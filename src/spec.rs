@@ -80,6 +80,8 @@ enum TaskName {
     DownloadClients,
     Notifications,
     Applications,
+    Indexers,
+    IndexerProxies,
 }
 
 impl TaskName {
@@ -98,7 +100,9 @@ impl TaskName {
             TaskName::DownloadClients | TaskName::Notifications => {
                 service.is_servarr() || service == Service::Prowlarr
             }
-            TaskName::Applications => service == Service::Prowlarr,
+            TaskName::Applications | TaskName::Indexers | TaskName::IndexerProxies => {
+                service == Service::Prowlarr
+            }
         }
     }
 }
@@ -286,12 +290,20 @@ pub struct ProviderSettings {
 
 /// One provider: its implementation (`QBittorrent`, `Webhook`, …), top-level
 /// fields of the resource, entries of its `fields` list by name, and entries
-/// whose value comes from a credential. The service answers those with
-/// `********`, so they are handed over on every `apply` and never compared.
+/// whose value comes from a credential. A credential's value is never
+/// printed: where the service answers `********` it is handed over on every
+/// `apply`, where it shows the value it is compared (design §13). `template`
+/// names the template to add a missing provider from, where one
+/// implementation has many (Prowlarr's `Cardigann` indexers); `tags` are
+/// labels, and without them the provider's tags are left alone.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderEntry {
     pub implementation: String,
+    #[serde(default)]
+    pub template: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
     #[serde(default)]
     pub set: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
@@ -333,6 +345,8 @@ pub enum Desired {
     DownloadClients(ProviderSettings),
     Notifications(ProviderSettings),
     Applications(ProviderSettings),
+    Indexers(ProviderSettings),
+    IndexerProxies(ProviderSettings),
 }
 
 /// A non-empty map of plain (undotted) field names, none of them `forbidden`.
@@ -686,7 +700,11 @@ impl Spec {
                 }
                 Desired::RootFolders(desired)
             }
-            TaskName::DownloadClients | TaskName::Notifications | TaskName::Applications => {
+            TaskName::DownloadClients
+            | TaskName::Notifications
+            | TaskName::Applications
+            | TaskName::Indexers
+            | TaskName::IndexerProxies => {
                 let desired: ProviderSettings = serde_json::from_value(raw.desired)
                     .map_err(|e| invalid(format!("desired: {e}")))?;
                 if desired.providers.is_empty() {
@@ -702,9 +720,30 @@ impl Spec {
                     if provider.implementation.is_empty() {
                         return Err(invalid(format!("{at}.implementation is empty")));
                     }
+                    if provider.template.as_deref() == Some("") {
+                        return Err(invalid(format!("{at}.template is empty")));
+                    }
+                    if let Some(tags) = &provider.tags {
+                        for (i, label) in tags.iter().enumerate() {
+                            // Servarr stores labels in lower case; another
+                            // spelling would never match what it answers.
+                            if label.is_empty()
+                                || label.trim() != label
+                                || label.to_lowercase() != *label
+                            {
+                                return Err(invalid(format!(
+                                    "{at}.tags: {label:?} is not a lower-case label without surrounding spaces"
+                                )));
+                            }
+                            if tags[..i].contains(label) {
+                                return Err(invalid(format!("{at}.tags: {label} is named twice")));
+                            }
+                        }
+                    }
                     if provider.set.is_empty()
                         && provider.fields.is_empty()
                         && provider.secret_fields.is_empty()
+                        && provider.tags.is_none()
                     {
                         return Err(invalid(format!("{at} names no field")));
                     }
@@ -735,6 +774,8 @@ impl Spec {
                 match raw.task {
                     TaskName::DownloadClients => Desired::DownloadClients(desired),
                     TaskName::Notifications => Desired::Notifications(desired),
+                    TaskName::Indexers => Desired::Indexers(desired),
+                    TaskName::IndexerProxies => Desired::IndexerProxies(desired),
                     _ => Desired::Applications(desired),
                 }
             }
@@ -765,6 +806,8 @@ impl Spec {
             Desired::DownloadClients(_) => "download-clients",
             Desired::Notifications(_) => "notifications",
             Desired::Applications(_) => "applications",
+            Desired::Indexers(_) => "indexers",
+            Desired::IndexerProxies(_) => "indexer-proxies",
         }
     }
 }
@@ -1210,6 +1253,49 @@ mod tests {
         );
         let misspelt = QBITTORRENT.replace("secret_fields", "secrets");
         assert!(reason(servarr("radarr", "download-clients", &misspelt)).contains("secrets"));
+    }
+
+    const TNTRACKER: &str = r#"{"providers":{"TNTracker":{"implementation":"Torznab","template":"Torrent Network","set":{"enable":true,"appProfileId":1},"fields":{"baseUrl":"http://tntracker.org"},"secret_fields":{"apiKey":"tntracker-apikey"},"tags":["umlautadaptarr"]}}}"#;
+
+    #[test]
+    fn indexers_and_proxies_belong_to_prowlarr_and_take_a_template_and_labels() {
+        let spec = servarr("prowlarr", "indexers", TNTRACKER).unwrap();
+        assert_eq!(spec.task_name(), "indexers");
+        let Desired::Indexers(desired) = spec.desired else {
+            panic!("wrong task")
+        };
+        let tnt = &desired.providers["TNTracker"];
+        assert_eq!(tnt.template.as_deref(), Some("Torrent Network"));
+        assert_eq!(
+            tnt.tags.as_deref(),
+            Some(&["umlautadaptarr".to_string()][..])
+        );
+        assert_eq!(
+            servarr("prowlarr", "indexer-proxies", TNTRACKER)
+                .unwrap()
+                .task_name(),
+            "indexer-proxies"
+        );
+        assert!(reason(servarr("radarr", "indexers", TNTRACKER)).contains("does not belong"));
+        assert!(reason(servarr("lidarr", "indexer-proxies", TNTRACKER)).contains("does not belong"));
+
+        // Only tags is a field of its own: an empty label list is one.
+        let only_tags = r#"{"providers":{"x":{"implementation":"Http","tags":[]}}}"#;
+        assert!(servarr("prowlarr", "indexer-proxies", only_tags).is_ok());
+        for bad in ["UmlautAdaptarr", " vpn", ""] {
+            let text = TNTRACKER.replace("umlautadaptarr", bad);
+            assert!(
+                reason(servarr("prowlarr", "indexers", &text))
+                    .contains("is not a lower-case label"),
+                "{bad:?}"
+            );
+        }
+        let twice = TNTRACKER.replace(r#"["umlautadaptarr"]"#, r#"["vpn","vpn"]"#);
+        assert!(reason(servarr("prowlarr", "indexers", &twice)).contains("vpn is named twice"));
+        let empty_template = TNTRACKER.replace(r#""Torrent Network""#, r#""""#);
+        assert!(
+            reason(servarr("prowlarr", "indexers", &empty_template)).contains("template is empty")
+        );
     }
 
     #[test]

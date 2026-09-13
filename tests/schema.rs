@@ -431,6 +431,37 @@ fn the_provider_endpoints_match_for_all_four_services() {
 }
 
 #[test]
+fn prowlarr_indexer_and_proxy_top_level_fields_are_checked() {
+    assert_eq!(
+        servarr_paths(
+            "prowlarr-2.5.2.5491",
+            "IndexerResource",
+            serde_json::json!({"enable": true, "appProfileId": 1, "priority": 25, "redirect": true})
+        ),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        servarr_paths(
+            "prowlarr-2.5.2.5491",
+            "IndexerResource",
+            serde_json::json!({"priority": "25", "syncLevel": "fullSync"})
+        ),
+        [
+            "IndexerResource.priority: expects integer, the spec has a string",
+            "IndexerResource.syncLevel: IndexerResource has no property syncLevel"
+        ]
+    );
+    assert_eq!(
+        servarr_paths(
+            "prowlarr-2.5.2.5491",
+            "IndexerProxyResource",
+            serde_json::json!({"onHealthIssue": false})
+        ),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
 fn provider_top_level_fields_are_checked_per_service() {
     // Lidarr's webhook fires on a release import; Radarr's on a download.
     assert_eq!(

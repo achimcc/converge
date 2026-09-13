@@ -1,0 +1,2848 @@
+[
+  {
+    "indexerUrls": [
+      "https://www.funfile.org/"
+    ],
+    "legacyUrls": [],
+    "definitionName": "funfile",
+    "description": "FunFile is a Private Torrent Tracker for MOVIES / TV / GENERAL",
+    "language": "en-US",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 0,
+    "protocol": "torrent",
+    "privacy": "private",
+    "capabilities": {
+      "limitsMax": 100,
+      "limitsDefault": 100,
+      "categories": [
+        {
+          "id": 8000,
+          "name": "Other",
+          "subCategories": [
+            {
+              "id": 8010,
+              "name": "Other/Misc",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 5000,
+          "name": "TV",
+          "subCategories": [
+            {
+              "id": 5070,
+              "name": "TV/Anime",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 4000,
+          "name": "PC",
+          "subCategories": [
+            {
+              "id": 4050,
+              "name": "PC/Games",
+              "subCategories": []
+            },
+            {
+              "id": 4040,
+              "name": "PC/Mobile-Other",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 3000,
+          "name": "Audio",
+          "subCategories": [
+            {
+              "id": 3030,
+              "name": "Audio/Audiobook",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 7000,
+          "name": "Books",
+          "subCategories": [
+            {
+              "id": 7020,
+              "name": "Books/EBook",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 2000,
+          "name": "Movies",
+          "subCategories": []
+        },
+        {
+          "id": 6000,
+          "name": "XXX",
+          "subCategories": [
+            {
+              "id": 6070,
+              "name": "XXX/Other",
+              "subCategories": []
+            }
+          ]
+        }
+      ],
+      "supportsRawSearch": false,
+      "searchParams": [
+        "q",
+        "q"
+      ],
+      "tvSearchParams": [
+        "q",
+        "season",
+        "ep",
+        "imdbId",
+        "genre"
+      ],
+      "movieSearchParams": [
+        "q",
+        "imdbId",
+        "genre"
+      ],
+      "musicSearchParams": [
+        "q"
+      ],
+      "bookSearchParams": [
+        "q"
+      ]
+    },
+    "priority": 25,
+    "downloadClientId": 0,
+    "added": "0001-01-01T00:00:00Z",
+    "sortName": "funfile",
+    "name": "FunFile",
+    "fields": [
+      {
+        "order": 0,
+        "name": "definitionFile",
+        "value": "funfile",
+        "type": "textbox",
+        "advanced": false,
+        "hidden": "hidden",
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "baseUrl",
+        "label": "Base Url",
+        "helpText": "Select which base url Prowlarr will use for requests to the site",
+        "type": "select",
+        "advanced": false,
+        "selectOptionsProviderAction": "getUrls",
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "baseSettings.queryLimit",
+        "label": "Query Limit",
+        "helpText": "The number of max queries as specified by the respective unit that Prowlarr will allow to the site",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "baseSettings.grabLimit",
+        "label": "Grab Limit",
+        "helpText": "The number of max grabs as specified by the respective unit that Prowlarr will allow to the site",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 4,
+        "name": "baseSettings.limitsUnit",
+        "label": "Limits Unit",
+        "helpText": "The unit of time for counting limits per indexer",
+        "value": 0,
+        "type": "select",
+        "advanced": true,
+        "selectOptions": [
+          {
+            "value": 0,
+            "name": "Day",
+            "order": 0,
+            "hint": "(0)"
+          },
+          {
+            "value": 1,
+            "name": "Hour",
+            "order": 1,
+            "hint": "(1)"
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 5,
+        "name": "torrentBaseSettings.appMinimumSeeders",
+        "label": "Apps Minimum Seeders",
+        "helpText": "Minimum seeders required by the Applications for the indexer to grab, empty is Sync profile's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 6,
+        "name": "torrentBaseSettings.seedRatio",
+        "label": "Seed Ratio",
+        "helpText": "The ratio a torrent should reach before stopping, empty uses the download client's default. Ratio should be at least 1.0 and follow the indexers rules",
+        "type": "number",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": true
+      },
+      {
+        "order": 7,
+        "name": "torrentBaseSettings.seedTime",
+        "label": "Seed Time",
+        "unit": "minutes",
+        "helpText": "The time a torrent should be seeded before stopping, empty uses the download client's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 8,
+        "name": "torrentBaseSettings.packSeedTime",
+        "label": "Pack Seed Time",
+        "unit": "minutes",
+        "helpText": "The time a pack (season or discography) torrent should be seeded before stopping, empty is app's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 9,
+        "name": "torrentBaseSettings.preferMagnetUrl",
+        "label": "Prefer Magnet URL",
+        "helpText": "When enabled, this indexer will prefer the use of magnet URLs for grabs with fallback to torrent links",
+        "value": false,
+        "type": "checkbox",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 0,
+        "name": "username",
+        "label": "Username",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "password",
+        "label": "Password",
+        "type": "password",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "freeleech",
+        "label": "Search freeleech only",
+        "value": false,
+        "type": "checkbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "info_activity",
+        "label": "Account Inactivity",
+        "value": "User accounts that are inactive for more than 42 days (ie haven't logged into the site) and NOT PARKED are automatically AND irretrievably deleted. Those with Donor VIP status are immune to the 42 day purging up to 1 year.",
+        "type": "info",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 4,
+        "name": "info_results",
+        "label": "Results Per Page",
+        "value": "For best results, change the 'Torrents per page' setting to 100 in your profile.",
+        "type": "info",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 5,
+        "name": "cardigannCaptcha",
+        "label": "CAPTCHA",
+        "type": "cardigannCaptcha",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "Cardigann",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "infoLink": "https://wiki.servarr.com/prowlarr/supported-indexers#funfile",
+    "tags": [],
+    "presets": []
+  },
+  {
+    "indexerUrls": [
+      "https://karagarga.in/"
+    ],
+    "legacyUrls": [],
+    "definitionName": "karagarga",
+    "description": "Karagarga is a Private Torrent Tracker that tracks non-hollywood, rare and obscure MOVIES, MUSIC and LITERATURE.",
+    "language": "en-US",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 0,
+    "protocol": "torrent",
+    "privacy": "private",
+    "capabilities": {
+      "limitsMax": 100,
+      "limitsDefault": 100,
+      "categories": [
+        {
+          "id": 2000,
+          "name": "Movies",
+          "subCategories": []
+        },
+        {
+          "id": 3000,
+          "name": "Audio",
+          "subCategories": []
+        },
+        {
+          "id": 7000,
+          "name": "Books",
+          "subCategories": []
+        }
+      ],
+      "supportsRawSearch": false,
+      "searchParams": [
+        "q",
+        "q"
+      ],
+      "tvSearchParams": [],
+      "movieSearchParams": [
+        "q",
+        "imdbId"
+      ],
+      "musicSearchParams": [
+        "q"
+      ],
+      "bookSearchParams": [
+        "q"
+      ]
+    },
+    "priority": 25,
+    "downloadClientId": 0,
+    "added": "0001-01-01T00:00:00Z",
+    "sortName": "karagarga",
+    "name": "Karagarga",
+    "fields": [
+      {
+        "order": 0,
+        "name": "definitionFile",
+        "value": "karagarga",
+        "type": "textbox",
+        "advanced": false,
+        "hidden": "hidden",
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "baseUrl",
+        "label": "Base Url",
+        "helpText": "Select which base url Prowlarr will use for requests to the site",
+        "type": "select",
+        "advanced": false,
+        "selectOptionsProviderAction": "getUrls",
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "baseSettings.queryLimit",
+        "label": "Query Limit",
+        "helpText": "The number of max queries as specified by the respective unit that Prowlarr will allow to the site",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "baseSettings.grabLimit",
+        "label": "Grab Limit",
+        "helpText": "The number of max grabs as specified by the respective unit that Prowlarr will allow to the site",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 4,
+        "name": "baseSettings.limitsUnit",
+        "label": "Limits Unit",
+        "helpText": "The unit of time for counting limits per indexer",
+        "value": 0,
+        "type": "select",
+        "advanced": true,
+        "selectOptions": [
+          {
+            "value": 0,
+            "name": "Day",
+            "order": 0,
+            "hint": "(0)"
+          },
+          {
+            "value": 1,
+            "name": "Hour",
+            "order": 1,
+            "hint": "(1)"
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 5,
+        "name": "torrentBaseSettings.appMinimumSeeders",
+        "label": "Apps Minimum Seeders",
+        "helpText": "Minimum seeders required by the Applications for the indexer to grab, empty is Sync profile's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 6,
+        "name": "torrentBaseSettings.seedRatio",
+        "label": "Seed Ratio",
+        "helpText": "The ratio a torrent should reach before stopping, empty uses the download client's default. Ratio should be at least 1.0 and follow the indexers rules",
+        "type": "number",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": true
+      },
+      {
+        "order": 7,
+        "name": "torrentBaseSettings.seedTime",
+        "label": "Seed Time",
+        "unit": "minutes",
+        "helpText": "The time a torrent should be seeded before stopping, empty uses the download client's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 8,
+        "name": "torrentBaseSettings.packSeedTime",
+        "label": "Pack Seed Time",
+        "unit": "minutes",
+        "helpText": "The time a pack (season or discography) torrent should be seeded before stopping, empty is app's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 9,
+        "name": "torrentBaseSettings.preferMagnetUrl",
+        "label": "Prefer Magnet URL",
+        "helpText": "When enabled, this indexer will prefer the use of magnet URLs for grabs with fallback to torrent links",
+        "value": false,
+        "type": "checkbox",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 0,
+        "name": "username",
+        "label": "Username",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "password",
+        "label": "Password",
+        "type": "password",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "freeleech",
+        "label": "Search freeleech only",
+        "value": false,
+        "type": "checkbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "cardigannCaptcha",
+        "label": "CAPTCHA",
+        "type": "cardigannCaptcha",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "Cardigann",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "infoLink": "https://wiki.servarr.com/prowlarr/supported-indexers#karagarga",
+    "tags": [],
+    "presets": []
+  },
+  {
+    "indexerUrls": [
+      "https://www.torrentleech.org/",
+      "https://www.torrentleech.cc/",
+      "https://www.torrentleech.me/",
+      "https://www.tleechreload.org/",
+      "https://www.tlgetin.cc/",
+      "https://rss.torrentleech.cc/"
+    ],
+    "legacyUrls": [
+      "https://v4.torrentleech.org/"
+    ],
+    "definitionName": "torrentleech",
+    "description": "TorrentLeech (TL) is a Private Torrent Tracker for 0DAY / GENERAL. not here _ not scene",
+    "language": "en-US",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 0,
+    "protocol": "torrent",
+    "privacy": "private",
+    "capabilities": {
+      "limitsMax": 100,
+      "limitsDefault": 100,
+      "categories": [
+        {
+          "id": 2000,
+          "name": "Movies",
+          "subCategories": [
+            {
+              "id": 2030,
+              "name": "Movies/SD",
+              "subCategories": []
+            },
+            {
+              "id": 2080,
+              "name": "Movies/WEB-DL",
+              "subCategories": []
+            },
+            {
+              "id": 2040,
+              "name": "Movies/HD",
+              "subCategories": []
+            },
+            {
+              "id": 2070,
+              "name": "Movies/DVD",
+              "subCategories": []
+            },
+            {
+              "id": 2050,
+              "name": "Movies/BluRay",
+              "subCategories": []
+            },
+            {
+              "id": 2045,
+              "name": "Movies/UHD",
+              "subCategories": []
+            },
+            {
+              "id": 2020,
+              "name": "Movies/Other",
+              "subCategories": []
+            },
+            {
+              "id": 2010,
+              "name": "Movies/Foreign",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 5000,
+          "name": "TV",
+          "subCategories": [
+            {
+              "id": 5030,
+              "name": "TV/SD",
+              "subCategories": []
+            },
+            {
+              "id": 5040,
+              "name": "TV/HD",
+              "subCategories": []
+            },
+            {
+              "id": 5070,
+              "name": "TV/Anime",
+              "subCategories": []
+            },
+            {
+              "id": 5020,
+              "name": "TV/Foreign",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 4000,
+          "name": "PC",
+          "subCategories": [
+            {
+              "id": 4050,
+              "name": "PC/Games",
+              "subCategories": []
+            },
+            {
+              "id": 4030,
+              "name": "PC/Mac",
+              "subCategories": []
+            },
+            {
+              "id": 4020,
+              "name": "PC/ISO",
+              "subCategories": []
+            },
+            {
+              "id": 4040,
+              "name": "PC/Mobile-Other",
+              "subCategories": []
+            },
+            {
+              "id": 4010,
+              "name": "PC/0day",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 1000,
+          "name": "Console",
+          "subCategories": [
+            {
+              "id": 1040,
+              "name": "Console/XBox",
+              "subCategories": []
+            },
+            {
+              "id": 1050,
+              "name": "Console/XBox 360",
+              "subCategories": []
+            },
+            {
+              "id": 1140,
+              "name": "Console/XBox One",
+              "subCategories": []
+            },
+            {
+              "id": 1080,
+              "name": "Console/PS3",
+              "subCategories": []
+            },
+            {
+              "id": 1180,
+              "name": "Console/PS4",
+              "subCategories": []
+            },
+            {
+              "id": 1020,
+              "name": "Console/PSP",
+              "subCategories": []
+            },
+            {
+              "id": 1030,
+              "name": "Console/Wii",
+              "subCategories": []
+            },
+            {
+              "id": 1010,
+              "name": "Console/NDS",
+              "subCategories": []
+            },
+            {
+              "id": 1090,
+              "name": "Console/Other",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 8000,
+          "name": "Other",
+          "subCategories": []
+        },
+        {
+          "id": 7000,
+          "name": "Books",
+          "subCategories": [
+            {
+              "id": 7020,
+              "name": "Books/EBook",
+              "subCategories": []
+            },
+            {
+              "id": 7030,
+              "name": "Books/Comics",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 3000,
+          "name": "Audio",
+          "subCategories": [
+            {
+              "id": 3020,
+              "name": "Audio/Video",
+              "subCategories": []
+            }
+          ]
+        }
+      ],
+      "supportsRawSearch": true,
+      "searchParams": [
+        "q",
+        "q"
+      ],
+      "tvSearchParams": [
+        "q",
+        "season",
+        "ep"
+      ],
+      "movieSearchParams": [
+        "q",
+        "imdbId"
+      ],
+      "musicSearchParams": [
+        "q"
+      ],
+      "bookSearchParams": [
+        "q"
+      ]
+    },
+    "priority": 25,
+    "downloadClientId": 0,
+    "added": "0001-01-01T00:00:00Z",
+    "sortName": "torrentleech",
+    "name": "TorrentLeech",
+    "fields": [
+      {
+        "order": 0,
+        "name": "definitionFile",
+        "value": "torrentleech",
+        "type": "textbox",
+        "advanced": false,
+        "hidden": "hidden",
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "baseUrl",
+        "label": "Base Url",
+        "helpText": "Select which base url Prowlarr will use for requests to the site",
+        "type": "select",
+        "advanced": false,
+        "selectOptionsProviderAction": "getUrls",
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "baseSettings.queryLimit",
+        "label": "Query Limit",
+        "helpText": "The number of max queries as specified by the respective unit that Prowlarr will allow to the site",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "baseSettings.grabLimit",
+        "label": "Grab Limit",
+        "helpText": "The number of max grabs as specified by the respective unit that Prowlarr will allow to the site",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 4,
+        "name": "baseSettings.limitsUnit",
+        "label": "Limits Unit",
+        "helpText": "The unit of time for counting limits per indexer",
+        "value": 0,
+        "type": "select",
+        "advanced": true,
+        "selectOptions": [
+          {
+            "value": 0,
+            "name": "Day",
+            "order": 0,
+            "hint": "(0)"
+          },
+          {
+            "value": 1,
+            "name": "Hour",
+            "order": 1,
+            "hint": "(1)"
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 5,
+        "name": "torrentBaseSettings.appMinimumSeeders",
+        "label": "Apps Minimum Seeders",
+        "helpText": "Minimum seeders required by the Applications for the indexer to grab, empty is Sync profile's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 6,
+        "name": "torrentBaseSettings.seedRatio",
+        "label": "Seed Ratio",
+        "helpText": "The ratio a torrent should reach before stopping, empty uses the download client's default. Ratio should be at least 1.0 and follow the indexers rules",
+        "type": "number",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": true
+      },
+      {
+        "order": 7,
+        "name": "torrentBaseSettings.seedTime",
+        "label": "Seed Time",
+        "unit": "minutes",
+        "helpText": "The time a torrent should be seeded before stopping, empty uses the download client's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 8,
+        "name": "torrentBaseSettings.packSeedTime",
+        "label": "Pack Seed Time",
+        "unit": "minutes",
+        "helpText": "The time a pack (season or discography) torrent should be seeded before stopping, empty is app's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 9,
+        "name": "torrentBaseSettings.preferMagnetUrl",
+        "label": "Prefer Magnet URL",
+        "helpText": "When enabled, this indexer will prefer the use of magnet URLs for grabs with fallback to torrent links",
+        "value": false,
+        "type": "checkbox",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 0,
+        "name": "username",
+        "label": "Username",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "password",
+        "label": "Password",
+        "type": "password",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "alt2fatoken",
+        "label": "Alt 2FA Token",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "info_alt2fatoken",
+        "label": "About Alt 2FA Token",
+        "value": "<masked>",
+        "type": "info",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 4,
+        "name": "freeleech",
+        "label": "Search freeleech only",
+        "value": false,
+        "type": "checkbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 5,
+        "name": "exclude_scene",
+        "label": "Exclude SCENE torrents from results",
+        "value": false,
+        "type": "checkbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 6,
+        "name": "exclude_archives",
+        "label": "Exclude torrents with the tag RAR from results (does not support IMDBID search)",
+        "value": false,
+        "type": "checkbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 7,
+        "name": "sort",
+        "label": "Sort requested from site",
+        "value": 0,
+        "type": "select",
+        "advanced": false,
+        "selectOptions": [
+          {
+            "value": 0,
+            "name": "created",
+            "order": 0
+          },
+          {
+            "value": 1,
+            "name": "title",
+            "order": 0
+          },
+          {
+            "value": 2,
+            "name": "seeders",
+            "order": 0
+          },
+          {
+            "value": 3,
+            "name": "size",
+            "order": 0
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 8,
+        "name": "type",
+        "label": "Order requested from site",
+        "value": 1,
+        "type": "select",
+        "advanced": false,
+        "selectOptions": [
+          {
+            "value": 0,
+            "name": "asc",
+            "order": 0
+          },
+          {
+            "value": 1,
+            "name": "desc",
+            "order": 0
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 9,
+        "name": "info_tpp",
+        "label": "Results Per Page",
+        "value": "For best results, change the <b>Torrents per page:</b> setting to <b>100</b> on your account profile.",
+        "type": "info",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 10,
+        "name": "info_flaresolverr",
+        "label": "FlareSolverr Info",
+        "helpLink": "https://wiki.servarr.com/prowlarr/faq#can-i-use-flaresolverr-indexers",
+        "value": "This site may use Cloudflare DDoS Protection, therefore Prowlarr requires <a href=\"https://wiki.servarr.com/prowlarr/faq#can-i-use-flaresolverr-indexers\" target=\"_blank\" rel=\"noreferrer\">FlareSolverr</a> to access it.",
+        "type": "info",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "Cardigann",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "infoLink": "https://wiki.servarr.com/prowlarr/supported-indexers#torrentleech",
+    "tags": [],
+    "presets": []
+  },
+  {
+    "indexerUrls": [
+      "https://www.funfile.org/"
+    ],
+    "legacyUrls": [],
+    "definitionName": "FunFile",
+    "description": "FunFile is a general tracker",
+    "language": "en-US",
+    "encoding": "Western European (ISO)",
+    "enable": false,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 0,
+    "protocol": "torrent",
+    "privacy": "private",
+    "capabilities": {
+      "limitsMax": 100,
+      "limitsDefault": 100,
+      "categories": [
+        {
+          "id": 5000,
+          "name": "TV",
+          "subCategories": [
+            {
+              "id": 5070,
+              "name": "TV/Anime",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 100044,
+          "name": "Anime",
+          "subCategories": []
+        },
+        {
+          "id": 4000,
+          "name": "PC",
+          "subCategories": [
+            {
+              "id": 4050,
+              "name": "PC/Games",
+              "subCategories": []
+            },
+            {
+              "id": 4040,
+              "name": "PC/Mobile-Other",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 100022,
+          "name": "Applications",
+          "subCategories": []
+        },
+        {
+          "id": 3000,
+          "name": "Audio",
+          "subCategories": [
+            {
+              "id": 3030,
+              "name": "Audio/Audiobook",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 100043,
+          "name": "Audio Books",
+          "subCategories": []
+        },
+        {
+          "id": 7000,
+          "name": "Books",
+          "subCategories": []
+        },
+        {
+          "id": 100027,
+          "name": "Ebook",
+          "subCategories": []
+        },
+        {
+          "id": 100004,
+          "name": "Games",
+          "subCategories": []
+        },
+        {
+          "id": 8000,
+          "name": "Other",
+          "subCategories": [
+            {
+              "id": 8010,
+              "name": "Other/Misc",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 100040,
+          "name": "Miscellaneous",
+          "subCategories": []
+        },
+        {
+          "id": 2000,
+          "name": "Movies",
+          "subCategories": []
+        },
+        {
+          "id": 100019,
+          "name": "Movies",
+          "subCategories": []
+        },
+        {
+          "id": 100006,
+          "name": "Music",
+          "subCategories": []
+        },
+        {
+          "id": 100031,
+          "name": "Portable",
+          "subCategories": []
+        },
+        {
+          "id": 100049,
+          "name": "Tutorials",
+          "subCategories": []
+        },
+        {
+          "id": 100007,
+          "name": "TV",
+          "subCategories": []
+        }
+      ],
+      "supportsRawSearch": false,
+      "searchParams": [
+        "q"
+      ],
+      "tvSearchParams": [
+        "q",
+        "season",
+        "ep",
+        "imdbId"
+      ],
+      "movieSearchParams": [
+        "q",
+        "imdbId"
+      ],
+      "musicSearchParams": [
+        "q"
+      ],
+      "bookSearchParams": [
+        "q"
+      ]
+    },
+    "priority": 25,
+    "downloadClientId": 0,
+    "added": "0001-01-01T00:00:00Z",
+    "sortName": "funfile",
+    "name": "FunFile",
+    "fields": [
+      {
+        "order": 0,
+        "name": "baseUrl",
+        "label": "Base Url",
+        "helpText": "Select which base url Prowlarr will use for requests to the site",
+        "type": "select",
+        "advanced": false,
+        "selectOptionsProviderAction": "getUrls",
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "username",
+        "label": "Username",
+        "helpText": "Site Username",
+        "value": "",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "userName",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "password",
+        "label": "Password",
+        "helpText": "Site Password",
+        "value": "",
+        "type": "password",
+        "advanced": false,
+        "privacy": "password",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "baseSettings.queryLimit",
+        "label": "Query Limit",
+        "helpText": "The number of max queries as specified by the respective unit that Prowlarr will allow to the site",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 4,
+        "name": "baseSettings.grabLimit",
+        "label": "Grab Limit",
+        "helpText": "The number of max grabs as specified by the respective unit that Prowlarr will allow to the site",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 5,
+        "name": "baseSettings.limitsUnit",
+        "label": "Limits Unit",
+        "helpText": "The unit of time for counting limits per indexer",
+        "value": 0,
+        "type": "select",
+        "advanced": true,
+        "selectOptions": [
+          {
+            "value": 0,
+            "name": "Day",
+            "order": 0,
+            "hint": "(0)"
+          },
+          {
+            "value": 1,
+            "name": "Hour",
+            "order": 1,
+            "hint": "(1)"
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 6,
+        "name": "torrentBaseSettings.appMinimumSeeders",
+        "label": "Apps Minimum Seeders",
+        "helpText": "Minimum seeders required by the Applications for the indexer to grab, empty is Sync profile's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 7,
+        "name": "torrentBaseSettings.seedRatio",
+        "label": "Seed Ratio",
+        "helpText": "The ratio a torrent should reach before stopping, empty uses the download client's default. Ratio should be at least 1.0 and follow the indexers rules",
+        "type": "number",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": true
+      },
+      {
+        "order": 8,
+        "name": "torrentBaseSettings.seedTime",
+        "label": "Seed Time",
+        "unit": "minutes",
+        "helpText": "The time a torrent should be seeded before stopping, empty uses the download client's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 9,
+        "name": "torrentBaseSettings.packSeedTime",
+        "label": "Pack Seed Time",
+        "unit": "minutes",
+        "helpText": "The time a pack (season or discography) torrent should be seeded before stopping, empty is app's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 10,
+        "name": "torrentBaseSettings.preferMagnetUrl",
+        "label": "Prefer Magnet URL",
+        "helpText": "When enabled, this indexer will prefer the use of magnet URLs for grabs with fallback to torrent links",
+        "value": false,
+        "type": "checkbox",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "FunFile",
+    "implementation": "FunFile",
+    "configContract": "UserPassTorrentBaseSettings",
+    "infoLink": "https://wiki.servarr.com/prowlarr/supported-indexers#funfile",
+    "tags": [],
+    "presets": []
+  },
+  {
+    "indexerUrls": [
+      "https://www.myanonamouse.net/"
+    ],
+    "legacyUrls": [],
+    "definitionName": "MyAnonamouse",
+    "description": "MyAnonaMouse (MAM) is a large ebook and audiobook tracker.",
+    "language": "en-US",
+    "encoding": "Unicode (UTF-8)",
+    "enable": false,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": true,
+    "appProfileId": 0,
+    "protocol": "torrent",
+    "privacy": "private",
+    "capabilities": {
+      "limitsMax": 100,
+      "limitsDefault": 100,
+      "categories": [
+        {
+          "id": 3000,
+          "name": "Audio",
+          "subCategories": [
+            {
+              "id": 3030,
+              "name": "Audio/Audiobook",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 100013,
+          "name": "AudioBooks",
+          "subCategories": []
+        },
+        {
+          "id": 7000,
+          "name": "Books",
+          "subCategories": [
+            {
+              "id": 7020,
+              "name": "Books/EBook",
+              "subCategories": []
+            },
+            {
+              "id": 7030,
+              "name": "Books/Comics",
+              "subCategories": []
+            },
+            {
+              "id": 7010,
+              "name": "Books/Mags",
+              "subCategories": []
+            },
+            {
+              "id": 7040,
+              "name": "Books/Technical",
+              "subCategories": []
+            }
+          ]
+        },
+        {
+          "id": 100014,
+          "name": "E-Books",
+          "subCategories": []
+        },
+        {
+          "id": 100015,
+          "name": "Musicology",
+          "subCategories": []
+        },
+        {
+          "id": 100016,
+          "name": "Radio",
+          "subCategories": []
+        },
+        {
+          "id": 100039,
+          "name": "Audiobooks - Action/Adventure",
+          "subCategories": []
+        },
+        {
+          "id": 100049,
+          "name": "Audiobooks - Art",
+          "subCategories": []
+        },
+        {
+          "id": 100050,
+          "name": "Audiobooks - Biographical",
+          "subCategories": []
+        },
+        {
+          "id": 100083,
+          "name": "Audiobooks - Business",
+          "subCategories": []
+        },
+        {
+          "id": 100051,
+          "name": "Audiobooks - Computer/Internet",
+          "subCategories": []
+        },
+        {
+          "id": 100097,
+          "name": "Audiobooks - Crafts",
+          "subCategories": []
+        },
+        {
+          "id": 100040,
+          "name": "Audiobooks - Crime/Thriller",
+          "subCategories": []
+        },
+        {
+          "id": 100041,
+          "name": "Audiobooks - Fantasy",
+          "subCategories": []
+        },
+        {
+          "id": 100106,
+          "name": "Audiobooks - Food",
+          "subCategories": []
+        },
+        {
+          "id": 100042,
+          "name": "Audiobooks - General Fiction",
+          "subCategories": []
+        },
+        {
+          "id": 100052,
+          "name": "Audiobooks - General Non-Fic",
+          "subCategories": []
+        },
+        {
+          "id": 100098,
+          "name": "Audiobooks - Historical Fiction",
+          "subCategories": []
+        },
+        {
+          "id": 100054,
+          "name": "Audiobooks - History",
+          "subCategories": []
+        },
+        {
+          "id": 100055,
+          "name": "Audiobooks - Home/Garden",
+          "subCategories": []
+        },
+        {
+          "id": 100043,
+          "name": "Audiobooks - Horror",
+          "subCategories": []
+        },
+        {
+          "id": 100099,
+          "name": "Audiobooks - Humor",
+          "subCategories": []
+        },
+        {
+          "id": 100084,
+          "name": "Audiobooks - Instructional",
+          "subCategories": []
+        },
+        {
+          "id": 100044,
+          "name": "Audiobooks - Juvenile",
+          "subCategories": []
+        },
+        {
+          "id": 100056,
+          "name": "Audiobooks - Language",
+          "subCategories": []
+        },
+        {
+          "id": 100045,
+          "name": "Audiobooks - Literary Classics",
+          "subCategories": []
+        },
+        {
+          "id": 100057,
+          "name": "Audiobooks - Math/Science/Tech",
+          "subCategories": []
+        },
+        {
+          "id": 100085,
+          "name": "Audiobooks - Medical",
+          "subCategories": []
+        },
+        {
+          "id": 100087,
+          "name": "Audiobooks - Mystery",
+          "subCategories": []
+        },
+        {
+          "id": 100119,
+          "name": "Audiobooks - Nature",
+          "subCategories": []
+        },
+        {
+          "id": 100088,
+          "name": "Audiobooks - Philosophy",
+          "subCategories": []
+        },
+        {
+          "id": 100058,
+          "name": "Audiobooks - Pol/Soc/Relig",
+          "subCategories": []
+        },
+        {
+          "id": 100059,
+          "name": "Audiobooks - Recreation",
+          "subCategories": []
+        },
+        {
+          "id": 100046,
+          "name": "Audiobooks - Romance",
+          "subCategories": []
+        },
+        {
+          "id": 100047,
+          "name": "Audiobooks - Science Fiction",
+          "subCategories": []
+        },
+        {
+          "id": 100053,
+          "name": "Audiobooks - Self-Help",
+          "subCategories": []
+        },
+        {
+          "id": 100089,
+          "name": "Audiobooks - Travel/Adventure",
+          "subCategories": []
+        },
+        {
+          "id": 100100,
+          "name": "Audiobooks - True Crime",
+          "subCategories": []
+        },
+        {
+          "id": 100108,
+          "name": "Audiobooks - Urban Fantasy",
+          "subCategories": []
+        },
+        {
+          "id": 100048,
+          "name": "Audiobooks - Western",
+          "subCategories": []
+        },
+        {
+          "id": 100111,
+          "name": "Audiobooks - Young Adult",
+          "subCategories": []
+        },
+        {
+          "id": 100060,
+          "name": "Ebooks - Action/Adventure",
+          "subCategories": []
+        },
+        {
+          "id": 100071,
+          "name": "Ebooks - Art",
+          "subCategories": []
+        },
+        {
+          "id": 100072,
+          "name": "Ebooks - Biographical",
+          "subCategories": []
+        },
+        {
+          "id": 100090,
+          "name": "Ebooks - Business",
+          "subCategories": []
+        },
+        {
+          "id": 100061,
+          "name": "Ebooks - Comics/Graphic novels",
+          "subCategories": []
+        },
+        {
+          "id": 100073,
+          "name": "Ebooks - Computer/Internet",
+          "subCategories": []
+        },
+        {
+          "id": 100101,
+          "name": "Ebooks - Crafts",
+          "subCategories": []
+        },
+        {
+          "id": 100062,
+          "name": "Ebooks - Crime/Thriller",
+          "subCategories": []
+        },
+        {
+          "id": 100063,
+          "name": "Ebooks - Fantasy",
+          "subCategories": []
+        },
+        {
+          "id": 100107,
+          "name": "Ebooks - Food",
+          "subCategories": []
+        },
+        {
+          "id": 100064,
+          "name": "Ebooks - General Fiction",
+          "subCategories": []
+        },
+        {
+          "id": 100074,
+          "name": "Ebooks - General Non-Fiction",
+          "subCategories": []
+        },
+        {
+          "id": 100102,
+          "name": "Ebooks - Historical Fiction",
+          "subCategories": []
+        },
+        {
+          "id": 100076,
+          "name": "Ebooks - History",
+          "subCategories": []
+        },
+        {
+          "id": 100077,
+          "name": "Ebooks - Home/Garden",
+          "subCategories": []
+        },
+        {
+          "id": 100065,
+          "name": "Ebooks - Horror",
+          "subCategories": []
+        },
+        {
+          "id": 100103,
+          "name": "Ebooks - Humor",
+          "subCategories": []
+        },
+        {
+          "id": 100115,
+          "name": "Ebooks - Illusion/Magic",
+          "subCategories": []
+        },
+        {
+          "id": 100091,
+          "name": "Ebooks - Instructional",
+          "subCategories": []
+        },
+        {
+          "id": 100066,
+          "name": "Ebooks - Juvenile",
+          "subCategories": []
+        },
+        {
+          "id": 100078,
+          "name": "Ebooks - Language",
+          "subCategories": []
+        },
+        {
+          "id": 100067,
+          "name": "Ebooks - Literary Classics",
+          "subCategories": []
+        },
+        {
+          "id": 100079,
+          "name": "Ebooks - Magazines/Newspapers",
+          "subCategories": []
+        },
+        {
+          "id": 100080,
+          "name": "Ebooks - Math/Science/Tech",
+          "subCategories": []
+        },
+        {
+          "id": 100092,
+          "name": "Ebooks - Medical",
+          "subCategories": []
+        },
+        {
+          "id": 100118,
+          "name": "Ebooks - Mixed Collections",
+          "subCategories": []
+        },
+        {
+          "id": 100094,
+          "name": "Ebooks - Mystery",
+          "subCategories": []
+        },
+        {
+          "id": 100120,
+          "name": "Ebooks - Nature",
+          "subCategories": []
+        },
+        {
+          "id": 100095,
+          "name": "Ebooks - Philosophy",
+          "subCategories": []
+        },
+        {
+          "id": 100081,
+          "name": "Ebooks - Pol/Soc/Relig",
+          "subCategories": []
+        },
+        {
+          "id": 100082,
+          "name": "Ebooks - Recreation",
+          "subCategories": []
+        },
+        {
+          "id": 100068,
+          "name": "Ebooks - Romance",
+          "subCategories": []
+        },
+        {
+          "id": 100069,
+          "name": "Ebooks - Science Fiction",
+          "subCategories": []
+        },
+        {
+          "id": 100075,
+          "name": "Ebooks - Self-Help",
+          "subCategories": []
+        },
+        {
+          "id": 100096,
+          "name": "Ebooks - Travel/Adventure",
+          "subCategories": []
+        },
+        {
+          "id": 100104,
+          "name": "Ebooks - True Crime",
+          "subCategories": []
+        },
+        {
+          "id": 100109,
+          "name": "Ebooks - Urban Fantasy",
+          "subCategories": []
+        },
+        {
+          "id": 100070,
+          "name": "Ebooks - Western",
+          "subCategories": []
+        },
+        {
+          "id": 100112,
+          "name": "Ebooks - Young Adult",
+          "subCategories": []
+        },
+        {
+          "id": 100019,
+          "name": "Guitar/Bass Tabs",
+          "subCategories": []
+        },
+        {
+          "id": 100020,
+          "name": "Individual Sheet",
+          "subCategories": []
+        },
+        {
+          "id": 100024,
+          "name": "Individual Sheet MP3",
+          "subCategories": []
+        },
+        {
+          "id": 100126,
+          "name": "Instructional Book with Video",
+          "subCategories": []
+        },
+        {
+          "id": 100022,
+          "name": "Instructional Media - Music",
+          "subCategories": []
+        },
+        {
+          "id": 100113,
+          "name": "Lick Library - LTP/Jam With",
+          "subCategories": []
+        },
+        {
+          "id": 100114,
+          "name": "Lick Library - Techniques/QL",
+          "subCategories": []
+        },
+        {
+          "id": 100017,
+          "name": "Music - Complete Editions",
+          "subCategories": []
+        },
+        {
+          "id": 100026,
+          "name": "Music Book",
+          "subCategories": []
+        },
+        {
+          "id": 100027,
+          "name": "Music Book MP3",
+          "subCategories": []
+        },
+        {
+          "id": 100030,
+          "name": "Sheet Collection",
+          "subCategories": []
+        },
+        {
+          "id": 100031,
+          "name": "Sheet Collection MP3",
+          "subCategories": []
+        },
+        {
+          "id": 100127,
+          "name": "Radio -  Comedy",
+          "subCategories": []
+        },
+        {
+          "id": 100130,
+          "name": "Radio - Drama",
+          "subCategories": []
+        },
+        {
+          "id": 100128,
+          "name": "Radio - Factual/Documentary",
+          "subCategories": []
+        },
+        {
+          "id": 100132,
+          "name": "Radio - Reading",
+          "subCategories": []
+        }
+      ],
+      "supportsRawSearch": false,
+      "searchParams": [
+        "q"
+      ],
+      "tvSearchParams": [],
+      "movieSearchParams": [],
+      "musicSearchParams": [],
+      "bookSearchParams": [
+        "q"
+      ]
+    },
+    "priority": 25,
+    "downloadClientId": 0,
+    "added": "0001-01-01T00:00:00Z",
+    "sortName": "myanonamouse",
+    "name": "MyAnonamouse",
+    "fields": [
+      {
+        "order": 0,
+        "name": "baseUrl",
+        "label": "Base Url",
+        "helpText": "Select which base url Prowlarr will use for requests to the site",
+        "type": "select",
+        "advanced": false,
+        "selectOptionsProviderAction": "getUrls",
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "mamId",
+        "label": "Mam Id",
+        "helpText": "Mam Session Id (Created Under Preferences -> Security)",
+        "value": "",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "searchType",
+        "label": "Search Type",
+        "helpText": "Specify the desired search type",
+        "value": 0,
+        "type": "select",
+        "advanced": false,
+        "selectOptions": [
+          {
+            "value": 0,
+            "name": "All torrents",
+            "order": 586,
+            "hint": "Search everything"
+          },
+          {
+            "value": 1,
+            "name": "Only active",
+            "order": 589,
+            "hint": "Last update had 1+ seeders"
+          },
+          {
+            "value": 2,
+            "name": "Freeleech",
+            "order": 592,
+            "hint": "Freeleech torrents"
+          },
+          {
+            "value": 3,
+            "name": "Freeleech or VIP",
+            "order": 595,
+            "hint": "Freeleech or VIP torrents"
+          },
+          {
+            "value": 4,
+            "name": "VIP",
+            "order": 598,
+            "hint": "VIP torrents"
+          },
+          {
+            "value": 5,
+            "name": "Not VIP",
+            "order": 601,
+            "hint": "Torrents not VIP"
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "searchInDescription",
+        "label": "Search in description",
+        "helpText": "Search text in the description",
+        "value": false,
+        "type": "checkbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 4,
+        "name": "searchInSeries",
+        "label": "Search in series",
+        "helpText": "Search text in the series",
+        "value": false,
+        "type": "checkbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 5,
+        "name": "searchInFilenames",
+        "label": "Search in filenames",
+        "helpText": "Search text in the filenames",
+        "value": false,
+        "type": "checkbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 6,
+        "name": "searchLanguages",
+        "label": "Search Languages",
+        "helpText": "Specify the desired languages. If unspecified, all options are used.",
+        "value": [],
+        "type": "select",
+        "advanced": false,
+        "selectOptions": [
+          {
+            "value": 1,
+            "name": "English",
+            "order": 607,
+            "hint": "(1)"
+          },
+          {
+            "value": 17,
+            "name": "Afrikaans",
+            "order": 610,
+            "hint": "(17)"
+          },
+          {
+            "value": 32,
+            "name": "Arabic",
+            "order": 613,
+            "hint": "(32)"
+          },
+          {
+            "value": 35,
+            "name": "Bengali",
+            "order": 616,
+            "hint": "(35)"
+          },
+          {
+            "value": 51,
+            "name": "Bosnian",
+            "order": 619,
+            "hint": "(51)"
+          },
+          {
+            "value": 18,
+            "name": "Bulgarian",
+            "order": 622,
+            "hint": "(18)"
+          },
+          {
+            "value": 6,
+            "name": "Burmese",
+            "order": 625,
+            "hint": "(6)"
+          },
+          {
+            "value": 44,
+            "name": "Cantonese",
+            "order": 628,
+            "hint": "(44)"
+          },
+          {
+            "value": 19,
+            "name": "Catalan",
+            "order": 631,
+            "hint": "(19)"
+          },
+          {
+            "value": 2,
+            "name": "Chinese",
+            "order": 634,
+            "hint": "(2)"
+          },
+          {
+            "value": 49,
+            "name": "Croatian",
+            "order": 637,
+            "hint": "(49)"
+          },
+          {
+            "value": 20,
+            "name": "Czech",
+            "order": 640,
+            "hint": "(20)"
+          },
+          {
+            "value": 21,
+            "name": "Danish",
+            "order": 643,
+            "hint": "(21)"
+          },
+          {
+            "value": 22,
+            "name": "Dutch",
+            "order": 646,
+            "hint": "(22)"
+          },
+          {
+            "value": 61,
+            "name": "Estonian",
+            "order": 649,
+            "hint": "(61)"
+          },
+          {
+            "value": 39,
+            "name": "Farsi",
+            "order": 652,
+            "hint": "(39)"
+          },
+          {
+            "value": 23,
+            "name": "Finnish",
+            "order": 655,
+            "hint": "(23)"
+          },
+          {
+            "value": 36,
+            "name": "French",
+            "order": 658,
+            "hint": "(36)"
+          },
+          {
+            "value": 37,
+            "name": "German",
+            "order": 661,
+            "hint": "(37)"
+          },
+          {
+            "value": 26,
+            "name": "Greek",
+            "order": 664,
+            "hint": "(26)"
+          },
+          {
+            "value": 59,
+            "name": "Greek, Ancient",
+            "order": 667,
+            "hint": "(59)"
+          },
+          {
+            "value": 3,
+            "name": "Gujarati",
+            "order": 670,
+            "hint": "(3)"
+          },
+          {
+            "value": 27,
+            "name": "Hebrew",
+            "order": 673,
+            "hint": "(27)"
+          },
+          {
+            "value": 8,
+            "name": "Hindi",
+            "order": 676,
+            "hint": "(8)"
+          },
+          {
+            "value": 28,
+            "name": "Hungarian",
+            "order": 679,
+            "hint": "(28)"
+          },
+          {
+            "value": 63,
+            "name": "Icelandic",
+            "order": 682,
+            "hint": "(63)"
+          },
+          {
+            "value": 53,
+            "name": "Indonesian",
+            "order": 685,
+            "hint": "(53)"
+          },
+          {
+            "value": 56,
+            "name": "Irish",
+            "order": 688,
+            "hint": "(56)"
+          },
+          {
+            "value": 43,
+            "name": "Italian",
+            "order": 691,
+            "hint": "(43)"
+          },
+          {
+            "value": 38,
+            "name": "Japanese",
+            "order": 694,
+            "hint": "(38)"
+          },
+          {
+            "value": 12,
+            "name": "Javanese",
+            "order": 697,
+            "hint": "(12)"
+          },
+          {
+            "value": 5,
+            "name": "Kannada",
+            "order": 700,
+            "hint": "(5)"
+          },
+          {
+            "value": 41,
+            "name": "Korean",
+            "order": 703,
+            "hint": "(41)"
+          },
+          {
+            "value": 50,
+            "name": "Lithuanian",
+            "order": 706,
+            "hint": "(50)"
+          },
+          {
+            "value": 46,
+            "name": "Latin",
+            "order": 709,
+            "hint": "(46)"
+          },
+          {
+            "value": 62,
+            "name": "Latvian",
+            "order": 712,
+            "hint": "(62)"
+          },
+          {
+            "value": 33,
+            "name": "Malay",
+            "order": 715,
+            "hint": "(33)"
+          },
+          {
+            "value": 58,
+            "name": "Malayalam",
+            "order": 718,
+            "hint": "(58)"
+          },
+          {
+            "value": 57,
+            "name": "Manx",
+            "order": 721,
+            "hint": "(57)"
+          },
+          {
+            "value": 9,
+            "name": "Marathi",
+            "order": 724,
+            "hint": "(9)"
+          },
+          {
+            "value": 48,
+            "name": "Norwegian",
+            "order": 727,
+            "hint": "(48)"
+          },
+          {
+            "value": 45,
+            "name": "Polish",
+            "order": 730,
+            "hint": "(45)"
+          },
+          {
+            "value": 34,
+            "name": "Portuguese",
+            "order": 733,
+            "hint": "(34)"
+          },
+          {
+            "value": 52,
+            "name": "Brazilian Portuguese (BP)",
+            "order": 736,
+            "hint": "(52)"
+          },
+          {
+            "value": 14,
+            "name": "Punjabi",
+            "order": 739,
+            "hint": "(14)"
+          },
+          {
+            "value": 30,
+            "name": "Romanian",
+            "order": 742,
+            "hint": "(30)"
+          },
+          {
+            "value": 16,
+            "name": "Russian",
+            "order": 745,
+            "hint": "(16)"
+          },
+          {
+            "value": 24,
+            "name": "Scottish Gaelic",
+            "order": 748,
+            "hint": "(24)"
+          },
+          {
+            "value": 60,
+            "name": "Sanskrit",
+            "order": 751,
+            "hint": "(60)"
+          },
+          {
+            "value": 31,
+            "name": "Serbian",
+            "order": 754,
+            "hint": "(31)"
+          },
+          {
+            "value": 54,
+            "name": "Slovenian",
+            "order": 757,
+            "hint": "(54)"
+          },
+          {
+            "value": 4,
+            "name": "Spanish",
+            "order": 760,
+            "hint": "(4)"
+          },
+          {
+            "value": 55,
+            "name": "Castilian Spanish",
+            "order": 763,
+            "hint": "(55)"
+          },
+          {
+            "value": 40,
+            "name": "Swedish",
+            "order": 766,
+            "hint": "(40)"
+          },
+          {
+            "value": 29,
+            "name": "Tagalog",
+            "order": 769,
+            "hint": "(29)"
+          },
+          {
+            "value": 11,
+            "name": "Tamil",
+            "order": 772,
+            "hint": "(11)"
+          },
+          {
+            "value": 10,
+            "name": "Telugu",
+            "order": 775,
+            "hint": "(10)"
+          },
+          {
+            "value": 7,
+            "name": "Thai",
+            "order": 778,
+            "hint": "(7)"
+          },
+          {
+            "value": 42,
+            "name": "Turkish",
+            "order": 781,
+            "hint": "(42)"
+          },
+          {
+            "value": 25,
+            "name": "Ukrainian",
+            "order": 784,
+            "hint": "(25)"
+          },
+          {
+            "value": 15,
+            "name": "Urdu",
+            "order": 787,
+            "hint": "(15)"
+          },
+          {
+            "value": 13,
+            "name": "Vietnamese",
+            "order": 790,
+            "hint": "(13)"
+          },
+          {
+            "value": 47,
+            "name": "Other",
+            "order": 793,
+            "hint": "(47)"
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 7,
+        "name": "useFreeleechWedge",
+        "label": "Use Freeleech Wedges",
+        "helpText": "Use freeleech wedges to make grabbed torrents personal freeleech",
+        "value": false,
+        "type": "checkbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 8,
+        "name": "baseSettings.queryLimit",
+        "label": "Query Limit",
+        "helpText": "The number of max queries as specified by the respective unit that Prowlarr will allow to the site",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 9,
+        "name": "baseSettings.grabLimit",
+        "label": "Grab Limit",
+        "helpText": "The number of max grabs as specified by the respective unit that Prowlarr will allow to the site",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 10,
+        "name": "baseSettings.limitsUnit",
+        "label": "Limits Unit",
+        "helpText": "The unit of time for counting limits per indexer",
+        "value": 0,
+        "type": "select",
+        "advanced": true,
+        "selectOptions": [
+          {
+            "value": 0,
+            "name": "Day",
+            "order": 0,
+            "hint": "(0)"
+          },
+          {
+            "value": 1,
+            "name": "Hour",
+            "order": 1,
+            "hint": "(1)"
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 11,
+        "name": "torrentBaseSettings.appMinimumSeeders",
+        "label": "Apps Minimum Seeders",
+        "helpText": "Minimum seeders required by the Applications for the indexer to grab, empty is Sync profile's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 12,
+        "name": "torrentBaseSettings.seedRatio",
+        "label": "Seed Ratio",
+        "helpText": "The ratio a torrent should reach before stopping, empty uses the download client's default. Ratio should be at least 1.0 and follow the indexers rules",
+        "type": "number",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": true
+      },
+      {
+        "order": 13,
+        "name": "torrentBaseSettings.seedTime",
+        "label": "Seed Time",
+        "unit": "minutes",
+        "helpText": "The time a torrent should be seeded before stopping, empty uses the download client's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 14,
+        "name": "torrentBaseSettings.packSeedTime",
+        "label": "Pack Seed Time",
+        "unit": "minutes",
+        "helpText": "The time a pack (season or discography) torrent should be seeded before stopping, empty is app's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 15,
+        "name": "torrentBaseSettings.preferMagnetUrl",
+        "label": "Prefer Magnet URL",
+        "helpText": "When enabled, this indexer will prefer the use of magnet URLs for grabs with fallback to torrent links",
+        "value": false,
+        "type": "checkbox",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "MyAnonamouse",
+    "implementation": "MyAnonamouse",
+    "configContract": "MyAnonamouseSettings",
+    "infoLink": "https://wiki.servarr.com/prowlarr/supported-indexers#myanonamouse",
+    "tags": [],
+    "presets": []
+  },
+  {
+    "indexerUrls": [
+      ""
+    ],
+    "legacyUrls": [],
+    "definitionName": "Newznab",
+    "description": "Newznab is an API search specification for Usenet",
+    "language": "en-US",
+    "encoding": "Unicode (UTF-8)",
+    "enable": true,
+    "redirect": true,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": true,
+    "supportsPagination": true,
+    "appProfileId": 0,
+    "protocol": "usenet",
+    "privacy": "private",
+    "capabilities": {
+      "limitsMax": 100,
+      "limitsDefault": 100,
+      "categories": [],
+      "supportsRawSearch": false,
+      "searchParams": [
+        "q"
+      ],
+      "tvSearchParams": [],
+      "movieSearchParams": [],
+      "musicSearchParams": [],
+      "bookSearchParams": []
+    },
+    "priority": 25,
+    "downloadClientId": 0,
+    "added": "0001-01-01T00:00:00Z",
+    "sortName": "generic newznab",
+    "name": "Generic Newznab",
+    "fields": [
+      {
+        "order": 0,
+        "name": "baseUrl",
+        "label": "Url",
+        "value": "",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "apiPath",
+        "label": "API Path",
+        "helpText": "Path to the api, usually /api",
+        "value": "/api",
+        "type": "textbox",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "apiKey",
+        "label": "API Key",
+        "helpText": "Site API Key",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "apiKey",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "additionalParameters",
+        "label": "Additional Parameters",
+        "helpText": "Additional Newznab parameters",
+        "type": "textbox",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 4,
+        "name": "vipExpiration",
+        "label": "VIP Expiration",
+        "helpText": "Enter date (yyyy-mm-dd) for VIP Expiration or blank, Prowlarr will notify 1 week from expiration of VIP",
+        "value": "",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 5,
+        "name": "baseSettings.queryLimit",
+        "label": "Query Limit",
+        "helpText": "The number of max queries as specified by the respective unit that Prowlarr will allow to the site",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 6,
+        "name": "baseSettings.grabLimit",
+        "label": "Grab Limit",
+        "helpText": "The number of max grabs as specified by the respective unit that Prowlarr will allow to the site",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 7,
+        "name": "baseSettings.limitsUnit",
+        "label": "Limits Unit",
+        "helpText": "The unit of time for counting limits per indexer",
+        "value": 0,
+        "type": "select",
+        "advanced": true,
+        "selectOptions": [
+          {
+            "value": 0,
+            "name": "Day",
+            "order": 0,
+            "hint": "(0)"
+          },
+          {
+            "value": 1,
+            "name": "Hour",
+            "order": 1,
+            "hint": "(1)"
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "Newznab",
+    "implementation": "Newznab",
+    "configContract": "NewznabSettings",
+    "infoLink": "https://wiki.servarr.com/prowlarr/supported-indexers#newznab",
+    "tags": [],
+    "presets": []
+  },
+  {
+    "indexerUrls": [
+      ""
+    ],
+    "legacyUrls": [],
+    "definitionName": "Torznab",
+    "description": "Torrent Network (TN) is a GERMAN Private site for TV / MOVIES / GENERAL",
+    "language": "de-DE",
+    "encoding": "Unicode (UTF-8)",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": true,
+    "supportsPagination": true,
+    "appProfileId": 0,
+    "protocol": "torrent",
+    "privacy": "private",
+    "capabilities": {
+      "limitsMax": 100,
+      "limitsDefault": 100,
+      "categories": [],
+      "supportsRawSearch": false,
+      "searchParams": [
+        "q"
+      ],
+      "tvSearchParams": [],
+      "movieSearchParams": [],
+      "musicSearchParams": [],
+      "bookSearchParams": []
+    },
+    "priority": 25,
+    "downloadClientId": 0,
+    "added": "0001-01-01T00:00:00Z",
+    "sortName": "torrent network",
+    "name": "Torrent Network",
+    "fields": [
+      {
+        "order": 0,
+        "name": "baseUrl",
+        "label": "Url",
+        "value": "https://tntracker.org",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "apiPath",
+        "label": "API Path",
+        "helpText": "Path to the api, usually /api",
+        "value": "/api/torznab/api",
+        "type": "textbox",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "apiKey",
+        "label": "API Key",
+        "helpText": "Site API Key",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "apiKey",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "torrentBaseSettings.appMinimumSeeders",
+        "label": "Apps Minimum Seeders",
+        "helpText": "Minimum seeders required by the Applications for the indexer to grab, empty is Sync profile's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 4,
+        "name": "torrentBaseSettings.seedRatio",
+        "label": "Seed Ratio",
+        "helpText": "The ratio a torrent should reach before stopping, empty uses the download client's default. Ratio should be at least 1.0 and follow the indexers rules",
+        "type": "number",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": true
+      },
+      {
+        "order": 5,
+        "name": "torrentBaseSettings.seedTime",
+        "label": "Seed Time",
+        "unit": "minutes",
+        "helpText": "The time a torrent should be seeded before stopping, empty uses the download client's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 6,
+        "name": "torrentBaseSettings.packSeedTime",
+        "label": "Pack Seed Time",
+        "unit": "minutes",
+        "helpText": "The time a pack (season or discography) torrent should be seeded before stopping, empty is app's default",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 7,
+        "name": "torrentBaseSettings.preferMagnetUrl",
+        "label": "Prefer Magnet URL",
+        "helpText": "When enabled, this indexer will prefer the use of magnet URLs for grabs with fallback to torrent links",
+        "value": false,
+        "type": "checkbox",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 8,
+        "name": "additionalParameters",
+        "label": "Additional Parameters",
+        "helpText": "Additional Newznab parameters",
+        "type": "textbox",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 9,
+        "name": "vipExpiration",
+        "label": "VIP Expiration",
+        "helpText": "Enter date (yyyy-mm-dd) for VIP Expiration or blank, Prowlarr will notify 1 week from expiration of VIP",
+        "value": "",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 10,
+        "name": "baseSettings.queryLimit",
+        "label": "Query Limit",
+        "helpText": "The number of max queries as specified by the respective unit that Prowlarr will allow to the site",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 11,
+        "name": "baseSettings.grabLimit",
+        "label": "Grab Limit",
+        "helpText": "The number of max grabs as specified by the respective unit that Prowlarr will allow to the site",
+        "type": "number",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 12,
+        "name": "baseSettings.limitsUnit",
+        "label": "Limits Unit",
+        "helpText": "The unit of time for counting limits per indexer",
+        "value": 0,
+        "type": "select",
+        "advanced": true,
+        "selectOptions": [
+          {
+            "value": 0,
+            "name": "Day",
+            "order": 0,
+            "hint": "(0)"
+          },
+          {
+            "value": 1,
+            "name": "Hour",
+            "order": 1,
+            "hint": "(1)"
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "Torznab",
+    "implementation": "Torznab",
+    "configContract": "TorznabSettings",
+    "infoLink": "https://wiki.servarr.com/prowlarr/supported-indexers#torznab",
+    "tags": [],
+    "presets": []
+  }
+]

@@ -11,6 +11,25 @@ Recorded 2026-09-13 around 18:30 CEST from a running Prowlarr 2.5.2.5491
 - `applications-schema.json` — `GET /api/v1/applications/schema`, only the
   Radarr, Sonarr and Lidarr templates
 
+Recorded the same evening around 20:10 CEST, same instance (v0.9.0):
+
+- `indexer.json` — `GET /api/v1/indexer` (all five indexers)
+- `indexer-schema.json` — `GET /api/v1/indexer/schema`, only the templates
+  named Karagarga, TorrentLeech, Torrent Network, Generic Newznab,
+  MyAnonamouse and FunFile (both FunFile entries; 627 templates in all)
+- `indexerproxy.json`, `indexerproxy-schema.json` — `GET /api/v1/indexerproxy`
+  and its `/schema`
+- `tag.json` — `GET /api/v1/tag`
+
+Prowlarr answers a Cardigann indexer's `username` and `password` and
+MyAnonamouse's `mamId` in the clear (`privacy normal`). These were masked on
+the host as well: every `fields` entry whose name matches
+`(?i)pass|user|mamid|key|token|secret|cookie|auth|captcha|2fa` and whose value
+is a string other than `********` or `""` became `"<masked>"` -- two user
+names, two passwords, one `mamId`, and the text of the `info_alt2fatoken`
+hint (once in each file). A second pass over the files found no unmasked
+value under such a name.
+
 Recorded with the service's key loaded as a credential inside the container
 (`curl -H "X-Api-Key: …"`), filtered and **masked on the host** with `jq`
 before anything left it: every `fields` entry whose `privacy` is not

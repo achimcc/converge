@@ -684,9 +684,9 @@ own connection test against the stored value (HTTP 200) was the acceptance.
   missing; an empty template list is an error.
 - **An existing provider** must have the spec's implementation; converge does
   not change one. Every `set` key must be in the answer, every `fields` and
-  `secret_fields` name in its `fields` list, and every secret field must be
-  one the service hides -- a `privacy normal` field is shown and belongs in
-  `fields`, where it is compared. A `fields` entry without `value` is `null`.
+  `secret_fields` name in its `fields` list, and (v0.8.0) every secret field had to be
+  one the service hides; since v0.9.0 a shown one is compared instead
+  (§13). A `fields` entry without `value` is `null`.
 - **Visible differences** are changes (`fields.port 8080 -> 8081`); the write
   sends the entry as read with the spec's values and the secrets.
 - **Every write sends `forceSave=true`.** No connection test runs: a test
@@ -711,10 +711,87 @@ and one `apply` handed Prowlarr's SABnzbd key over: the list stayed
 byte-identical and Prowlarr's connection test with the stored key answered
 200.
 
-## 13. Not in the pilot
+## 13. Prowlarr's indexers, indexer proxies, tags and shown secrets (v0.9.0, 2026-09-13)
+
+Prowlarr's indexers and indexer proxies are providers too, and the host
+needed them for the unit that replaced a 415-line shell script:
+
+| task | services | read | write |
+|---|---|---|---|
+| `indexers` | Prowlarr | `GET /api/v1/indexer` | `POST`/`PUT …/indexer?forceSave=true` |
+| `indexer-proxies` | Prowlarr | `GET /api/v1/indexerproxy` | the same under `indexerproxy` |
+
+```json
+{ "service": "prowlarr", "task": "indexers", "…": "…",
+  "desired": { "providers": {
+    "TNTracker": {
+      "implementation": "Torznab", "template": "Torrent Network",
+      "set": { "enable": true, "appProfileId": 1, "priority": 25 },
+      "fields": { "baseUrl": "http://tntracker.org" },
+      "secret_fields": { "apiKey": "tntracker-apikey" },
+      "tags": ["umlautadaptarr"] } } } }
+```
+
+### Templates by name
+
+`GET /api/v1/indexer/schema` answered 627 templates on 2026-09-13, most of
+them `Cardigann` definitions: the implementation does not pick one. A
+provider may name its `template`; a missing provider is added from the one
+template with that name and the spec's implementation. None is an error, and
+so are two (the recording has `FunFile` twice, once as `Cardigann` and once
+as `FunFile`; the implementation tells those apart). Without `template` the
+implementation picks, as before. An existing provider's template is not
+checked: Prowlarr does not answer which one it came from.
+
+### Tags by label
+
+`tags` is a list of labels. Tag ids are the service's own and differ between
+installations, so a spec names labels; converge reads `GET …/tag` only when a
+provider names tags, adds a label the service lacks (`POST …/tag`) before
+writing any provider, and sends the ids. A difference is shown as labels
+(`tags ["vpn"] -> ["umlautadaptarr"]`; an id the service does not list shows
+as `#id`). Servarr stores labels in lower case, so a spec's labels must be
+lower case. `tags: []` is a statement -- the provider has no tag --; leaving
+`tags` out leaves them alone.
+
+### Secrets the service shows
+
+Measured on the host on 2026-09-13 against Prowlarr 2.5.2.5491: a Cardigann
+indexer's `username` and `password` and MyAnonamouse's `mamId` have `privacy
+normal` and are answered in the clear; the Torznab and Newznab `apiKey`
+fields are `********`. A stored credential is a secret either way, and
+putting it into `fields` would put it into a world-readable spec. So:
+
+- a `secret_fields` entry whose field the service **hides** is handed over on
+  every `apply`, as in §12;
+- one whose field the service **shows** is compared like a field. A
+  difference is a change that names neither value
+  (`fields.password (another value, not shown) -> (the credential's, not shown)`),
+  and the write carries the credential. It is not handed over.
+
+The recorded answers are masked accordingly: besides the §12 rule, every
+`fields` entry whose name looks like a credential (`user`, `pass`, `key`,
+`token`, `cookie`, `mamid`, …) and holds a string other than `********` or
+`""` became `"<masked>"` on the host. Tests hold `<masked>` as those
+credentials, and a stale password (`pw-7f3a9c-never-print-me`) must appear
+in the request body and in no change, note or hand-over line; a sabotage
+printing the credential or skipping the comparison turns two tests red.
+
+The build checks `set` against `IndexerResource` and `IndexerProxyResource`,
+and the tag endpoints against `TagResource`, for every Servarr service.
+
+Before release, `plan` ran on the host with the two specs it deploys, the
+real credentials loaded: `unchanged` for both -- the proxies, the tags and
+the shown tracker credentials matched.
+
+A spec cannot say "write the indexers only if the proxies are there": a
+failing spec does not stop the next one (`src/main.rs`). The host runs the two specs as
+two `ExecStart=` lines, and systemd stops at the first that fails.
+
+## 14. Not in the pilot
 
 - Other services and tasks (Authentik, Seerr, …).
 - TLS, JSON output, a NixOS module.
 - Deleting things. `converge` only sets what the spec names, and appends
-  list entries (§8), connections (§9), subscriptions (§10), root folders (§11) and providers (§12) it is
+  list entries (§8), connections (§9), subscriptions (§10), root folders (§11), providers (§12, §13) and tags (§13) it is
   responsible for.

@@ -58,7 +58,7 @@ fn schema_check_passes_for_the_vendored_file() {
     // Exit 0 alone would also pass for a program that does nothing.
     assert!(
         String::from_utf8_lossy(&out.stdout)
-            .contains("radarr: 19 endpoints and their wire types match"),
+            .contains("radarr: 23 endpoints and their wire types match"),
         "{}",
         String::from_utf8_lossy(&out.stdout)
     );
@@ -698,7 +698,7 @@ fn schema_check_passes_lidarr_specs_and_names_a_provider_field_name() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("lidarr: 18 endpoints and their wire types match"),
+        stdout.contains("lidarr: 22 endpoints and their wire types match"),
         "{stdout}"
     );
     // path, name, defaultMonitorOption, defaultQualityProfileId; two fields.
@@ -843,7 +843,7 @@ fn schema_check_passes_a_prowlarr_applications_spec_and_rejects_an_own_field() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("prowlarr: 13 endpoints and their wire types match"),
+        stdout.contains("prowlarr: 31 endpoints and their wire types match"),
         "{stdout}"
     );
     assert!(

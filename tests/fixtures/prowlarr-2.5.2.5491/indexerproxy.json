@@ -1,0 +1,114 @@
+[
+  {
+    "onHealthIssue": false,
+    "supportsOnHealthIssue": false,
+    "includeHealthWarnings": false,
+    "name": "Tunnel (torrent-01)",
+    "fields": [
+      {
+        "order": 0,
+        "name": "host",
+        "label": "Host",
+        "value": "10.0.10.11",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "port",
+        "label": "Port",
+        "value": 1080,
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "username",
+        "label": "Username",
+        "value": "",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "userName",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "password",
+        "label": "Password",
+        "value": "",
+        "type": "password",
+        "advanced": false,
+        "privacy": "password",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "Socks5",
+    "implementation": "Socks5",
+    "configContract": "Socks5Settings",
+    "infoLink": "https://wiki.servarr.com/prowlarr/supported#socks5",
+    "tags": [
+      1
+    ],
+    "id": 1
+  },
+  {
+    "onHealthIssue": false,
+    "supportsOnHealthIssue": false,
+    "includeHealthWarnings": false,
+    "name": "UmlautAdaptarr (media-01)",
+    "fields": [
+      {
+        "order": 0,
+        "name": "host",
+        "label": "Host",
+        "value": "127.0.0.1",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "port",
+        "label": "Port",
+        "value": 5006,
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "username",
+        "label": "Username",
+        "value": "",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "userName",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "password",
+        "label": "Password",
+        "value": "",
+        "type": "password",
+        "advanced": false,
+        "privacy": "password",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "Http",
+    "implementation": "Http",
+    "configContract": "HttpSettings",
+    "infoLink": "https://wiki.servarr.com/prowlarr/supported#http",
+    "tags": [
+      2
+    ],
+    "id": 2
+  }
+]

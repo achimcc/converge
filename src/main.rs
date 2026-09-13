@@ -22,6 +22,17 @@ const USAGE: &str = "usage:
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The provider kind of a provider spec; any other spec is not asked.
+fn provider_kind(desired: &Desired) -> providers::Kind {
+    match desired {
+        Desired::DownloadClients(_) => providers::Kind::DownloadClients,
+        Desired::Notifications(_) => providers::Kind::Notifications,
+        Desired::Indexers(_) => providers::Kind::Indexers,
+        Desired::IndexerProxies(_) => providers::Kind::IndexerProxies,
+        _ => providers::Kind::Applications,
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -193,12 +204,10 @@ fn reconcile_one(
         }
         Desired::DownloadClients(desired)
         | Desired::Notifications(desired)
-        | Desired::Applications(desired) => {
-            let kind = match spec.desired {
-                Desired::DownloadClients(_) => providers::Kind::DownloadClients,
-                Desired::Notifications(_) => providers::Kind::Notifications,
-                _ => providers::Kind::Applications,
-            };
+        | Desired::Applications(desired)
+        | Desired::Indexers(desired)
+        | Desired::IndexerProxies(desired) => {
+            let kind = provider_kind(&spec.desired);
             let api = providers::ProviderApi::of(spec.service, kind).ok_or_else(|| {
                 fail(Error::SpecInvalid {
                     path: spec.path.clone(),
@@ -218,6 +227,8 @@ fn reconcile_one(
                 targets.push(providers::ProviderTarget {
                     name: name.clone(),
                     implementation: entry.implementation.clone(),
+                    template: entry.template.clone(),
+                    tags: entry.tags.clone(),
                     set: entry.set.clone(),
                     fields: entry.fields.clone(),
                     secret_fields,
@@ -453,12 +464,10 @@ fn schema_check(args: &[String]) -> ExitCode {
             // are checked here, the entries against the answer at runtime.
             Desired::DownloadClients(desired)
             | Desired::Notifications(desired)
-            | Desired::Applications(desired) => {
-                let kind = match spec.desired {
-                    Desired::DownloadClients(_) => providers::Kind::DownloadClients,
-                    Desired::Notifications(_) => providers::Kind::Notifications,
-                    _ => providers::Kind::Applications,
-                };
+            | Desired::Applications(desired)
+            | Desired::Indexers(desired)
+            | Desired::IndexerProxies(desired) => {
+                let kind = provider_kind(&spec.desired);
                 match providers::ProviderApi::of(spec.service, kind) {
                     Some(api) => {
                         let mut found = Vec::new();
