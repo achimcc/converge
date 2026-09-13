@@ -234,15 +234,23 @@ contract, and the host documents its side in its own language.
   rendered with `builtins.toJSON` from the table that already exists.
   `LoadCredential` stays as it is. `TimeoutStartSec` stays above twice the
   per-spec deadline.
-- **A flake check in the host** fetches `openapi.json` for the *deployed*
-  package's version (`radarr.version`, `sonarr.version`) from the release
-  tag, by a hash kept in a table keyed by version. A version without an
-  entry is an evaluation error naming the command that produces the hash —
-  so a package bump cannot pass without the schema being checked again.
+- **The schema check is part of the host's system build**, not a separate
+  flake check (changed during integration, 2026-09-13). The spec file the
+  unit runs is a derivation that first fetches `openapi.json` for the version
+  of the package the host actually deploys (`config.services.<s>.package`),
+  by a hash kept in a table keyed by version, runs `converge schema-check`
+  against it, and only then copies the spec. A flake check could be skipped
+  by a deploy; this cannot. A version without a hash is an evaluation error
+  naming the command that produces it, so a package bump cannot pass without
+  the schema being checked again.
 - **Acceptance on the running host**, not on the build: `converge plan`
   against both instances reports no difference after the deploy, and a
   deliberate one-field change in the table shows up as exactly one changed
   line in `apply`, then as no difference in `plan`.
+  *Done 2026-09-13:* `plan` unchanged for both; `apply` of Radarr's `Unknown`
+  min 0 -> 1 and back, each "read back and confirmed"; afterwards all 30
+  entries byte-identical to the morning's recording. Deployed as host
+  generation 734; the unit's first run reported `unchanged` for both.
 
 ## 5. Not in the pilot
 
