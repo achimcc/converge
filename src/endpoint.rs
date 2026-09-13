@@ -9,6 +9,8 @@ pub enum Shape {
     /// configuration documents): the endpoint and component are checked, the
     /// fields with `schema::check_paths` against the spec.
     Document(&'static str),
+    /// A list of such documents (Servarr's root folders).
+    Documents(&'static str),
     /// A component the description declares without properties (Jellyfin's
     /// `BasePluginConfiguration`): only the reference itself is checked, and
     /// the task's documentation says its fields are checked at runtime only.

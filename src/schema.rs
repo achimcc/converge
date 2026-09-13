@@ -360,14 +360,14 @@ fn check_body(
     let (component, found, kind, typed) = match shape {
         Shape::One(c) => (c, reference(schema), "one", true),
         Shape::Document(c) | Shape::Opaque(c) => (c, reference(schema), "one", false),
-        Shape::List(c) => {
+        Shape::List(c) | Shape::Documents(c) => {
             let is_array = schema.get("type").and_then(Value::as_str) == Some("array");
             let found = if is_array {
                 schema.get("items").and_then(reference)
             } else {
                 None
             };
-            (c, found, "a list of", true)
+            (c, found, "a list of", matches!(shape, Shape::List(_)))
         }
     };
     if found != Some(component) {

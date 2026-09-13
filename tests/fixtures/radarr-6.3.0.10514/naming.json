@@ -1,0 +1,8 @@
+{
+  "renameMovies": true,
+  "replaceIllegalCharacters": true,
+  "colonReplacementFormat": "smart",
+  "standardMovieFormat": "{Movie CleanTitle} {(Release Year)} [imdbid-{ImdbId}] - {{Edition Tags}} {[MediaInfo 3D]}{[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}",
+  "movieFolderFormat": "{Movie CleanTitle} ({Release Year}) [imdbid-{ImdbId}]",
+  "id": 1
+}

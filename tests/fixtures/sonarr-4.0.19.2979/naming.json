@@ -1,0 +1,14 @@
+{
+  "renameEpisodes": true,
+  "replaceIllegalCharacters": true,
+  "colonReplacementFormat": 4,
+  "customColonReplacementFormat": "",
+  "multiEpisodeStyle": 5,
+  "standardEpisodeFormat": "{Series CleanTitleWithoutYear} {(Series Year)} - S{season:00}E{episode:00} - {Episode CleanTitle:90} {[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}",
+  "dailyEpisodeFormat": "{Series CleanTitleWithoutYear} {(Series Year)} - {Air-Date} - {Episode CleanTitle:90} {[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}{[Mediainfo VideoCodec]}{-Release Group}",
+  "animeEpisodeFormat": "{Series CleanTitleWithoutYear} {(Series Year)} - S{season:00}E{episode:00} - {absolute:000} - {Episode CleanTitle:90} {[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}{MediaInfo AudioLanguages}{[MediaInfo VideoDynamicRangeType]}[{Mediainfo VideoCodec }{MediaInfo VideoBitDepth}bit]{-Release Group}",
+  "seriesFolderFormat": "{Series CleanTitleWithoutYear} {(Series Year)} [tvdbid-{TvdbId}]",
+  "seasonFolderFormat": "Season {season:00}",
+  "specialsFolderFormat": "Specials",
+  "id": 1
+}

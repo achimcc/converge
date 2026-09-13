@@ -10,14 +10,14 @@ use converge::{
     engine::{run, Mode, Outcome, Timing},
     error::Error,
     schema,
-    services::{arr, jellyfin, ntfy, trailarr},
+    services::{arr, jellyfin, ntfy, servarr, trailarr},
     spec::{Desired, Spec},
 };
 
 const USAGE: &str = "usage:
   converge apply [--deadline <seconds>] <spec.json>...
   converge plan [--deadline <seconds>] <spec.json>...
-  converge schema-check --service <radarr|sonarr|jellyfin|trailarr> --openapi <file> [--spec <spec.json>]...
+  converge schema-check --service <radarr|sonarr|lidarr|jellyfin|trailarr> --openapi <file> [--spec <spec.json>]...
   converge schema-check --service ntfy [--spec <spec.json>]...";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -178,6 +178,34 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::Naming(set) | Desired::MediaManagement(set) => {
+            let kind = if matches!(spec.desired, Desired::Naming(_)) {
+                servarr::Kind::Naming
+            } else {
+                servarr::Kind::MediaManagement
+            };
+            let task = servarr::Document {
+                api: servarr_api(&spec).map_err(fail)?,
+                kind,
+                set: set.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        Desired::RootFolders(desired) => {
+            let task = servarr::RootFolders {
+                api: servarr_api(&spec).map_err(fail)?,
+                folders: desired
+                    .folders
+                    .iter()
+                    .map(|(path, folder)| servarr::FolderTarget {
+                        path: path.clone(),
+                        set: folder.set.clone(),
+                        profiles: folder.profiles.clone(),
+                    })
+                    .collect(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
     }
     .map_err(fail)?;
     println!("{label}: service version {}", report.version);
@@ -207,6 +235,15 @@ fn reconcile_one(
             Ok(false)
         }
     }
+}
+
+/// The spec parser only lets Servarr tasks through for Radarr, Sonarr and
+/// Lidarr; this says so instead of trusting it.
+fn servarr_api(spec: &Spec) -> Result<&'static servarr::Api, Error> {
+    servarr::Api::of(spec.service).ok_or_else(|| Error::SpecInvalid {
+        path: spec.path.clone(),
+        reason: format!("{} has no Servarr API", spec.service.name()),
+    })
 }
 
 /// ntfy has no OpenAPI description (design §10): its specs are loaded and
@@ -263,10 +300,19 @@ fn schema_check(args: &[String]) -> ExitCode {
     let (Some(service), Some(openapi)) = (service, openapi) else {
         return usage(Some("schema-check needs --service and --openapi"));
     };
-    let (endpoints, wire): (&[converge::endpoint::Endpoint], _) = match service.as_str() {
-        "radarr" | "sonarr" => (&arr::ENDPOINTS, arr::wire_types()),
-        "jellyfin" => (&jellyfin::ENDPOINTS, jellyfin::wire_types()),
-        "trailarr" => (&trailarr::ENDPOINTS, trailarr::wire_types()),
+    let (endpoints, wire): (Vec<converge::endpoint::Endpoint>, _) = match service.as_str() {
+        "radarr" | "sonarr" => {
+            let mut endpoints = arr::ENDPOINTS.to_vec();
+            endpoints.extend(servarr::V3.task_endpoints());
+            (endpoints, arr::wire_types())
+        }
+        "lidarr" => {
+            let mut endpoints = vec![servarr::V1.status];
+            endpoints.extend(servarr::V1.task_endpoints());
+            (endpoints, servarr::lidarr_wire_types())
+        }
+        "jellyfin" => (jellyfin::ENDPOINTS.to_vec(), jellyfin::wire_types()),
+        "trailarr" => (trailarr::ENDPOINTS.to_vec(), trailarr::wire_types()),
         _ => return usage(Some(&format!("unknown service {service:?}"))),
     };
     let document = std::fs::read_to_string(&openapi)
@@ -279,7 +325,7 @@ fn schema_check(args: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let mut findings = schema::check(&document, endpoints, &wire);
+    let mut findings = schema::check(&document, &endpoints, &wire);
     let mut checked_fields = 0;
     for path in &specs {
         let spec = match Spec::load(path) {
@@ -350,6 +396,34 @@ fn schema_check(args: &[String]) -> ExitCode {
             ),
             // Not reachable: the service check above rejects an ntfy spec.
             Desired::AccountSubscriptions(_) => (Vec::new(), 0),
+            Desired::Naming(set) => (
+                schema::check_paths(&document, servarr::NAMING, set),
+                set.len(),
+            ),
+            Desired::MediaManagement(set) => (
+                schema::check_paths(&document, servarr::MEDIA_MANAGEMENT, set),
+                set.len(),
+            ),
+            // A folder is sent with its path, its fields and its profiles as
+            // ids; each of them must be a property of the root folder.
+            Desired::RootFolders(desired) => {
+                let mut found = Vec::new();
+                let mut count = 0;
+                for (path, folder) in &desired.folders {
+                    let mut fields = folder.set.clone();
+                    fields.insert("path".to_string(), serde_json::Value::from(path.clone()));
+                    for field in folder.profiles.keys() {
+                        fields.insert(field.clone(), serde_json::Value::from(1));
+                    }
+                    count += fields.len();
+                    found.extend(
+                        schema::check_paths(&document, servarr::ROOT_FOLDER, &fields)
+                            .into_iter()
+                            .map(|f| format!("root folder {path}: {f}")),
+                    );
+                }
+                (found, count)
+            }
         };
         checked_fields += count;
         findings.extend(

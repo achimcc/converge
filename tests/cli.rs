@@ -58,7 +58,7 @@ fn schema_check_passes_for_the_vendored_file() {
     // Exit 0 alone would also pass for a program that does nothing.
     assert!(
         String::from_utf8_lossy(&out.stdout)
-            .contains("radarr: 5 endpoints and their wire types match"),
+            .contains("radarr: 11 endpoints and their wire types match"),
         "{}",
         String::from_utf8_lossy(&out.stdout)
     );
@@ -655,5 +655,72 @@ fn an_ntfy_topic_never_reaches_the_output_even_when_the_write_fails() {
             .iter()
             .all(|r| r.headers.contains("Bearer tk_ntfy-token-value")),
         "the token travels as a bearer token"
+    );
+}
+
+fn lidarr_spec(dir: &Path, file: &str, task: &str, desired: &str) -> PathBuf {
+    let path = dir.join(file);
+    std::fs::write(
+        &path,
+        format!(
+            r#"{{"service":"lidarr","base_url":"http://localhost:8686","api_key_credential":"lidarr-api-key","task":"{task}","desired":{desired}}}"#
+        ),
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn schema_check_passes_lidarr_specs_and_names_a_provider_field_name() {
+    let openapi = format!(
+        "{}/openapi/lidarr-3.1.0.4875.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let media = lidarr_spec(
+        dir.path(),
+        "m.json",
+        "media-management",
+        r#"{"copyUsingHardlinks":false,"allowFingerprinting":"newFiles"}"#,
+    );
+    let folders = lidarr_spec(
+        dir.path(),
+        "f.json",
+        "root-folders",
+        r#"{"folders":{"/tank/data/media/music":{"set":{"name":"Musik","defaultMonitorOption":"all"},"profiles":{"defaultQualityProfileId":"Standard"}}}}"#,
+    );
+    let out = schema_check("lidarr", Some(&openapi), &[&media, &folders]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("lidarr: 10 endpoints and their wire types match"),
+        "{stdout}"
+    );
+    // path, name, defaultMonitorOption, defaultQualityProfileId; two fields.
+    assert!(
+        stdout.contains("6 spec field(s) in 2 spec(s) match"),
+        "{stdout}"
+    );
+
+    // The name tofu's provider used; the API calls it copyUsingHardlinks.
+    let tofu_name = lidarr_spec(
+        dir.path(),
+        "t.json",
+        "media-management",
+        r#"{"hardlinks_copy":false}"#,
+    );
+    let out = schema_check("lidarr", Some(&openapi), &[&tofu_name]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(
+            "MediaManagementConfigResource.hardlinks_copy: MediaManagementConfigResource has no property hardlinks_copy"
+        ),
+        "{stderr}"
     );
 }

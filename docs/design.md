@@ -551,10 +551,77 @@ converge wrote would be overwritten at the next login and written again at the
 next timer run — two writers flip-flopping over one field. The fix belongs in
 Grafana's OAuth configuration, not in converge.
 
-## 11. Not in the pilot
+## 11. Servarr: naming, media management, root folders (v0.7.0, 2026-09-13)
+
+Radarr, Sonarr and Lidarr are one code base (Servarr) behind two API
+versions: v3 for Radarr and Sonarr, v1 for Lidarr. Their configuration
+documents and root folders have the same shape in all three. On the host
+they were set by OpenTofu resources that ran only when someone typed
+`tofu apply`; the three tasks replace those resources.
+
+| task | services | read | write | desired |
+|---|---|---|---|---|
+| `naming` | Radarr, Sonarr, Lidarr | `GET /api/vN/config/naming` | `PUT /api/vN/config/naming/{id}` | top-level fields of `NamingConfigResource` |
+| `media-management` | Radarr, Sonarr, Lidarr | `GET /api/vN/config/mediamanagement` | `PUT …/mediamanagement/{id}` | top-level fields of `MediaManagementConfigResource` |
+| `root-folders` | Radarr, Sonarr, Lidarr | `GET /api/vN/rootfolder` | `POST /api/vN/rootfolder` (missing), `PUT /api/v1/rootfolder/{id}` (Lidarr, differing) | folders by path, with fields and profiles by name |
+
+### Documents
+
+- **A document is one object with an integer `id`.** An answer without one,
+  or not an object, is an error.
+- The spec names **plain top-level field names**; `id` cannot be set. Every
+  name must be in the answer, and at build time a property of the component
+  with a matching type and enum value -- Radarr's `colonReplacementFormat`
+  is an enum of strings, Sonarr's of integers, and both are checked as such.
+- The write sends **the whole document back** with only the named fields
+  changed and accepts `200` and `202`; the engine reads back.
+- The names are the API's, not the ones a Terraform provider used for the
+  same setting. The host's provider called one field `copy_using_hardlinks`
+  for Radarr and `hardlinks_copy` for Sonarr and Lidarr; the API calls it
+  `copyUsingHardlinks` everywhere, and `hardlinks_copy` fails the schema
+  check.
+
+### Root folders
+
+```json
+{ "service": "lidarr", "task": "root-folders", "…": "…",
+  "desired": { "folders": {
+    "/tank/data/media/music": {
+      "set": { "name": "Musik", "defaultMonitorOption": "all" },
+      "profiles": { "defaultQualityProfileId": "Standard",
+                    "defaultMetadataProfileId": "Standard" } } } } }
+```
+
+- **Found by path**, compared as a string. A path must be absolute and
+  without a trailing slash.
+- **A missing folder is added** with `path`, the `set` fields and the
+  profiles as ids: `root folder /tank/data/media/music: (missing) -> (added)`.
+- **An existing folder** gets one change per differing field. Only Lidarr's
+  API can update a root folder; Radarr's and Sonarr's folders are a path and
+  nothing else, so their specs may name neither `set` nor `profiles`, and
+  the parser says so.
+- **Profiles are given by name.** Lidarr's root folder carries default
+  quality and metadata profiles as ids. An id in the spec would be the wrong
+  one, silently, after the database is rebuilt; the name is looked up in
+  `GET /api/v1/qualityprofile` and `/metadataprofile`, and a name that
+  matches no profile is an error naming it. The lists are only read when the
+  spec names a profile, and an empty list is an error.
+- `id`, `path`, `accessible`, `freeSpace`, `totalSpace` and
+  `unmappedFolders` are the service's and cannot be in `set`.
+- **An empty folder list is a valid answer** (a fresh service has none);
+  folders the spec does not name are a note. Nothing is removed.
+- At build time `path`, every `set` field and every profile field are
+  checked as properties of `RootFolderResource`.
+
+Recorded answers: `tests/fixtures/{radarr,sonarr}-*/{naming,mediamanagement,rootfolder}.json`
+and `tests/fixtures/lidarr-3.1.0.4875/`. Before release, `plan` ran on the
+host against all three services with the specs the host deploys, and
+reported `unchanged` for all eight.
+
+## 12. Not in the pilot
 
 - Other services and tasks (Authentik, Seerr, …).
 - TLS, JSON output, a NixOS module.
 - Deleting things. `converge` only sets what the spec names, and appends
-  list entries (§8), connections (§9) and subscriptions (§10) it is
+  list entries (§8), connections (§9), subscriptions (§10) and root folders (§11) it is
   responsible for.

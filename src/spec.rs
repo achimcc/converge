@@ -15,6 +15,7 @@ pub enum Service {
     Jellyfin,
     Trailarr,
     Ntfy,
+    Lidarr,
 }
 
 impl Service {
@@ -25,13 +26,14 @@ impl Service {
             Service::Jellyfin => "jellyfin",
             Service::Trailarr => "trailarr",
             Service::Ntfy => "ntfy",
+            Service::Lidarr => "lidarr",
         }
     }
 
     /// The request header the API key travels in.
     pub fn key_header(self) -> &'static str {
         match self {
-            Service::Radarr | Service::Sonarr => "X-Api-Key",
+            Service::Radarr | Service::Sonarr | Service::Lidarr => "X-Api-Key",
             Service::Jellyfin => "X-Emby-Token",
             Service::Trailarr => "X-API-KEY",
             Service::Ntfy => "Authorization",
@@ -50,6 +52,12 @@ impl Service {
     fn is_arr(self) -> bool {
         matches!(self, Service::Radarr | Service::Sonarr)
     }
+
+    /// Radarr, Sonarr and Lidarr: the same application underneath (Servarr),
+    /// whose configuration documents and root folders share their shape.
+    pub fn is_servarr(self) -> bool {
+        matches!(self, Service::Radarr | Service::Sonarr | Service::Lidarr)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -64,6 +72,9 @@ enum TaskName {
     Connections,
     TrailerProfiles,
     AccountSubscriptions,
+    Naming,
+    MediaManagement,
+    RootFolders,
 }
 
 impl TaskName {
@@ -76,6 +87,9 @@ impl TaskName {
             | TaskName::PluginConfigurations => service == Service::Jellyfin,
             TaskName::Connections | TaskName::TrailerProfiles => service == Service::Trailarr,
             TaskName::AccountSubscriptions => service == Service::Ntfy,
+            TaskName::Naming | TaskName::MediaManagement | TaskName::RootFolders => {
+                service.is_servarr()
+            }
         }
     }
 }
@@ -219,6 +233,40 @@ pub struct AccountSubscriptions {
     pub topics_credential: String,
 }
 
+/// Root folders by path. A missing folder is added; converge never removes
+/// one.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RootFolderSettings {
+    pub folders: BTreeMap<String, FolderSettings>,
+}
+
+/// One root folder: top-level fields (Lidarr's carry defaults for new
+/// artists; Radarr's and Sonarr's have none to set) and profile fields given
+/// by the profile's name, which converge looks up -- an id would silently be
+/// the wrong one after the database is rebuilt.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FolderSettings {
+    #[serde(default)]
+    pub set: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub profiles: BTreeMap<String, String>,
+}
+
+/// The profile fields a root folder may name by profile name.
+pub const PROFILE_FIELDS: [&str; 2] = ["defaultQualityProfileId", "defaultMetadataProfileId"];
+
+/// Fields of a root folder the service owns.
+const ROOT_FOLDER_OWN: [&str; 6] = [
+    "id",
+    "path",
+    "accessible",
+    "freeSpace",
+    "totalSpace",
+    "unmappedFolders",
+];
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Desired {
     QualityDefinitions(BTreeMap<String, SizeLimits>),
@@ -230,6 +278,9 @@ pub enum Desired {
     Connections(TrailarrConnections),
     TrailerProfiles(TrailerProfileSettings),
     AccountSubscriptions(AccountSubscriptions),
+    Naming(BTreeMap<String, serde_json::Value>),
+    MediaManagement(BTreeMap<String, serde_json::Value>),
+    RootFolders(RootFolderSettings),
 }
 
 /// A non-empty map of plain (undotted) field names, none of them `forbidden`.
@@ -524,6 +575,65 @@ impl Spec {
                     .map_err(invalid)?;
                 Desired::AccountSubscriptions(desired)
             }
+            TaskName::Naming | TaskName::MediaManagement => {
+                let map: BTreeMap<String, serde_json::Value> = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                // The id addresses the document; it is the service's.
+                plain_fields(&map, "desired", &["id"]).map_err(invalid)?;
+                if matches!(raw.task, TaskName::Naming) {
+                    Desired::Naming(map)
+                } else {
+                    Desired::MediaManagement(map)
+                }
+            }
+            TaskName::RootFolders => {
+                let desired: RootFolderSettings = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if desired.folders.is_empty() {
+                    return Err(invalid("desired.folders names no folder".to_string()));
+                }
+                for (path, folder) in &desired.folders {
+                    let at = format!("desired.folders.{path}");
+                    if !path.starts_with('/') || path.len() < 2 || path.ends_with('/') {
+                        return Err(invalid(format!(
+                            "{at}: a root folder is an absolute path without a trailing slash"
+                        )));
+                    }
+                    // Radarr's and Sonarr's root folders are a path and
+                    // nothing the caller could set.
+                    if raw.service != Service::Lidarr
+                        && !(folder.set.is_empty() && folder.profiles.is_empty())
+                    {
+                        return Err(invalid(format!(
+                            "{at}: a {} root folder has nothing to set but its path",
+                            raw.service.name()
+                        )));
+                    }
+                    if !folder.set.is_empty() {
+                        plain_fields(&folder.set, &format!("{at}.set"), &ROOT_FOLDER_OWN)
+                            .map_err(invalid)?;
+                    }
+                    for (field, name) in &folder.profiles {
+                        if !PROFILE_FIELDS.contains(&field.as_str()) {
+                            return Err(invalid(format!(
+                                "{at}.profiles: {field} is not a profile field (these are: {})",
+                                PROFILE_FIELDS.join(", ")
+                            )));
+                        }
+                        if name.is_empty() {
+                            return Err(invalid(format!(
+                                "{at}.profiles.{field}: the name is empty"
+                            )));
+                        }
+                        if folder.set.contains_key(field) {
+                            return Err(invalid(format!(
+                                "{at}: {field} is both in set and in profiles"
+                            )));
+                        }
+                    }
+                }
+                Desired::RootFolders(desired)
+            }
         };
         Ok(Spec {
             path: path.to_path_buf(),
@@ -545,6 +655,9 @@ impl Spec {
             Desired::Connections(_) => "connections",
             Desired::TrailerProfiles(_) => "trailer-profiles",
             Desired::AccountSubscriptions(_) => "account-subscriptions",
+            Desired::Naming(_) => "naming",
+            Desired::MediaManagement(_) => "media-management",
+            Desired::RootFolders(_) => "root-folders",
         }
     }
 }
@@ -848,9 +961,90 @@ mod tests {
             Service::Sonarr,
             Service::Jellyfin,
             Service::Trailarr,
+            Service::Lidarr,
         ] {
             assert_eq!(value(service).expose(), "t0ken", "{service:?}");
         }
+    }
+
+    fn servarr(service: &str, task: &str, desired: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"{service}","base_url":"http://localhost:8686","api_key_credential":"k","task":"{task}","desired":{desired}}}"#
+        ))
+    }
+
+    #[test]
+    fn naming_and_media_management_are_plain_fields_without_id() {
+        for (service, task) in [
+            ("radarr", "naming"),
+            ("sonarr", "media-management"),
+            ("lidarr", "naming"),
+        ] {
+            let spec = servarr(service, task, r#"{"renameMovies":true}"#).unwrap();
+            assert_eq!(spec.task_name(), task);
+            assert_eq!(spec.service.key_header(), "X-Api-Key");
+        }
+        assert!(reason(servarr("radarr", "naming", "{}")).contains("names no field"));
+        assert!(reason(servarr("radarr", "naming", r#"{"id":2}"#)).contains("is not set this way"));
+        assert!(
+            reason(servarr("radarr", "naming", r#"{"a.b":1}"#)).contains("not a plain field name")
+        );
+        assert!(reason(servarr("jellyfin", "naming", r#"{"x":1}"#)).contains("does not belong"));
+        assert!(reason(servarr(
+            "trailarr",
+            "root-folders",
+            r#"{"folders":{"/a":{}}}"#
+        ))
+        .contains("does not belong"));
+    }
+
+    const LIDARR_FOLDERS: &str = r#"{"folders":{"/tank/data/media/music":{"set":{"name":"Musik","defaultMonitorOption":"all"},"profiles":{"defaultQualityProfileId":"Standard","defaultMetadataProfileId":"Standard"}}}}"#;
+
+    #[test]
+    fn root_folders_are_strict() {
+        let spec = servarr("lidarr", "root-folders", LIDARR_FOLDERS).unwrap();
+        let Desired::RootFolders(desired) = spec.desired else {
+            panic!("wrong task")
+        };
+        assert_eq!(
+            desired.folders["/tank/data/media/music"].profiles["defaultQualityProfileId"],
+            "Standard"
+        );
+        let radarr = r#"{"folders":{"/tank/data/media/movies":{}}}"#;
+        assert!(servarr("radarr", "root-folders", radarr).is_ok());
+        let radarr_set = r#"{"folders":{"/tank/data/media/movies":{"set":{"name":"x"}}}}"#;
+        assert!(reason(servarr("radarr", "root-folders", radarr_set))
+            .contains("nothing to set but its path"));
+        assert!(
+            reason(servarr("lidarr", "root-folders", r#"{"folders":{}}"#))
+                .contains("names no folder")
+        );
+        for bad in ["relative", "/", "/trailing/"] {
+            let text = format!(r#"{{"folders":{{"{bad}":{{}}}}}}"#);
+            assert!(
+                reason(servarr("lidarr", "root-folders", &text)).contains("absolute path"),
+                "{bad}"
+            );
+        }
+        for own in ["path", "id", "freeSpace"] {
+            let text = LIDARR_FOLDERS.replace(r#""name""#, &format!(r#""{own}""#));
+            assert!(
+                reason(servarr("lidarr", "root-folders", &text)).contains("is not set this way"),
+                "{own}"
+            );
+        }
+        let unknown_profile = LIDARR_FOLDERS.replace("defaultMetadataProfileId", "defaultTagId");
+        assert!(reason(servarr("lidarr", "root-folders", &unknown_profile))
+            .contains("not a profile field"));
+        let both = LIDARR_FOLDERS.replace(r#""name":"Musik""#, r#""defaultQualityProfileId":3"#);
+        assert!(reason(servarr("lidarr", "root-folders", &both))
+            .contains("both in set and in profiles"));
+        let empty_name = LIDARR_FOLDERS.replacen(r#":"Standard""#, r#":"""#, 1);
+        assert!(
+            reason(servarr("lidarr", "root-folders", &empty_name)).contains("the name is empty")
+        );
+        let misspelt = LIDARR_FOLDERS.replace(r#""profiles""#, r#""profile""#);
+        assert!(reason(servarr("lidarr", "root-folders", &misspelt)).contains("profile"));
     }
 
     #[test]

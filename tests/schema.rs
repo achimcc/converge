@@ -408,3 +408,111 @@ fn trailer_profile_fields_are_checked_by_name_and_type() {
         ]
     );
 }
+
+// --- Servarr: naming, media management, root folders ------------------------
+
+fn servarr_findings(openapi: &Value, lidarr: bool) -> Vec<String> {
+    use converge::services::servarr;
+    if lidarr {
+        let mut endpoints = vec![servarr::V1.status];
+        endpoints.extend(servarr::V1.task_endpoints());
+        check(openapi, &endpoints, &servarr::lidarr_wire_types())
+    } else {
+        let mut endpoints = arr::ENDPOINTS.to_vec();
+        endpoints.extend(servarr::V3.task_endpoints());
+        check(openapi, &endpoints, &arr::wire_types())
+    }
+}
+
+fn servarr_paths(file: &str, component: &str, desired: Value) -> Vec<String> {
+    let map = desired.as_object().unwrap().clone().into_iter().collect();
+    converge::schema::check_paths(&doc(file), component, &map)
+}
+
+#[test]
+fn the_servarr_endpoints_match_for_all_three_services() {
+    assert_eq!(
+        servarr_findings(&doc("radarr-6.3.0.10514"), false),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        servarr_findings(&doc("sonarr-4.0.19.2979"), false),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        servarr_findings(&doc("lidarr-3.1.0.4875"), true),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_root_folder_list_of_the_wrong_component_and_a_renamed_profile_name_are_found() {
+    let mut d = doc("lidarr-3.1.0.4875");
+    d["paths"]["/api/v1/rootfolder"]["get"]["responses"]["200"]["content"]["application/json"]
+        ["schema"]["items"]["$ref"] = "#/components/schemas/TagResource".into();
+    let props = properties(&mut d, "QualityProfileResource");
+    let v = props.remove("name").unwrap();
+    props.insert("title".into(), v);
+    assert_eq!(
+        servarr_findings(&d, true),
+        [
+            "GET /api/v1/rootfolder 200 response is not a list of RootFolderResource",
+            "QualityProfileResource.name: not in the OpenAPI description"
+        ]
+    );
+}
+
+#[test]
+fn the_hosts_documents_are_checked_by_name_type_and_enum() {
+    // Radarr's colon replacement is an enum of strings, Sonarr's of numbers.
+    assert_eq!(
+        servarr_paths(
+            "radarr-6.3.0.10514",
+            "NamingConfigResource",
+            serde_json::json!({"colonReplacementFormat": "smart", "renameMovies": true})
+        ),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        servarr_paths(
+            "sonarr-4.0.19.2979",
+            "NamingConfigResource",
+            serde_json::json!({"colonReplacementFormat": 4, "multiEpisodeStyle": 5})
+        ),
+        Vec::<String>::new()
+    );
+    let found = servarr_paths(
+        "radarr-6.3.0.10514",
+        "NamingConfigResource",
+        serde_json::json!({"colonReplacementFormat": "clever", "renameEpisodes": true}),
+    );
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(
+        found[0]
+            .starts_with("NamingConfigResource.colonReplacementFormat: \"clever\" is not one of"),
+        "{found:?}"
+    );
+    assert_eq!(
+        found[1],
+        "NamingConfigResource.renameEpisodes: NamingConfigResource has no property renameEpisodes"
+    );
+    // tofu's provider called it hardlinks_copy; the API does not.
+    assert_eq!(
+        servarr_paths(
+            "lidarr-3.1.0.4875",
+            "MediaManagementConfigResource",
+            serde_json::json!({"hardlinksCopy": false})
+        ),
+        ["MediaManagementConfigResource.hardlinksCopy: MediaManagementConfigResource has no property hardlinksCopy"]
+    );
+    assert_eq!(
+        servarr_paths(
+            "lidarr-3.1.0.4875",
+            "RootFolderResource",
+            serde_json::json!({"name": "Musik", "path": "/tank/data/media/music",
+                               "defaultMonitorOption": "all", "defaultNewItemMonitorOption": "all",
+                               "defaultQualityProfileId": 1, "defaultMetadataProfileId": 1})
+        ),
+        Vec::<String>::new()
+    );
+}

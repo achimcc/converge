@@ -1,0 +1,15 @@
+[
+  {
+    "name": "Musik",
+    "path": "/tank/data/media/music",
+    "defaultMetadataProfileId": 1,
+    "defaultQualityProfileId": 3,
+    "defaultMonitorOption": "all",
+    "defaultNewItemMonitorOption": "all",
+    "defaultTags": [],
+    "accessible": true,
+    "freeSpace": 14583813111808,
+    "totalSpace": 15501000441856,
+    "id": 1
+  }
+]

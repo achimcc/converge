@@ -29,3 +29,11 @@ limit has no `maxSize` key at all.
   `lib/qualitaetsgroessen.nix` rendered with `nix eval --json`, the
   `.sonarr` attribute. At recording time the service held exactly this
   state.
+
+- `naming.json` — `GET /api/v3/config/naming`
+- `mediamanagement.json` — `GET /api/v3/config/mediamanagement`
+- `rootfolder.json` — `GET /api/v3/rootfolder`
+
+These three were recorded 2026-09-13 around 18:20 CEST the same way (with
+the credential loaded under another name). None of them carries credentials;
+searched for long tokens, the only hits were field names.
