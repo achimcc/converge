@@ -1,31 +1,34 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": [
+    "config:recommended"
+  ],
   "description": [
     "Keeps Cargo.lock and flake.lock current. One PR per run, never",
-    "auto-merged: the crates here talk to a signal-cli socket and to Seerr's",
-    "REST API, and a bump is worth reading before it lands, not applying on",
-    "sight."
+    "auto-merged: a bump of ureq or schemars changes how this program talks to",
+    "live services and how it reads their OpenAPI files, and is worth reading",
+    "before it lands."
   ],
-
   "dependencyDashboard": true,
   "automerge": false,
   "rebaseWhen": "conflicted",
   "commitMessagePrefix": "chore(deps):",
-
   "packageRules": [
     {
       "description": "One PR, not one per dependency.",
-      "matchPackageNames": ["*"],
+      "matchPackageNames": [
+        "*"
+      ],
       "groupName": "dependencies"
     },
     {
       "description": "A few days' grace before a fresh release lands here, except for security fixes below.",
-      "matchPackageNames": ["*"],
+      "matchPackageNames": [
+        "*"
+      ],
       "minimumReleaseAge": "3 days"
     }
   ],
-
   "nix": {
     "description": [
       "The Nix manager is beta and has to be turned on explicitly, or",
@@ -33,12 +36,10 @@
     ],
     "enabled": true
   },
-
   "lockFileMaintenance": {
     "description": "Refreshes both Cargo.lock and flake.lock even when no manifest range has changed.",
     "enabled": true
   },
-
   "vulnerabilityAlerts": {
     "description": "Security advisories skip the release-age grace period; everything else about review and auto-merge still applies.",
     "enabled": true,
