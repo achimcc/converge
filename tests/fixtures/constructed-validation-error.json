@@ -1,0 +1,8 @@
+[
+  {
+    "propertyName": "MaxSize",
+    "errorMessage": "'Max Size' must be greater than or equal to 'Min Size'.",
+    "attemptedValue": 1,
+    "severity": "error"
+  }
+]

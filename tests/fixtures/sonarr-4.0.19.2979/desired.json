@@ -1,0 +1,112 @@
+{
+  "Bluray-1080p": {
+    "max": null,
+    "min": 12.5,
+    "preferred": null
+  },
+  "Bluray-1080p Remux": {
+    "max": null,
+    "min": 69.1,
+    "preferred": null
+  },
+  "Bluray-2160p": {
+    "max": null,
+    "min": 94.6,
+    "preferred": null
+  },
+  "Bluray-2160p Remux": {
+    "max": null,
+    "min": 187.4,
+    "preferred": null
+  },
+  "Bluray-480p": {
+    "max": 100,
+    "min": 2,
+    "preferred": 95
+  },
+  "Bluray-576p": {
+    "max": 100,
+    "min": 2,
+    "preferred": 95
+  },
+  "Bluray-720p": {
+    "max": null,
+    "min": 17.1,
+    "preferred": null
+  },
+  "DVD": {
+    "max": 100,
+    "min": 2,
+    "preferred": 95
+  },
+  "HDTV-1080p": {
+    "max": null,
+    "min": 15,
+    "preferred": null
+  },
+  "HDTV-2160p": {
+    "max": null,
+    "min": 25,
+    "preferred": null
+  },
+  "HDTV-720p": {
+    "max": null,
+    "min": 10,
+    "preferred": null
+  },
+  "Raw-HD": {
+    "max": null,
+    "min": 4,
+    "preferred": 95
+  },
+  "SDTV": {
+    "max": 100,
+    "min": 2,
+    "preferred": 95
+  },
+  "Unknown": {
+    "max": 199.9,
+    "min": 1,
+    "preferred": 95
+  },
+  "WEBDL-1080p": {
+    "max": null,
+    "min": 15,
+    "preferred": null
+  },
+  "WEBDL-2160p": {
+    "max": null,
+    "min": 25,
+    "preferred": null
+  },
+  "WEBDL-480p": {
+    "max": 100,
+    "min": 2,
+    "preferred": 95
+  },
+  "WEBDL-720p": {
+    "max": null,
+    "min": 10,
+    "preferred": null
+  },
+  "WEBRip-1080p": {
+    "max": null,
+    "min": 15,
+    "preferred": null
+  },
+  "WEBRip-2160p": {
+    "max": null,
+    "min": 25,
+    "preferred": null
+  },
+  "WEBRip-480p": {
+    "max": 100,
+    "min": 2,
+    "preferred": 95
+  },
+  "WEBRip-720p": {
+    "max": null,
+    "min": 10,
+    "preferred": null
+  }
+}
