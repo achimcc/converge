@@ -40,3 +40,19 @@ matches `key|token|secret|passw|auth` (case-insensitive) was replaced with
 were checked there too: plugin ids and download paths only. Everything else,
 including empty strings as `""` (the JSON API does not omit them; the XML
 file on disk does), is as recorded.
+
+## SkinManager and JavaScript Injector (recorded 2026-09-13 around 14:16 CEST)
+
+- `plugins/e10fb9d4c9414c6e82602641031c2618.json` — SkinManager
+- `plugins/f5a34f7b2e8a4e6aa7223a216a81b374.json` — JavaScript Injector
+
+A second run over every plugin, masked on the host the same way (the pattern
+additionally covered `cookie`, `smtp.*user` and `username`) and written with
+`jq -S`, so keys are sorted. **No field of these two was masked.** They carry
+a theme choice and scripts: the host's own `Skin-Manager-Vorgabe` script
+(public in the host repository) and the scripts other plugins register. The
+long values were checked before committing: GUIDs, field names and
+JavaScript identifiers; every `Token` is a variable name in a script.
+
+GetAvatar was recorded too and deliberately left out: its `UserAvatars` says
+which person picked which picture.

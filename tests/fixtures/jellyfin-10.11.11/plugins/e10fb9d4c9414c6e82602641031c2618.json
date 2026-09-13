@@ -1,0 +1,16 @@
+{
+  "AllowUserThemes": true,
+  "ConfigVersion": 5,
+  "CustomCss": "",
+  "HasConditionalImports": true,
+  "PreconnectUrls": [
+    "https://cdn.jsdelivr.net",
+    "https://fonts.googleapis.com",
+    "https://fonts.gstatic.com"
+  ],
+  "SelectedCssUrl": "https://jellyfin.rusty-vault.de/skin-katalog/themes/elegantfin.css",
+  "SelectedVersion": "25.12.32",
+  "Skin": "ElegantFin",
+  "SkinUrl": "/skin-katalog/skins.json",
+  "ThemeVars": "{}"
+}

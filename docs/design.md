@@ -369,8 +369,47 @@ differing secret is reported as `(hidden) -> (hidden) from its credential`,
 and not even the *old* value is shown (it may be a key someone else set).
 A path may not be both in `set` and in `secrets`.
 
-## 8. Not in the pilot
+## 8. Shared lists: entries by key (v0.5.0, 2026-09-13)
+
+Some plugin settings are lists that more than one writer fills. The
+JavaScript Injector keeps `CustomJavaScripts`, where the host registers one
+script next to whatever a person adds in the web UI, and
+`PluginJavaScripts`, which other plugins fill themselves. Replacing such a
+list with `set` would take everyone else's entries away. `lists` names the
+entries converge is responsible for and nothing more:
+
+```json
+"f5a34f7b2e8a4e6aa7223a216a81b374": {
+  "name": "JavaScript Injector",
+  "set": { "DisableScriptInjectionMiddleware": false },
+  "lists": {
+    "CustomJavaScripts": {
+      "key": "Name",
+      "items": [ { "Name": "Skin-Manager-Vorgabe", "Script": "…",
+                   "Enabled": true, "RequiresAuthentication": true } ] } } }
+```
+
+- **An entry is found by its key** — the item's value of `key`, compared as
+  JSON. The first matching entry counts if the service carries a key twice.
+- **A found entry gets the item's fields**; its other fields stay. A field
+  the entry does not carry is an error, as for any path.
+- **A missing entry is appended** after all others, as the item says it.
+- **No entry is ever removed, and none moves.** Taking a script out is done
+  by setting `Enabled` to `false`, which is a field like any other.
+- **Changes name the entry**: `CustomJavaScripts[Name=Skin-Manager-Vorgabe].Enabled
+  true -> false`, or `(missing) -> (added)`. Values longer than 80
+  characters are cut to their beginning and their length — a script says
+  nothing more in full.
+- The spec is checked before anything is read: a dotted path, a non-empty
+  key that every item carries as a string, no key twice, at least one field
+  besides the key, and no path that is also in `set` or `secrets`.
+
+The recorded SkinManager and JavaScript Injector configurations back the
+tests (`tests/fixtures/jellyfin-10.11.11/SOURCE.md`).
+
+## 9. Not in the pilot
 
 - Other services and tasks (Authentik, Seerr, …).
 - TLS, JSON output, a NixOS module.
-- Deleting things. `converge` only sets what the spec names.
+- Deleting things. `converge` only sets what the spec names, and appends
+  list entries it is responsible for (§8).

@@ -142,6 +142,7 @@ fn reconcile_one(
                     name: plugin.name.clone(),
                     set: plugin.set.clone(),
                     secrets,
+                    lists: plugin.lists.clone(),
                 });
             }
             let task = jellyfin::PluginConfigurations { plugins: targets };

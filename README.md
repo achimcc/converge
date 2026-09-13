@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.4.0** — tasks for **Radarr**, **Sonarr** (API v3) and
+Early. **v0.5.0** — tasks for **Radarr**, **Sonarr** (API v3) and
 **Jellyfin** (10.11), each replacing a shell unit on the host it was written
 for:
 
@@ -30,7 +30,7 @@ for:
 | Jellyfin | `server-configuration` | fields of `ServerConfiguration`, by path |
 | Jellyfin | `library-options` | fields of the named libraries' `LibraryOptions`, by path |
 | Jellyfin | `scheduled-task-triggers` | the trigger list of tasks whose key starts with a prefix |
-| Jellyfin | `plugin-configurations` | fields of plugin configurations by path, keys from credentials |
+| Jellyfin | `plugin-configurations` | fields of plugin configurations by path, keys from credentials, entries of shared lists by key |
 
 ## A spec
 

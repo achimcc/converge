@@ -127,8 +127,9 @@ pub struct TaskTriggers {
     pub triggers: Vec<serde_json::Map<String, serde_json::Value>>,
 }
 
-/// One plugin's configuration: plain fields by path, and fields whose value
-/// comes from a systemd credential (path -> credential name). The name is the
+/// One plugin's configuration: plain fields by path, fields whose value
+/// comes from a systemd credential (path -> credential name), and entries of
+/// lists the plugin shares with others (path -> keyed items). The name is the
 /// plugin's name as `/Plugins` reports it, so a wrong id fails loudly.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -138,6 +139,19 @@ pub struct PluginSettings {
     pub set: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub secrets: BTreeMap<String, String>,
+    #[serde(default)]
+    pub lists: BTreeMap<String, ListItems>,
+}
+
+/// Entries of a list that is not converge's alone. Each item is found by the
+/// value of its `key` field; the fields it names are set, a missing item is
+/// appended, and every other entry of the list stays as it is -- in its place.
+/// converge never removes an entry.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListItems {
+    pub key: String,
+    pub items: Vec<serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -159,6 +173,39 @@ fn field_paths(map: &BTreeMap<String, serde_json::Value>, what: &str) -> Result<
         Some(bad) => Err(format!("{what}: {bad:?} is not a dotted path")),
         None => Ok(()),
     }
+}
+
+/// A well-formed keyed list: a dotted path, a key every item carries as a
+/// string, no key twice, and at least one field besides the key.
+fn list_items(path: &str, list: &ListItems) -> Result<(), String> {
+    if crate::paths::segments(path).is_none() {
+        return Err(format!("{path:?} is not a dotted path"));
+    }
+    if list.key.is_empty() {
+        return Err(format!("{path}: the key is empty"));
+    }
+    if list.items.is_empty() {
+        return Err(format!("{path} names no item"));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for (index, item) in list.items.iter().enumerate() {
+        let Some(serde_json::Value::String(key)) = item.get(&list.key) else {
+            return Err(format!(
+                "{path}: item {index} has no key {} as a string",
+                list.key
+            ));
+        };
+        if !seen.insert(key.as_str()) {
+            return Err(format!("{path}: {}={key} is named twice", list.key));
+        }
+        if item.len() < 2 {
+            return Err(format!(
+                "{path}: {}={key} names no field besides its key",
+                list.key
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -279,7 +326,8 @@ impl Spec {
                             "{at}: a plugin id is 32 lowercase hex digits without dashes"
                         )));
                     }
-                    if plugin.set.is_empty() && plugin.secrets.is_empty() {
+                    if plugin.set.is_empty() && plugin.secrets.is_empty() && plugin.lists.is_empty()
+                    {
                         return Err(invalid(format!("{at} names no field")));
                     }
                     if !plugin.set.is_empty() {
@@ -299,6 +347,14 @@ impl Spec {
                         if plugin.set.contains_key(path) {
                             return Err(invalid(format!(
                                 "{at}: {path} is both in set and in secrets"
+                            )));
+                        }
+                    }
+                    for (path, list) in &plugin.lists {
+                        list_items(path, list).map_err(|e| invalid(format!("{at}.lists: {e}")))?;
+                        if plugin.set.contains_key(path) || plugin.secrets.contains_key(path) {
+                            return Err(invalid(format!(
+                                "{at}: {path} is both in set and in lists"
                             )));
                         }
                     }
@@ -464,6 +520,52 @@ mod tests {
         let path_credential =
             r#"{"c531afa3de204055aca5a7cc43adf783":{"name":"X","secrets":{"A":"../x"}}}"#;
         assert!(jellyfin("plugin-configurations", path_credential).is_err());
+    }
+
+    #[test]
+    fn plugin_lists_are_strict() {
+        let spec = |lists: &str| {
+            jellyfin(
+                "plugin-configurations",
+                &format!(
+                    r#"{{"f5a34f7b2e8a4e6aa7223a216a81b374":{{"name":"JavaScript Injector","lists":{lists}}}}}"#
+                ),
+            )
+        };
+        let good = r#"{"CustomJavaScripts":{"key":"Name","items":[{"Name":"A","Enabled":true}]}}"#;
+        let parsed = spec(good).unwrap();
+        let Desired::PluginConfigurations(plugins) = parsed.desired else {
+            panic!("wrong task")
+        };
+        assert_eq!(
+            plugins["f5a34f7b2e8a4e6aa7223a216a81b374"].lists["CustomJavaScripts"].key,
+            "Name"
+        );
+
+        let no_key_in_item = r#"{"CustomJavaScripts":{"key":"Name","items":[{"Enabled":true}]}}"#;
+        assert!(spec(no_key_in_item)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("has no key Name"));
+        let twice = r#"{"CustomJavaScripts":{"key":"Name","items":[{"Name":"A","Enabled":true},{"Name":"A","Enabled":false}]}}"#;
+        assert!(spec(twice).err().unwrap().to_string().contains("twice"));
+        let only_key = r#"{"CustomJavaScripts":{"key":"Name","items":[{"Name":"A"}]}}"#;
+        assert!(spec(only_key)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("no field besides"));
+        let empty = r#"{"CustomJavaScripts":{"key":"Name","items":[]}}"#;
+        assert!(spec(empty).is_err());
+        let misspelt = r#"{"CustomJavaScripts":{"key":"Name","item":[{"Name":"A"}]}}"#;
+        assert!(spec(misspelt).err().unwrap().to_string().contains("item"));
+        let both = r#"{"f5a34f7b2e8a4e6aa7223a216a81b374":{"name":"X","set":{"CustomJavaScripts":[]},"lists":{"CustomJavaScripts":{"key":"Name","items":[{"Name":"A","Enabled":true}]}}}}"#;
+        assert!(jellyfin("plugin-configurations", both)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("both in set and in lists"));
     }
 
     #[test]

@@ -16,6 +16,7 @@ use crate::{
     error::Error,
     paths,
     secret::Secret,
+    spec::ListItems,
 };
 
 pub const SYSTEM_INFO: Endpoint = Endpoint {
@@ -520,11 +521,123 @@ const HIDDEN: &str = "(hidden)";
 
 /// One plugin to configure. `secrets` maps a path to the value read from a
 /// systemd credential; the value never appears in a change or an error.
+/// `lists` names entries of lists other writers share (design §8).
 pub struct PluginTarget {
     pub id: String,
     pub name: String,
     pub set: BTreeMap<String, Value>,
     pub secrets: BTreeMap<String, Secret>,
+    pub lists: BTreeMap<String, ListItems>,
+}
+
+/// A value short enough for one line of a change. A script of three
+/// kilobytes says nothing more in full than its beginning and its length.
+fn shortened(value: &Value) -> String {
+    const KEEP: usize = 60;
+    let text = value.to_string();
+    let length = text.chars().count();
+    if length <= KEEP + 20 {
+        return text;
+    }
+    let start: String = text.chars().take(KEEP).collect();
+    format!("{start}… ({length} characters)")
+}
+
+/// `name=value` of a keyed item, for changes and errors.
+fn item_label(path: &str, list: &ListItems, item: &Map<String, Value>) -> String {
+    let key = item.get(&list.key).and_then(Value::as_str).unwrap_or("");
+    format!("{path}[{}={key}]", list.key)
+}
+
+/// The entry of `entries` whose key equals the item's; the first one if the
+/// service carries the key twice.
+fn entry_for<'a>(
+    entries: &'a [Value],
+    list: &ListItems,
+    item: &Map<String, Value>,
+) -> Option<&'a Map<String, Value>> {
+    entries
+        .iter()
+        .filter_map(Value::as_object)
+        .find(|entry| entry.get(&list.key) == item.get(&list.key))
+}
+
+/// The differences between the keyed items and the list at `path`. A path
+/// that is not a list, or a field an existing entry does not carry, goes to
+/// `missing`.
+fn compare_list(
+    subject: &str,
+    document: &Value,
+    path: &str,
+    list: &ListItems,
+    missing: &mut Vec<String>,
+) -> Vec<Change> {
+    let Some(Value::Array(entries)) = paths::get(document, path) else {
+        missing.push(format!("{subject}: {path} (a list)"));
+        return Vec::new();
+    };
+    let mut changes = Vec::new();
+    for item in &list.items {
+        let label = item_label(path, list, item);
+        let Some(entry) = entry_for(entries, list, item) else {
+            changes.push(Change {
+                subject: subject.to_string(),
+                field: label,
+                current: "(missing)".to_string(),
+                desired: "(added)".to_string(),
+            });
+            continue;
+        };
+        for (field, desired) in item {
+            match entry.get(field) {
+                None => missing.push(format!("{subject}: {label}.{field}")),
+                Some(current) if current != desired => changes.push(Change {
+                    subject: subject.to_string(),
+                    field: format!("{label}.{field}"),
+                    current: shortened(current),
+                    desired: shortened(desired),
+                }),
+                Some(_) => {}
+            }
+        }
+    }
+    changes
+}
+
+/// `document` with the keyed items merged into the list at `path`: fields of
+/// a matching entry replaced, a missing item appended, every other entry left
+/// where it was.
+fn with_list(
+    subject: &str,
+    document: &mut Value,
+    path: &str,
+    list: &ListItems,
+) -> Result<(), Error> {
+    let Some(Value::Array(entries)) = paths::get(document, path) else {
+        return Err(Error::MissingField(vec![format!(
+            "{subject}: {path} (a list)"
+        )]));
+    };
+    let mut entries = entries.clone();
+    for item in &list.items {
+        let found = entries
+            .iter_mut()
+            .filter_map(Value::as_object_mut)
+            .find(|entry| entry.get(&list.key) == item.get(&list.key));
+        match found {
+            Some(entry) => {
+                for (field, value) in item {
+                    entry.insert(field.clone(), value.clone());
+                }
+            }
+            None => entries.push(Value::Object(item.clone())),
+        }
+    }
+    if paths::set(document, path, Value::Array(entries)) {
+        Ok(())
+    } else {
+        Err(Error::MissingField(vec![format!("{subject}: {path}")]))
+    }
 }
 
 pub struct PluginConfigurations {
@@ -571,6 +684,15 @@ impl PluginConfigurations {
                     desired: format!("{HIDDEN} from its credential"),
                 }),
             }
+        }
+        for (path, list) in &target.lists {
+            changes.extend(compare_list(
+                &target.name,
+                configuration,
+                path,
+                list,
+                missing,
+            ));
         }
         changes
     }
@@ -673,6 +795,9 @@ impl Task for PluginConfigurations {
                         target.name
                     )]));
                 }
+            }
+            for (path, list) in &target.lists {
+                with_list(&target.name, &mut updated, path, list)?;
             }
             let path = PLUGIN_CONFIGURATION_WRITE
                 .path
@@ -940,6 +1065,7 @@ mod tests {
                     )]
                     .into_iter()
                     .collect(),
+                    lists: BTreeMap::new(),
                 },
                 PluginTarget {
                     id: MEDIATHEK.to_string(),
@@ -949,6 +1075,7 @@ mod tests {
                         ("WizardCompleted", json!(true)),
                     ]),
                     secrets: BTreeMap::new(),
+                    lists: BTreeMap::new(),
                 },
             ],
         }
@@ -1048,6 +1175,142 @@ mod tests {
             err,
             "the answer has no such field: Jellyfin Oscars: OmdbKey"
         );
+    }
+
+    const INJECTOR: &str = "f5a34f7b2e8a4e6aa7223a216a81b374";
+
+    fn injector(items: Vec<Value>) -> PluginConfigurations {
+        PluginConfigurations {
+            plugins: vec![PluginTarget {
+                id: INJECTOR.to_string(),
+                name: "JavaScript Injector".to_string(),
+                set: fields(&[("DisableScriptInjectionMiddleware", json!(false))]),
+                secrets: BTreeMap::new(),
+                lists: [(
+                    "CustomJavaScripts".to_string(),
+                    ListItems {
+                        key: "Name".to_string(),
+                        items: items
+                            .into_iter()
+                            .map(|v| v.as_object().unwrap().clone())
+                            .collect(),
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            }],
+        }
+    }
+
+    fn injector_transport(configuration: &str) -> FakeTransport {
+        FakeTransport::default()
+            .on_get(PLUGINS.path, vec![ok(PLUGINS_JSON)])
+            .on_get(
+                &format!("/Plugins/{INJECTOR}/Configuration"),
+                vec![ok(configuration)],
+            )
+            .on_put(vec![Step::Answer(204, String::new())])
+    }
+
+    /// The recorded host entry, as the spec would name it.
+    fn recorded_entry() -> Value {
+        let recorded: Value = serde_json::from_str(&plugin_file(INJECTOR)).unwrap();
+        recorded["CustomJavaScripts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["Name"] == "Skin-Manager-Vorgabe")
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn a_keyed_list_item_that_already_matches_is_unchanged() {
+        let task = injector(vec![recorded_entry()]);
+        let t = injector_transport(&plugin_file(INJECTOR));
+        assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn a_changed_field_of_the_own_item_is_one_change_and_foreign_items_stay() {
+        let mut wanted = recorded_entry();
+        wanted["Enabled"] = json!(false);
+        let task = injector(vec![wanted]);
+        let t = injector_transport(&plugin_file(INJECTOR));
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        assert_eq!(changes.len(), 1, "{changes:?}");
+        assert_eq!(
+            changes[0].to_string(),
+            "JavaScript Injector: CustomJavaScripts[Name=Skin-Manager-Vorgabe].Enabled true -> false"
+        );
+        task.write(&t, &current).unwrap();
+        let sent: Value = serde_json::from_str(&t.written.borrow()[0].1).unwrap();
+        let mut expected: Value = serde_json::from_str(&plugin_file(INJECTOR)).unwrap();
+        for e in expected["CustomJavaScripts"].as_array_mut().unwrap() {
+            if e["Name"] == "Skin-Manager-Vorgabe" {
+                e["Enabled"] = json!(false);
+            }
+        }
+        // Everything else byte for byte: PluginJavaScripts belong to the
+        // plugins and must survive, in their order.
+        assert_eq!(sent, expected);
+    }
+
+    #[test]
+    fn a_missing_item_is_appended_after_the_foreign_ones() {
+        let mut recorded: Value = serde_json::from_str(&plugin_file(INJECTOR)).unwrap();
+        recorded["CustomJavaScripts"] = json!([{"Name": "Fremd", "Script": "x", "Enabled": true, "RequiresAuthentication": false}]);
+        let task = injector(vec![recorded_entry()]);
+        let t = injector_transport(&recorded.to_string());
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            changes[0].to_string(),
+            "JavaScript Injector: CustomJavaScripts[Name=Skin-Manager-Vorgabe] (missing) -> (added)"
+        );
+        task.write(&t, &current).unwrap();
+        let sent: Value = serde_json::from_str(&t.written.borrow()[0].1).unwrap();
+        let names: Vec<&str> = sent["CustomJavaScripts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["Name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["Fremd", "Skin-Manager-Vorgabe"]);
+    }
+
+    #[test]
+    fn a_list_path_that_is_not_a_list_is_an_error() {
+        let mut task = injector(vec![recorded_entry()]);
+        let list = task.plugins[0].lists.remove("CustomJavaScripts").unwrap();
+        task.plugins[0]
+            .lists
+            .insert("DisableScriptInjectionMiddleware".to_string(), list);
+        task.plugins[0].set.clear();
+        let t = injector_transport(&plugin_file(INJECTOR));
+        let err = task
+            .diff(&task.read(&t).unwrap())
+            .err()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            err,
+            "the answer has no such field: JavaScript Injector: DisableScriptInjectionMiddleware (a list)"
+        );
+    }
+
+    #[test]
+    fn a_long_value_is_shortened_in_the_change() {
+        let mut wanted = recorded_entry();
+        wanted["Script"] = json!("x".repeat(500));
+        let task = injector(vec![wanted]);
+        let t = injector_transport(&plugin_file(INJECTOR));
+        let changes = task.diff(&task.read(&t).unwrap()).unwrap();
+        let shown = changes[0].to_string();
+        assert!(shown.len() < 260, "{shown}");
+        assert!(shown.contains("…"), "{shown}");
     }
 
     #[test]
