@@ -252,7 +252,28 @@ contract, and the host documents its side in its own language.
   entries byte-identical to the morning's recording. Deployed as host
   generation 734; the unit's first run reported `unchanged` for both.
 
-## 5. Not in the pilot
+## 5. Second task: `quality-profiles` (v0.2.0, 2026-09-13)
+
+Replaces the host's `notnagelstufe` unit: every quality profile of Radarr and
+Sonarr must allow `Unknown`, the lowest rung, so a badly named release can be
+grabbed when nothing better exists.
+
+- **Only allowing.** The ladder itself belongs to whoever defines profiles
+  (Recyclarr with TRaSH templates on that host). converge flips `allowed` on
+  an existing top-level item; a profile without that item is an error naming
+  it, not something to rebuild.
+- **Groups keep their shape.** A group has no `quality` key; the item type
+  skips serializing an absent quality, and nested `items` travel in the
+  flattened map. Checked against the recorded profiles byte for byte.
+- **One PUT per differing profile** to `/api/v3/qualityprofile/{id}`; errors
+  name the filled-in path.
+- **The schema check follows lists.** `QualityProfileResource.items` is a
+  list of `QualityProfileQualityItemResource`; before v0.2.0 the check
+  stopped at "array" and never compared the element's fields — the deployed
+  versions passed for the wrong reason. It now descends and reports a list of
+  the wrong component.
+
+## 6. Not in the pilot
 
 - Other services and tasks (Jellyfin, Authentik, Seerr, …).
 - TLS, JSON output, a NixOS module.

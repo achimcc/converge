@@ -95,6 +95,12 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::QualityProfiles(policy) => {
+            let task = arr::QualityProfiles {
+                allow_in_every_profile: policy.allow_in_every_profile.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
     }
     .map_err(fail)?;
     println!("{label}: service version {}", report.version);

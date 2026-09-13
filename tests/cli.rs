@@ -58,7 +58,7 @@ fn schema_check_passes_for_the_vendored_file() {
     // Exit 0 alone would also pass for a program that does nothing.
     assert!(
         String::from_utf8_lossy(&out.stdout)
-            .contains("radarr: 3 endpoints and their wire types match"),
+            .contains("radarr: 5 endpoints and their wire types match"),
         "{}",
         String::from_utf8_lossy(&out.stdout)
     );
@@ -175,4 +175,58 @@ fn a_missing_credential_directory_is_reported_by_name() {
         "{stderr}"
     );
     assert!(server.requests().is_empty(), "no request without a key");
+}
+
+#[test]
+fn quality_profiles_plan_over_http() {
+    const PROFILES: &str = include_str!("fixtures/sonarr-4.0.19.2979/qualityprofile.json");
+    const SONARR_STATUS: &str = include_str!("fixtures/sonarr-4.0.19.2979/system-status.json");
+    let mut off: serde_json::Value = serde_json::from_str(PROFILES).unwrap();
+    for item in off[0]["items"].as_array_mut().unwrap() {
+        if item["quality"]["name"] == "Unknown" {
+            item["allowed"] = false.into();
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("sonarr-api-key"), "k\n").unwrap();
+    for (body, code, expect) in [
+        (
+            PROFILES.to_string(),
+            0,
+            "sonarr quality-profiles: unchanged",
+        ),
+        (
+            off.to_string(),
+            2,
+            "would change Dual Language, sonst Deutsch (1080p): Unknown: allowed false -> true",
+        ),
+    ] {
+        let server = Server::start(vec![
+            ("GET", "/api/v3/system/status", 200, SONARR_STATUS.into()),
+            ("GET", "/api/v3/qualityprofile", 200, body),
+        ]);
+        let spec = dir.path().join("profiles.json");
+        std::fs::write(
+            &spec,
+            format!(
+                r#"{{"service":"sonarr","base_url":"{}","api_key_credential":"sonarr-api-key","task":"quality-profiles","desired":{{"allow_in_every_profile":["Unknown"]}}}}"#,
+                server.base_url()
+            ),
+        )
+        .unwrap();
+        let out = converge()
+            .arg("plan")
+            .arg(&spec)
+            .env("CREDENTIALS_DIRECTORY", dir.path())
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(
+            out.status.code(),
+            Some(code),
+            "{stdout}{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(stdout.contains(expect), "{stdout}");
+    }
 }

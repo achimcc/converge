@@ -161,6 +161,8 @@ fn compare(
                     .unwrap_or("untyped");
                 if their_type != our_name {
                     findings.push(format!("{at}: {their_type} there, {our_name} here"));
+                } else if our_name == "array" {
+                    compare_list(findings, &at, our, their, defs, openapi);
                 }
             }
             (ours, theirs) => findings.push(format!(
@@ -171,6 +173,39 @@ fn compare(
                 ))
             )),
         }
+    }
+}
+
+/// Follows a list into its elements. Without this, `items: Vec<T>` would match
+/// any array and the fields of `T` would never be compared.
+fn compare_list(
+    findings: &mut Vec<String>,
+    at: &str,
+    ours: &Value,
+    theirs: &Value,
+    defs: Option<&Value>,
+    openapi: &Value,
+) {
+    let our_element = ours
+        .pointer("/items/$ref")
+        .and_then(Value::as_str)
+        .map(|r| r.trim_start_matches("#/$defs/"));
+    let their_element = theirs
+        .pointer("/items/$ref")
+        .and_then(Value::as_str)
+        .map(|r| r.strip_prefix(COMPONENTS).unwrap_or(r));
+    match (our_element, their_element) {
+        // A list of plain values on both sides: nothing further to follow.
+        (None, None) => {}
+        (Some(ours), Some(theirs)) if ours == theirs => match defs.and_then(|d| d.get(ours)) {
+            Some(nested) => compare(findings, ours, nested, defs, openapi),
+            None => findings.push(format!("{at}: wire type {ours} is not defined")),
+        },
+        (ours, theirs) => findings.push(format!(
+            "{at}: a list of {} there, of {} here",
+            theirs.unwrap_or("plain values"),
+            ours.unwrap_or("plain values")
+        )),
     }
 }
 

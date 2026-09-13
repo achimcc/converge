@@ -30,7 +30,17 @@ pub const QUALITY_UPDATE: Endpoint = Endpoint {
     request: Some(Shape::List("QualityDefinitionResource")),
     response: None,
 };
-pub const ENDPOINTS: [Endpoint; 3] = [SYSTEM_STATUS, QUALITY_LIST, QUALITY_UPDATE];
+pub mod profiles;
+
+pub use profiles::{QualityProfiles, PROFILE_LIST, PROFILE_UPDATE};
+
+pub const ENDPOINTS: [Endpoint; 5] = [
+    SYSTEM_STATUS,
+    QUALITY_LIST,
+    QUALITY_UPDATE,
+    PROFILE_LIST,
+    PROFILE_UPDATE,
+];
 
 /// The wire types, each named exactly like its OpenAPI component. Their
 /// fields are what `schema-check` compares -- derived, not listed by hand.
@@ -38,7 +48,34 @@ pub fn wire_types() -> Vec<schemars::Schema> {
     vec![
         schemars::schema_for!(SystemResource),
         schemars::schema_for!(QualityDefinitionResource),
+        schemars::schema_for!(profiles::QualityProfileResource),
     ]
+}
+
+/// Readiness for Radarr and Sonarr: the status endpoint answers with a
+/// version. A refused key is fatal; anything else is worth waiting for.
+pub fn probe(t: &dyn Transport) -> Result<String, Probe> {
+    let reply = t
+        .get(SYSTEM_STATUS.path)
+        .map_err(|e| Probe::NotYet(e.to_string()))?;
+    match reply.status {
+        200 => {}
+        401 | 403 => {
+            return Err(Probe::Fatal(Error::Status {
+                method: SYSTEM_STATUS.method,
+                path: SYSTEM_STATUS.path.to_string(),
+                status: reply.status,
+                validation: vec!["the API key was refused".to_string()],
+            }))
+        }
+        other => return Err(Probe::NotYet(format!("HTTP {other}"))),
+    }
+    let status: SystemResource = serde_json::from_str(&reply.body)
+        .map_err(|e| Probe::NotYet(format!("unexpected answer: {e}")))?;
+    status
+        .version
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| Probe::NotYet("the answer has no version".to_string()))
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -83,27 +120,7 @@ impl Task for QualityDefinitions {
     type Current = Vec<QualityDefinitionResource>;
 
     fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
-        let reply = t
-            .get(SYSTEM_STATUS.path)
-            .map_err(|e| Probe::NotYet(e.to_string()))?;
-        match reply.status {
-            200 => {}
-            401 | 403 => {
-                return Err(Probe::Fatal(Error::Status {
-                    method: SYSTEM_STATUS.method,
-                    path: SYSTEM_STATUS.path.to_string(),
-                    status: reply.status,
-                    validation: vec!["the API key was refused".to_string()],
-                }))
-            }
-            other => return Err(Probe::NotYet(format!("HTTP {other}"))),
-        }
-        let status: SystemResource = serde_json::from_str(&reply.body)
-            .map_err(|e| Probe::NotYet(format!("unexpected answer: {e}")))?;
-        status
-            .version
-            .filter(|v| !v.is_empty())
-            .ok_or_else(|| Probe::NotYet("the answer has no version".to_string()))
+        probe(t)
     }
 
     fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
@@ -354,7 +371,7 @@ mod tests {
         assert!(err.contains("empty list"), "{err}");
         let nameless = r#"[{"quality":{"id":0},"minSize":0}]"#;
         let err = t.read(&listing(nameless)).err().unwrap().to_string();
-        assert!(err.contains("no quality name"), "{err}");
+        assert!(err.contains("has no name"), "{err}");
         let err = t
             .read(&listing(r#"[{"minSize":0}]"#))
             .err()
@@ -428,6 +445,13 @@ mod tests {
             .iter()
             .map(|s| s.as_value()["title"].as_str().unwrap().to_string())
             .collect();
-        assert_eq!(titles, ["SystemResource", "QualityDefinitionResource"]);
+        assert_eq!(
+            titles,
+            [
+                "SystemResource",
+                "QualityDefinitionResource",
+                "QualityProfileResource"
+            ]
+        );
     }
 }

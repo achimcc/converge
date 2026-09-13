@@ -19,9 +19,13 @@ script should have been:
 
 ## Status
 
-Early. **v0.1.0** — one task: the quality size limits of **Radarr** and
-**Sonarr** (API v3). Written for one host, where it replaces a shell unit.
-More tasks come only after this one has been evaluated.
+Early. **v0.2.0** — two tasks for **Radarr** and **Sonarr** (API v3), each
+replacing a shell unit on the host it was written for:
+
+| task | desired state |
+|---|---|
+| `quality-definitions` | size limits (MB per minute) per quality |
+| `quality-profiles` | qualities every profile must allow |
 
 ## A spec
 
@@ -43,6 +47,19 @@ Every key is required and unknown keys are an error, so `prefered` fails
 instead of being ignored. The key itself is read from the systemd credential
 named in `api_key_credential` (`$CREDENTIALS_DIRECTORY/<name>`). Qualities the
 spec does not name are left as they are.
+
+A `quality-profiles` spec only allows, it never takes a quality away, and it
+only touches rungs that already exist at the top level of a profile's ladder:
+
+```json
+{
+  "service": "sonarr",
+  "base_url": "http://localhost:8989",
+  "api_key_credential": "sonarr-api-key",
+  "task": "quality-profiles",
+  "desired": { "allow_in_every_profile": ["Unknown"] }
+}
+```
 
 ## Commands
 

@@ -78,6 +78,31 @@ fn a_missing_endpoint_or_wrong_body_is_found() {
     );
 }
 
+#[test]
+fn a_renamed_property_inside_a_list_is_found() {
+    // QualityProfileResource.items is a list of QualityProfileQualityItemResource;
+    // the check has to follow the list, not stop at "array".
+    let mut d = doc("radarr-6.3.0.10514");
+    let props = properties(&mut d, "QualityProfileQualityItemResource");
+    let v = props.remove("allowed").unwrap();
+    props.insert("isAllowed".into(), v);
+    assert_eq!(
+        findings(&d),
+        ["QualityProfileQualityItemResource.allowed: not in the OpenAPI description"]
+    );
+}
+
+#[test]
+fn a_list_of_the_wrong_component_is_found() {
+    let mut d = doc("sonarr-4.0.19.2979");
+    properties(&mut d, "QualityProfileResource")["items"]["items"]["$ref"] =
+        "#/components/schemas/Quality".into();
+    assert_eq!(
+        findings(&d),
+        ["QualityProfileResource.items: a list of Quality there, of QualityProfileQualityItemResource here"]
+    );
+}
+
 mod strict {
     use super::JsonSchema;
 

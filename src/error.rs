@@ -33,8 +33,10 @@ pub enum Error {
     NotReady { waited_secs: u64, last: String },
     #[error("{path} returned an empty list")]
     EmptyList { path: String },
-    #[error("entry {index} of {path} has no quality name")]
+    #[error("entry {index} of {path} has no name")]
     MissingName { path: String, index: usize },
+    #[error("no top-level item for these qualities: {}", .0.join("; "))]
+    MissingItem(Vec<String>),
     #[error("the service does not know these qualities from the spec: {}", .0.join(", "))]
     UnknownQualities(Vec<String>),
     #[error("written, but after {waited_secs} s these still differ: {}", .remaining.join("; "))]

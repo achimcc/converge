@@ -5,6 +5,9 @@ Recorded 2026-09-13 around 11:47 CEST from a running Radarr 6.3.0.10514
 
 - `system-status.json` — `GET /api/v3/system/status`
 - `qualitydefinition.json` — `GET /api/v3/qualitydefinition`
+- `qualityprofile.json` — `GET /api/v3/qualityprofile`, recorded 2026-09-13
+  around 12:50 CEST the same way. Groups (`items` without a `quality`
+  key) and the top-level `Unknown` item come from here.
 
 Both were recorded verbatim with
 

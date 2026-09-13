@@ -27,6 +27,7 @@ impl Service {
 #[serde(rename_all = "kebab-case")]
 enum TaskName {
     QualityDefinitions,
+    QualityProfiles,
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,9 +84,18 @@ pub fn show(value: Option<f64>) -> String {
     value.map_or_else(|| "unlimited".to_string(), |v| v.to_string())
 }
 
+/// Which qualities every quality profile must allow. Only allowing is
+/// possible: converge never takes a quality away from a profile.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProfilePolicy {
+    pub allow_in_every_profile: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Desired {
     QualityDefinitions(BTreeMap<String, SizeLimits>),
+    QualityProfiles(ProfilePolicy),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -132,6 +142,23 @@ impl Spec {
                 }
                 Desired::QualityDefinitions(map)
             }
+            TaskName::QualityProfiles => {
+                let policy: ProfilePolicy = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                let names = &policy.allow_in_every_profile;
+                if names.is_empty() {
+                    return Err(invalid(
+                        "desired.allow_in_every_profile names no quality".to_string(),
+                    ));
+                }
+                let mut seen = std::collections::BTreeSet::new();
+                if let Some(twice) = names.iter().find(|n| !seen.insert(n.as_str())) {
+                    return Err(invalid(format!(
+                        "desired.allow_in_every_profile names {twice:?} twice"
+                    )));
+                }
+                Desired::QualityProfiles(policy)
+            }
         };
         Ok(Spec {
             path: path.to_path_buf(),
@@ -145,6 +172,7 @@ impl Spec {
     pub fn task_name(&self) -> &'static str {
         match self.desired {
             Desired::QualityDefinitions(_) => "quality-definitions",
+            Desired::QualityProfiles(_) => "quality-profiles",
         }
     }
 }
@@ -173,7 +201,9 @@ mod tests {
         let spec = parse(GOOD).unwrap();
         assert_eq!(spec.service, Service::Radarr);
         assert_eq!(spec.task_name(), "quality-definitions");
-        let Desired::QualityDefinitions(map) = spec.desired;
+        let Desired::QualityDefinitions(map) = spec.desired else {
+            panic!("wrong task")
+        };
         assert_eq!(
             map["Bluray-1080p"],
             SizeLimits {
@@ -182,6 +212,30 @@ mod tests {
                 max: None
             }
         );
+    }
+
+    const PROFILES: &str = r#"{"service":"sonarr","base_url":"http://localhost:8989","api_key_credential":"sonarr-api-key","task":"quality-profiles","desired":{"allow_in_every_profile":["Unknown"]}}"#;
+
+    #[test]
+    fn parses_a_quality_profiles_spec() {
+        let spec = parse(PROFILES).unwrap();
+        assert_eq!(spec.task_name(), "quality-profiles");
+        assert_eq!(
+            spec.desired,
+            Desired::QualityProfiles(ProfilePolicy {
+                allow_in_every_profile: vec!["Unknown".to_string()]
+            })
+        );
+    }
+
+    #[test]
+    fn a_quality_profiles_spec_is_strict() {
+        let misspelt = PROFILES.replace("allow_in_every_profile", "allow_everywhere");
+        let err = parse(&misspelt).err().unwrap().to_string();
+        assert!(err.contains("allow_everywhere"), "{err}");
+        assert!(parse(&PROFILES.replace(r#"["Unknown"]"#, "[]")).is_err());
+        let twice = PROFILES.replace(r#"["Unknown"]"#, r#"["Unknown","Unknown"]"#);
+        assert!(parse(&twice).is_err());
     }
 
     #[test]

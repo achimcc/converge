@@ -79,12 +79,23 @@ impl Transport for HttpTransport {
 /// Accepts the listed statuses. Anything else becomes an error that carries
 /// the validation messages of the body -- and nothing else from it.
 pub fn expect_status(ep: &Endpoint, reply: &Reply, accepted: &[u16]) -> Result<(), Error> {
+    expect_status_at(ep.method, ep.path, reply, accepted)
+}
+
+/// The same for a path with its parameters filled in, so the error names the
+/// object (`/api/v3/qualityprofile/7`) and not the template.
+pub fn expect_status_at(
+    method: &'static str,
+    path: &str,
+    reply: &Reply,
+    accepted: &[u16],
+) -> Result<(), Error> {
     if accepted.contains(&reply.status) {
         return Ok(());
     }
     Err(Error::Status {
-        method: ep.method,
-        path: ep.path.to_string(),
+        method,
+        path: path.to_string(),
         status: reply.status,
         validation: validation_messages(&reply.body),
     })
