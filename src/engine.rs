@@ -9,7 +9,7 @@ use crate::{client::Transport, clock::Clock, error::Error};
 #[derive(Debug, Clone, PartialEq)]
 pub struct Change {
     pub subject: String,
-    pub field: &'static str,
+    pub field: String,
     pub current: String,
     pub desired: String,
 }

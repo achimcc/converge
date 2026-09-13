@@ -112,4 +112,14 @@ impl Transport for FakeTransport {
         let step = take(Some(&mut *self.puts.borrow_mut()));
         play(step, "PUT", path)
     }
+
+    /// Shares the write queue with `put_json`: a test scripts the answers to
+    /// writes, whichever verb the service uses.
+    fn post_json(&self, path: &str, body: &str) -> Result<Reply, Error> {
+        self.written
+            .borrow_mut()
+            .push((path.to_string(), body.to_string()));
+        let step = take(Some(&mut *self.puts.borrow_mut()));
+        play(step, "POST", path)
+    }
 }

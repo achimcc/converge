@@ -172,7 +172,7 @@ impl Task for QualityDefinitions {
                 if have != wanted {
                     changes.push(Change {
                         subject: name.to_string(),
-                        field,
+                        field: field.to_string(),
                         current: show(have),
                         desired: show(wanted),
                     });

@@ -37,6 +37,10 @@ pub enum Error {
     MissingName { path: String, index: usize },
     #[error("no top-level item for these qualities: {}", .0.join("; "))]
     MissingItem(Vec<String>),
+    #[error("the answer has no such field: {}", .0.join("; "))]
+    MissingField(Vec<String>),
+    #[error("not found on the service: {}", .0.join("; "))]
+    NotFound(Vec<String>),
     #[error("the service does not know these qualities from the spec: {}", .0.join(", "))]
     UnknownQualities(Vec<String>),
     #[error("written, but after {waited_secs} s these still differ: {}", .remaining.join("; "))]

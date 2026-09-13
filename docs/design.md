@@ -273,8 +273,62 @@ grabbed when nothing better exists.
   versions passed for the wrong reason. It now descends and reports a list of
   the wrong component.
 
-## 6. Not in the pilot
+## 6. Jellyfin: fields by path (v0.3.0, 2026-09-13)
 
-- Other services and tasks (Jellyfin, Authentik, Seerr, …).
+Jellyfin's `ServerConfiguration` has 56 properties and `LibraryOptions` 42;
+the host sets two or three of them at a time, always the same way: read the
+whole object, change a field, post the whole object back (the endpoint
+replaces it), read back. Typing every property would be busywork, and a
+typed subset would need a release for every new setting. Decided with the
+host's owner on 2026-09-13: **the spec names fields by path, and the path is
+checked** — not the Rust code.
+
+### The spec
+
+```json
+{ "service": "jellyfin", "base_url": "http://localhost:8096",
+  "api_key_credential": "jellyfin-api-key", "task": "server-configuration",
+  "desired": { "TrickplayOptions.EnableKeyFrameOnlyExtraction": true,
+               "TrickplayOptions.EnableHwAcceleration": true } }
+```
+
+Three tasks, each over one object Jellyfin replaces as a whole:
+
+| task | read | write | desired |
+|---|---|---|---|
+| `server-configuration` | `GET /System/Configuration` | `POST /System/Configuration` | path → value in `ServerConfiguration` |
+| `library-options` | `GET /Library/VirtualFolders` | `POST /Library/VirtualFolders/LibraryOptions` (`{Id, LibraryOptions}`) | `libraries` (names) and `set`: path → value in `LibraryOptions` |
+| `scheduled-task-triggers` | `GET /ScheduledTasks` | `POST /ScheduledTasks/{taskId}/Triggers` | `key_prefix` and `triggers`: the complete trigger list, compared on the keys the spec names |
+
+The key travels as `X-Emby-Token`. Readiness is `GET /System/Info` with a
+`Version`. Writes answer `204`.
+
+### How a path is checked
+
+- **At build time**, `converge schema-check --service jellyfin --openapi <file>
+  --spec <spec>` walks every path through the named OpenAPI component
+  (following `$ref` and the `allOf: [{$ref}]` Jellyfin uses), and checks the
+  value against the property: JSON type, `nullable` for `null`, and **enum
+  membership**. The last one is not decoration: on 2026-09-07 the host set a
+  trigger type the API accepted silently and never fired; `"Type": "Daily"`
+  now fails the build.
+- **At runtime**, every path must exist in the object Jellyfin returned —
+  intermediate objects included. A path the answer does not carry is an
+  error, never a key added on the way back.
+- **Plugin configurations** (a later stage) have no schema in the OpenAPI
+  file; for them only the runtime check and recorded answers apply, and the
+  documentation of that task says so.
+
+### What stays the same
+
+The engine: wait, read, diff, write only on difference, read back until the
+desired values are there, deadline. The whole object goes back with only the
+named fields changed; nothing else is touched. Libraries not named, tasks not
+matching the prefix, are left alone. A library name or key prefix that
+matches nothing is an error, not "nothing to do".
+
+## 7. Not in the pilot
+
+- Other services and tasks (Authentik, Seerr, …).
 - TLS, JSON output, a NixOS module.
 - Deleting things. `converge` only sets what the spec names.

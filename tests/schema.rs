@@ -103,6 +103,112 @@ fn a_list_of_the_wrong_component_is_found() {
     );
 }
 
+fn jellyfin() -> Value {
+    doc("jellyfin-10.11.11")
+}
+
+fn paths(component: &str, desired: serde_json::Value) -> Vec<String> {
+    let map = desired.as_object().unwrap().clone().into_iter().collect();
+    converge::schema::check_paths(&jellyfin(), component, &map)
+}
+
+#[test]
+fn a_known_path_with_the_right_type_passes() {
+    let found = paths(
+        "ServerConfiguration",
+        serde_json::json!({
+            "TrickplayOptions.EnableKeyFrameOnlyExtraction": true,
+            "TrickplayOptions.EnableHwAcceleration": true
+        }),
+    );
+    assert_eq!(found, Vec::<String>::new());
+    let found = paths(
+        "LibraryOptions",
+        serde_json::json!({"EnableTrickplayImageExtraction": true}),
+    );
+    assert_eq!(found, Vec::<String>::new());
+}
+
+#[test]
+fn a_misspelt_segment_is_found_with_the_component_it_is_missing_from() {
+    let found = paths(
+        "ServerConfiguration",
+        serde_json::json!({"TrickplayOptions.EnableHwAccel": true}),
+    );
+    assert_eq!(
+        found,
+        ["ServerConfiguration.TrickplayOptions.EnableHwAccel: TrickplayOptions has no property EnableHwAccel"]
+    );
+}
+
+#[test]
+fn a_wrong_value_type_is_found() {
+    let found = paths(
+        "ServerConfiguration",
+        serde_json::json!({"TrickplayOptions.EnableHwAcceleration": "yes"}),
+    );
+    assert_eq!(
+        found,
+        ["ServerConfiguration.TrickplayOptions.EnableHwAcceleration: expects boolean, the spec has a string"]
+    );
+}
+
+#[test]
+fn a_path_through_a_plain_value_is_found() {
+    let found = paths(
+        "LibraryOptions",
+        serde_json::json!({"EnableTrickplayImageExtraction.Deeper": true}),
+    );
+    assert_eq!(
+        found,
+        ["LibraryOptions.EnableTrickplayImageExtraction.Deeper: EnableTrickplayImageExtraction is not an object"]
+    );
+}
+
+#[test]
+fn a_trigger_type_outside_the_enum_is_found() {
+    // 2026-09-07 on the host: a trigger type the API accepted silently and
+    // never fired. The enum in the OpenAPI file turns it into a build error.
+    let list = serde_json::json!([{"Type": "Daily", "TimeOfDayTicks": 198000000000i64}]);
+    let found = converge::schema::check_objects(&jellyfin(), "TaskTriggerInfo", &list);
+    assert_eq!(
+        found,
+        ["TaskTriggerInfo[0].Type: \"Daily\" is not one of DailyTrigger, WeeklyTrigger, IntervalTrigger, StartupTrigger"]
+    );
+    let good = serde_json::json!([{"Type": "DailyTrigger", "TimeOfDayTicks": 198000000000i64}]);
+    assert_eq!(
+        converge::schema::check_objects(&jellyfin(), "TaskTriggerInfo", &good),
+        Vec::<String>::new()
+    );
+    let unknown_key = serde_json::json!([{"Type": "DailyTrigger", "TimeOfDay": 1}]);
+    assert_eq!(
+        converge::schema::check_objects(&jellyfin(), "TaskTriggerInfo", &unknown_key),
+        ["TaskTriggerInfo[0].TimeOfDay: TaskTriggerInfo has no property TimeOfDay"]
+    );
+}
+
+#[test]
+fn null_needs_a_nullable_property() {
+    let found = paths(
+        "ServerConfiguration",
+        serde_json::json!({"TrickplayOptions.EnableHwAcceleration": null}),
+    );
+    assert_eq!(
+        found,
+        ["ServerConfiguration.TrickplayOptions.EnableHwAcceleration: is not nullable, the spec has null"]
+    );
+}
+
+#[test]
+fn the_jellyfin_endpoints_and_wire_types_match() {
+    let found = check(
+        &jellyfin(),
+        &converge::services::jellyfin::ENDPOINTS,
+        &converge::services::jellyfin::wire_types(),
+    );
+    assert_eq!(found, Vec::<String>::new());
+}
+
 mod strict {
     use super::JsonSchema;
 

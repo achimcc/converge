@@ -65,6 +65,74 @@ fn schema_check_passes_for_the_vendored_file() {
 }
 
 #[test]
+fn schema_check_reads_jellyfin_specs_and_rejects_a_trigger_type_outside_the_enum() {
+    let openapi = format!(
+        "{}/openapi/jellyfin-10.11.11.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let spec = |name: &str, trigger: &str| {
+        let path = dir.path().join(name);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"service":"jellyfin","base_url":"http://localhost:8096","api_key_credential":"k","task":"scheduled-task-triggers","desired":{{"key_prefix":"Merge","triggers":[{{"Type":"{trigger}","TimeOfDayTicks":198000000000}}]}}}}"#
+            ),
+        )
+        .unwrap();
+        path
+    };
+    let good = spec("good.json", "DailyTrigger");
+    let out = converge()
+        .args([
+            "schema-check",
+            "--service",
+            "jellyfin",
+            "--openapi",
+            &openapi,
+            "--spec",
+        ])
+        .arg(&good)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("jellyfin: 7 endpoints and their wire types match"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("2 spec field(s) in 1 spec(s) match"),
+        "{stdout}"
+    );
+
+    let bad = spec("bad.json", "Daily");
+    let out = converge()
+        .args([
+            "schema-check",
+            "--service",
+            "jellyfin",
+            "--openapi",
+            &openapi,
+            "--spec",
+        ])
+        .arg(&bad)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("TaskTriggerInfo[0].Type: \"Daily\" is not one of"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn schema_check_fails_for_a_renamed_field() {
     let dir = tempfile::tempdir().unwrap();
     let original = std::fs::read_to_string(format!(

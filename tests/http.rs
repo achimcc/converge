@@ -11,6 +11,7 @@ use support::Server;
 fn transport(base: &str) -> HttpTransport {
     HttpTransport::new(
         base,
+        "X-Api-Key",
         Secret::new("s3cret-key-value".into()),
         Duration::from_secs(5),
     )
@@ -30,6 +31,22 @@ fn get_sends_the_key_as_a_header_and_returns_non_2xx_as_a_reply() {
 }
 
 #[test]
+fn the_header_name_is_the_callers() {
+    let server = Server::start(vec![("GET", "/a", 200, "{}".into())]);
+    HttpTransport::new(
+        &server.base_url(),
+        "X-Emby-Token",
+        Secret::new("t0ken".into()),
+        Duration::from_secs(5),
+    )
+    .get("/a")
+    .unwrap();
+    let headers = server.requests()[0].headers.to_ascii_lowercase();
+    assert!(headers.contains("x-emby-token: t0ken"), "{headers}");
+    assert!(!headers.contains("x-api-key"), "{headers}");
+}
+
+#[test]
 fn put_sends_json() {
     let server = Server::start(vec![("PUT", "/u", 202, String::new())]);
     let reply = transport(&server.base_url())
@@ -42,6 +59,20 @@ fn put_sends_json() {
         .headers
         .to_ascii_lowercase()
         .contains("content-type: application/json"));
+}
+
+#[test]
+fn post_sends_json() {
+    let server = Server::start(vec![("POST", "/p", 204, String::new())]);
+    let reply = transport(&server.base_url())
+        .post_json("/p", r#"{"b":2}"#)
+        .unwrap();
+    assert_eq!(reply.status, 204);
+    let seen = &server.requests()[0];
+    assert_eq!(
+        (seen.method.as_str(), seen.body.as_str()),
+        ("POST", r#"{"b":2}"#)
+    );
 }
 
 #[test]

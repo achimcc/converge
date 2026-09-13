@@ -12,16 +12,25 @@ pub struct Reply {
 pub trait Transport {
     fn get(&self, path: &str) -> Result<Reply, Error>;
     fn put_json(&self, path: &str, body: &str) -> Result<Reply, Error>;
+    fn post_json(&self, path: &str, body: &str) -> Result<Reply, Error>;
 }
 
 pub struct HttpTransport {
     agent: ureq::Agent,
     base_url: String,
+    header: &'static str,
     key: Secret,
 }
 
 impl HttpTransport {
-    pub fn new(base_url: &str, key: Secret, request_timeout: Duration) -> Self {
+    /// `header` is where the key goes: `X-Api-Key` for Radarr and Sonarr,
+    /// `X-Emby-Token` for Jellyfin.
+    pub fn new(
+        base_url: &str,
+        header: &'static str,
+        key: Secret,
+        request_timeout: Duration,
+    ) -> Self {
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(request_timeout))
             // A status is an answer, not a transport failure; the caller decides.
@@ -31,6 +40,7 @@ impl HttpTransport {
         Self {
             agent,
             base_url: base_url.trim_end_matches('/').to_string(),
+            header,
             key,
         }
     }
@@ -60,7 +70,7 @@ impl Transport for HttpTransport {
         let result = self
             .agent
             .get(format!("{}{path}", self.base_url))
-            .header("X-Api-Key", self.key.expose())
+            .header(self.header, self.key.expose())
             .call();
         Self::finish("GET", path, result)
     }
@@ -69,10 +79,20 @@ impl Transport for HttpTransport {
         let result = self
             .agent
             .put(format!("{}{path}", self.base_url))
-            .header("X-Api-Key", self.key.expose())
+            .header(self.header, self.key.expose())
             .content_type("application/json")
             .send(body);
         Self::finish("PUT", path, result)
+    }
+
+    fn post_json(&self, path: &str, body: &str) -> Result<Reply, Error> {
+        let result = self
+            .agent
+            .post(format!("{}{path}", self.base_url))
+            .header(self.header, self.key.expose())
+            .content_type("application/json")
+            .send(body);
+        Self::finish("POST", path, result)
     }
 }
 

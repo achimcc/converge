@@ -19,13 +19,17 @@ script should have been:
 
 ## Status
 
-Early. **v0.2.0** — two tasks for **Radarr** and **Sonarr** (API v3), each
-replacing a shell unit on the host it was written for:
+Early. **v0.3.0** — tasks for **Radarr**, **Sonarr** (API v3) and
+**Jellyfin** (10.11), each replacing a shell unit on the host it was written
+for:
 
-| task | desired state |
-|---|---|
-| `quality-definitions` | size limits (MB per minute) per quality |
-| `quality-profiles` | qualities every profile must allow |
+| service | task | desired state |
+|---|---|---|
+| Radarr, Sonarr | `quality-definitions` | size limits (MB per minute) per quality |
+| Radarr, Sonarr | `quality-profiles` | qualities every profile must allow |
+| Jellyfin | `server-configuration` | fields of `ServerConfiguration`, by path |
+| Jellyfin | `library-options` | fields of the named libraries' `LibraryOptions`, by path |
+| Jellyfin | `scheduled-task-triggers` | the trigger list of tasks whose key starts with a prefix |
 
 ## A spec
 
@@ -61,13 +65,32 @@ only touches rungs that already exist at the top level of a profile's ladder:
 }
 ```
 
+For Jellyfin, the spec names fields by path rather than converge declaring
+them in code — `ServerConfiguration` alone has 56 properties. The paths are
+checked all the same: at build time against the OpenAPI component (type,
+nullability, enum membership), at runtime against the object Jellyfin
+returns. A path the answer does not carry is an error, never an addition.
+
+```json
+{
+  "service": "jellyfin",
+  "base_url": "http://localhost:8096",
+  "api_key_credential": "jellyfin-api-key",
+  "task": "scheduled-task-triggers",
+  "desired": {
+    "key_prefix": "Merge",
+    "triggers": [ { "Type": "DailyTrigger", "TimeOfDayTicks": 198000000000 } ]
+  }
+}
+```
+
 ## Commands
 
 | command | does | exit |
 |---|---|---|
 | `converge apply [--deadline <s>] <spec>...` | reconcile, write, read back | 0 done, 1 any spec failed |
 | `converge plan [--deadline <s>] <spec>...` | show what `apply` would change | 0 equal, 2 differs, 1 error |
-| `converge schema-check --service <radarr\|sonarr> --openapi <file>` | compare the wire types with an OpenAPI file | 0 / 1 |
+| `converge schema-check --service <radarr\|sonarr\|jellyfin> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
 
 Several specs are processed in order; one failing does not skip the next.
 

@@ -12,6 +12,7 @@ use crate::error::Error;
 pub enum Service {
     Radarr,
     Sonarr,
+    Jellyfin,
 }
 
 impl Service {
@@ -19,7 +20,20 @@ impl Service {
         match self {
             Service::Radarr => "radarr",
             Service::Sonarr => "sonarr",
+            Service::Jellyfin => "jellyfin",
         }
+    }
+
+    /// The request header the API key travels in.
+    pub fn key_header(self) -> &'static str {
+        match self {
+            Service::Radarr | Service::Sonarr => "X-Api-Key",
+            Service::Jellyfin => "X-Emby-Token",
+        }
+    }
+
+    fn is_arr(self) -> bool {
+        matches!(self, Service::Radarr | Service::Sonarr)
     }
 }
 
@@ -28,6 +42,9 @@ impl Service {
 enum TaskName {
     QualityDefinitions,
     QualityProfiles,
+    ServerConfiguration,
+    LibraryOptions,
+    ScheduledTaskTriggers,
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,10 +109,41 @@ pub struct ProfilePolicy {
     pub allow_in_every_profile: Vec<String>,
 }
 
+/// Fields by path in each named library's `LibraryOptions`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LibrarySettings {
+    pub libraries: Vec<String>,
+    pub set: BTreeMap<String, serde_json::Value>,
+}
+
+/// The complete trigger list of every scheduled task whose key starts with
+/// `key_prefix`, compared on the keys each trigger object names.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskTriggers {
+    pub key_prefix: String,
+    pub triggers: Vec<serde_json::Map<String, serde_json::Value>>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Desired {
     QualityDefinitions(BTreeMap<String, SizeLimits>),
     QualityProfiles(ProfilePolicy),
+    ServerConfiguration(BTreeMap<String, serde_json::Value>),
+    LibraryOptions(LibrarySettings),
+    ScheduledTaskTriggers(TaskTriggers),
+}
+
+/// A non-empty map of well-formed dotted paths.
+fn field_paths(map: &BTreeMap<String, serde_json::Value>, what: &str) -> Result<(), String> {
+    if map.is_empty() {
+        return Err(format!("{what} names no field"));
+    }
+    match map.keys().find(|k| crate::paths::segments(k).is_none()) {
+        Some(bad) => Err(format!("{what}: {bad:?} is not a dotted path")),
+        None => Ok(()),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -126,6 +174,16 @@ impl Spec {
             return Err(invalid(format!(
                 "base_url must start with http:// (this version links no TLS), got {:?}",
                 raw.base_url
+            )));
+        }
+        let arr_task = matches!(
+            raw.task,
+            TaskName::QualityDefinitions | TaskName::QualityProfiles
+        );
+        if arr_task != raw.service.is_arr() {
+            return Err(invalid(format!(
+                "the task does not belong to service {:?}",
+                raw.service.name()
             )));
         }
         let desired = match raw.task {
@@ -159,6 +217,36 @@ impl Spec {
                 }
                 Desired::QualityProfiles(policy)
             }
+            TaskName::ServerConfiguration => {
+                let map: BTreeMap<String, serde_json::Value> = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                field_paths(&map, "desired").map_err(invalid)?;
+                Desired::ServerConfiguration(map)
+            }
+            TaskName::LibraryOptions => {
+                let settings: LibrarySettings = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if settings.libraries.is_empty() {
+                    return Err(invalid("desired.libraries names no library".to_string()));
+                }
+                field_paths(&settings.set, "desired.set").map_err(invalid)?;
+                Desired::LibraryOptions(settings)
+            }
+            TaskName::ScheduledTaskTriggers => {
+                let triggers: TaskTriggers = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if triggers.key_prefix.is_empty() {
+                    return Err(invalid("desired.key_prefix is empty".to_string()));
+                }
+                // An empty list would delete every trigger. converge does not
+                // delete; say so instead of doing it.
+                if triggers.triggers.is_empty() {
+                    return Err(invalid(
+                        "desired.triggers is empty -- that would remove every trigger".to_string(),
+                    ));
+                }
+                Desired::ScheduledTaskTriggers(triggers)
+            }
         };
         Ok(Spec {
             path: path.to_path_buf(),
@@ -173,6 +261,9 @@ impl Spec {
         match self.desired {
             Desired::QualityDefinitions(_) => "quality-definitions",
             Desired::QualityProfiles(_) => "quality-profiles",
+            Desired::ServerConfiguration(_) => "server-configuration",
+            Desired::LibraryOptions(_) => "library-options",
+            Desired::ScheduledTaskTriggers(_) => "scheduled-task-triggers",
         }
     }
 }
@@ -236,6 +327,78 @@ mod tests {
         assert!(parse(&PROFILES.replace(r#"["Unknown"]"#, "[]")).is_err());
         let twice = PROFILES.replace(r#"["Unknown"]"#, r#"["Unknown","Unknown"]"#);
         assert!(parse(&twice).is_err());
+    }
+
+    fn jellyfin(task: &str, desired: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"jellyfin","base_url":"http://localhost:8096","api_key_credential":"k","task":"{task}","desired":{desired}}}"#
+        ))
+    }
+
+    #[test]
+    fn parses_the_three_jellyfin_tasks() {
+        let spec = jellyfin(
+            "server-configuration",
+            r#"{"TrickplayOptions.EnableHwAcceleration": true}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.service.key_header(), "X-Emby-Token");
+        assert_eq!(spec.task_name(), "server-configuration");
+        let spec = jellyfin(
+            "library-options",
+            r#"{"libraries":["Filme"],"set":{"EnableTrickplayImageExtraction":true}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "library-options");
+        let spec = jellyfin(
+            "scheduled-task-triggers",
+            r#"{"key_prefix":"Merge","triggers":[{"Type":"DailyTrigger","TimeOfDayTicks":198000000000}]}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "scheduled-task-triggers");
+    }
+
+    #[test]
+    fn jellyfin_specs_are_strict() {
+        assert!(jellyfin("server-configuration", "{}").is_err(), "empty");
+        let bad_path = jellyfin("server-configuration", r#"{"A..B": 1}"#);
+        assert!(bad_path
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("not a dotted path"));
+        let unknown = jellyfin(
+            "library-options",
+            r#"{"libraries":["Filme"],"set":{"X":1},"extra":1}"#,
+        );
+        assert!(unknown.err().unwrap().to_string().contains("extra"));
+        assert!(jellyfin("library-options", r#"{"libraries":[],"set":{"X":1}}"#).is_err());
+        let wipe = jellyfin(
+            "scheduled-task-triggers",
+            r#"{"key_prefix":"Merge","triggers":[]}"#,
+        );
+        assert!(wipe
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("remove every trigger"));
+    }
+
+    #[test]
+    fn a_task_of_the_wrong_service_is_an_error() {
+        let err = parse(&GOOD.replace(r#""radarr""#, r#""jellyfin""#))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(err.contains("does not belong to service"), "{err}");
+        let err = jellyfin(
+            "quality-profiles",
+            r#"{"allow_in_every_profile":["Unknown"]}"#,
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(err.contains("does not belong to service"), "{err}");
     }
 
     #[test]

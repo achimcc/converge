@@ -128,7 +128,7 @@ impl Task for QualityProfiles {
                     None => missing.push(format!("{}: {quality}", profile_name(profile))),
                     Some(item) if !item.allowed => changes.push(Change {
                         subject: format!("{}: {quality}", profile_name(profile)),
-                        field: "allowed",
+                        field: "allowed".to_string(),
                         current: "false".to_string(),
                         desired: "true".to_string(),
                     }),
