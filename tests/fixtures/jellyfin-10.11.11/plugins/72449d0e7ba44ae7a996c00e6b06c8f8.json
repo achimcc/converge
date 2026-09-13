@@ -1,0 +1,7 @@
+{
+  "BazarrUrl": "http://10.0.10.10:6767",
+  "BazarrApiKey": "<masked>",
+  "EnableForMovies": true,
+  "EnableForEpisodes": true,
+  "SearchTimeoutSeconds": 25
+}

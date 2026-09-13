@@ -1,0 +1,12 @@
+{
+  "OmdbApiKey": "<masked>",
+  "CacheDurationHours": 168,
+  "EnableOscarEnrichment": true,
+  "EnableScheduledRefresh": false,
+  "RefreshBatchSize": 100,
+  "CreateOscarWinnersCollection": false,
+  "CreateOscarNomineesCollection": false,
+  "IncludeWinnersInNomineesCollection": false,
+  "SetDefaultArtworkForOscarCollections": true,
+  "ExcludedOscarCollectionLibraryIds": []
+}

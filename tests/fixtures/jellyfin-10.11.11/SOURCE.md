@@ -24,3 +24,19 @@ At recording time the service already held the state the host wants:
 trickplay extraction on for `Filme` and `Serien`, key-frame-only and hardware
 extraction on, and both Merge Versions tasks triggered daily at 05:30
 (`TimeOfDayTicks` 198000000000).
+
+## Plugins (recorded 2026-09-13 around 13:50 CEST)
+
+- `plugins.json` — `GET /Plugins`
+- `plugins/<id>.json` — `GET /Plugins/<id>/Configuration` for Jellyfin
+  Oscars, MDBList Ratings, Ratings, Bazarr, Media Bar, Mediathek Downloader
+  and Auto Collections.
+
+**These are masked, not verbatim.** Plugin configurations carry API keys.
+Before the answers left the host, every non-empty string field whose name
+matches `key|token|secret|passw|auth` (case-insensitive) was replaced with
+`"<masked>"` by `jq` on the host itself — four fields in total (`OmdbApiKey`,
+`MdbListApiKey`, `TmdbApiToken`, `BazarrApiKey`). The remaining long values
+were checked there too: plugin ids and download paths only. Everything else,
+including empty strings as `""` (the JSON API does not omit them; the XML
+file on disk does), is as recorded.

@@ -103,7 +103,7 @@ fn schema_check_reads_jellyfin_specs_and_rejects_a_trigger_type_outside_the_enum
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("jellyfin: 7 endpoints and their wire types match"),
+        stdout.contains("jellyfin: 10 endpoints and their wire types match"),
         "{stdout}"
     );
     assert!(
@@ -297,4 +297,87 @@ fn quality_profiles_plan_over_http() {
         );
         assert!(stdout.contains(expect), "{stdout}");
     }
+}
+
+#[test]
+fn a_plugin_secret_never_reaches_the_output_even_when_the_write_fails() {
+    const INFO: &str = include_str!("fixtures/jellyfin-10.11.11/system-info.json");
+    const PLUGINS: &str = include_str!("fixtures/jellyfin-10.11.11/plugins.json");
+    const OSCARS: &str = "c531afa3de204055aca5a7cc43adf783";
+    let config = std::fs::read_to_string(format!(
+        "{}/tests/fixtures/jellyfin-10.11.11/plugins/{OSCARS}.json",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    let config_path = format!("/Plugins/{OSCARS}/Configuration");
+    let secret = "very-secret-omdb-key-4711";
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("jellyfin-api-key"), "k\n").unwrap();
+    std::fs::write(dir.path().join("jellyfin-omdb-key"), format!("{secret}\n")).unwrap();
+
+    // Leaked into `routes` as a &'static str: the server outlives the test body.
+    let config_path: &'static str = Box::leak(config_path.into_boxed_str());
+    let server = Server::start(vec![
+        ("GET", "/System/Info", 200, INFO.into()),
+        ("GET", "/Plugins", 200, PLUGINS.into()),
+        ("GET", config_path, 200, config),
+        // The write is refused, with a body that would echo whatever it got.
+        (
+            "POST",
+            config_path,
+            400,
+            r#"[{"propertyName":"OmdbApiKey","errorMessage":"rejected"}]"#.to_string(),
+        ),
+    ]);
+    let spec = dir.path().join("plugins.json");
+    std::fs::write(
+        &spec,
+        format!(
+            r#"{{"service":"jellyfin","base_url":"{}","api_key_credential":"jellyfin-api-key","task":"plugin-configurations","desired":{{"{OSCARS}":{{"name":"Jellyfin Oscars","secrets":{{"OmdbApiKey":"jellyfin-omdb-key"}}}}}}}}"#,
+            server.base_url()
+        ),
+    )
+    .unwrap();
+
+    for mode in ["plan", "apply"] {
+        let out = converge()
+            .arg(mode)
+            .arg(&spec)
+            .env("CREDENTIALS_DIRECTORY", dir.path())
+            .output()
+            .unwrap();
+        let all = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(!all.contains(secret), "{mode}: {all}");
+        assert!(
+            !all.contains("<masked>"),
+            "{mode}: the old value is not shown either: {all}"
+        );
+        if mode == "plan" {
+            assert!(
+                all.contains("OmdbApiKey (hidden) -> (hidden) from its credential"),
+                "{all}"
+            );
+        } else {
+            // A failed apply stops before printing changes; what it prints is
+            // the error, and the error carries no value either.
+            assert_eq!(out.status.code(), Some(1), "{all}");
+            assert!(
+                all.contains("answered HTTP 400: OmdbApiKey: rejected"),
+                "{all}"
+            );
+        }
+    }
+    // The key did travel -- in the body of the refused POST, nowhere else.
+    let posted = server
+        .requests()
+        .into_iter()
+        .find(|r| r.method == "POST")
+        .unwrap();
+    assert!(posted.body.contains(secret));
+    assert!(!posted.path.contains(secret) && !posted.headers.contains(secret));
 }

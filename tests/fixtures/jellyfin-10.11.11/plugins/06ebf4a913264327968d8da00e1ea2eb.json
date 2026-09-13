@@ -1,0 +1,69 @@
+{
+  "TitleMatchPairs": [
+    {
+      "TitleMatch": "Dokumentarfilm",
+      "CollectionName": "Dokumentarfilme",
+      "CaseSensitive": false,
+      "MatchType": "Genre",
+      "MediaType": "All",
+      "ExactMatch": true,
+      "SortBy": "CommunityRating",
+      "SortOrder": "Descending"
+    },
+    {
+      "TitleMatch": "Horror",
+      "CollectionName": "Horror",
+      "CaseSensitive": false,
+      "MatchType": "Genre",
+      "MediaType": "All",
+      "ExactMatch": true,
+      "SortBy": "CommunityRating",
+      "SortOrder": "Descending"
+    },
+    {
+      "TitleMatch": "Komödie",
+      "CollectionName": "Komödie",
+      "CaseSensitive": false,
+      "MatchType": "Genre",
+      "MediaType": "All",
+      "ExactMatch": true,
+      "SortBy": "CommunityRating",
+      "SortOrder": "Descending"
+    },
+    {
+      "TitleMatch": "Krimi",
+      "CollectionName": "Krimi",
+      "CaseSensitive": false,
+      "MatchType": "Genre",
+      "MediaType": "All",
+      "ExactMatch": true,
+      "SortBy": "CommunityRating",
+      "SortOrder": "Descending"
+    },
+    {
+      "TitleMatch": "Mystery",
+      "CollectionName": "Mystery",
+      "CaseSensitive": false,
+      "MatchType": "Genre",
+      "MediaType": "All",
+      "ExactMatch": true,
+      "SortBy": "CommunityRating",
+      "SortOrder": "Descending"
+    },
+    {
+      "TitleMatch": "Science Fiction",
+      "CollectionName": "Science Fiction",
+      "CaseSensitive": false,
+      "MatchType": "Genre",
+      "MediaType": "All",
+      "ExactMatch": true,
+      "SortBy": "CommunityRating",
+      "SortOrder": "Descending"
+    }
+  ],
+  "ExpressionCollections": [],
+  "IsInitialized": true,
+  "DeleteOrphanedCollections": true,
+  "TagTitlePairs": [],
+  "Tags": []
+}

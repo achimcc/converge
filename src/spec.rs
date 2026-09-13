@@ -45,6 +45,7 @@ enum TaskName {
     ServerConfiguration,
     LibraryOptions,
     ScheduledTaskTriggers,
+    PluginConfigurations,
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,6 +127,19 @@ pub struct TaskTriggers {
     pub triggers: Vec<serde_json::Map<String, serde_json::Value>>,
 }
 
+/// One plugin's configuration: plain fields by path, and fields whose value
+/// comes from a systemd credential (path -> credential name). The name is the
+/// plugin's name as `/Plugins` reports it, so a wrong id fails loudly.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginSettings {
+    pub name: String,
+    #[serde(default)]
+    pub set: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub secrets: BTreeMap<String, String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Desired {
     QualityDefinitions(BTreeMap<String, SizeLimits>),
@@ -133,6 +147,7 @@ pub enum Desired {
     ServerConfiguration(BTreeMap<String, serde_json::Value>),
     LibraryOptions(LibrarySettings),
     ScheduledTaskTriggers(TaskTriggers),
+    PluginConfigurations(BTreeMap<String, PluginSettings>),
 }
 
 /// A non-empty map of well-formed dotted paths.
@@ -247,6 +262,49 @@ impl Spec {
                 }
                 Desired::ScheduledTaskTriggers(triggers)
             }
+            TaskName::PluginConfigurations => {
+                let plugins: BTreeMap<String, PluginSettings> = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if plugins.is_empty() {
+                    return Err(invalid("desired names no plugin".to_string()));
+                }
+                for (id, plugin) in &plugins {
+                    let at = format!("desired.{id}");
+                    if id.len() != 32
+                        || !id
+                            .chars()
+                            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+                    {
+                        return Err(invalid(format!(
+                            "{at}: a plugin id is 32 lowercase hex digits without dashes"
+                        )));
+                    }
+                    if plugin.set.is_empty() && plugin.secrets.is_empty() {
+                        return Err(invalid(format!("{at} names no field")));
+                    }
+                    if !plugin.set.is_empty() {
+                        field_paths(&plugin.set, &format!("{at}.set")).map_err(invalid)?;
+                    }
+                    for (path, credential) in &plugin.secrets {
+                        if crate::paths::segments(path).is_none() {
+                            return Err(invalid(format!(
+                                "{at}.secrets: {path:?} is not a dotted path"
+                            )));
+                        }
+                        if credential.is_empty() || credential.contains('/') {
+                            return Err(invalid(format!(
+                                "{at}.secrets.{path}: {credential:?} is not a credential name"
+                            )));
+                        }
+                        if plugin.set.contains_key(path) {
+                            return Err(invalid(format!(
+                                "{at}: {path} is both in set and in secrets"
+                            )));
+                        }
+                    }
+                }
+                Desired::PluginConfigurations(plugins)
+            }
         };
         Ok(Spec {
             path: path.to_path_buf(),
@@ -264,6 +322,7 @@ impl Spec {
             Desired::ServerConfiguration(_) => "server-configuration",
             Desired::LibraryOptions(_) => "library-options",
             Desired::ScheduledTaskTriggers(_) => "scheduled-task-triggers",
+            Desired::PluginConfigurations(_) => "plugin-configurations",
         }
     }
 }
@@ -382,6 +441,29 @@ mod tests {
             .unwrap()
             .to_string()
             .contains("remove every trigger"));
+    }
+
+    #[test]
+    fn plugin_configurations_are_strict() {
+        let good = r#"{"c531afa3de204055aca5a7cc43adf783":{"name":"Jellyfin Oscars","secrets":{"OmdbApiKey":"jellyfin-omdb-key"}}}"#;
+        let spec = jellyfin("plugin-configurations", good).unwrap();
+        assert_eq!(spec.task_name(), "plugin-configurations");
+        let dashed = good.replace(
+            "c531afa3de204055aca5a7cc43adf783",
+            "c531afa3-de20-4055-aca5-a7cc43adf783",
+        );
+        assert!(jellyfin("plugin-configurations", &dashed).is_err());
+        let nothing = r#"{"c531afa3de204055aca5a7cc43adf783":{"name":"Jellyfin Oscars"}}"#;
+        assert!(jellyfin("plugin-configurations", nothing).is_err());
+        let both = r#"{"c531afa3de204055aca5a7cc43adf783":{"name":"X","set":{"A":1},"secrets":{"A":"k"}}}"#;
+        assert!(jellyfin("plugin-configurations", both)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("both in set and in secrets"));
+        let path_credential =
+            r#"{"c531afa3de204055aca5a7cc43adf783":{"name":"X","secrets":{"A":"../x"}}}"#;
+        assert!(jellyfin("plugin-configurations", path_credential).is_err());
     }
 
     #[test]

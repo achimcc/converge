@@ -15,6 +15,7 @@ use crate::{
     engine::{Change, Probe, Task},
     error::Error,
     paths,
+    secret::Secret,
 };
 
 pub const SYSTEM_INFO: Endpoint = Endpoint {
@@ -59,7 +60,28 @@ pub const TRIGGERS_WRITE: Endpoint = Endpoint {
     request: Some(Shape::List("TaskTriggerInfo")),
     response: None,
 };
-pub const ENDPOINTS: [Endpoint; 7] = [
+pub const PLUGINS: Endpoint = Endpoint {
+    method: "GET",
+    path: "/Plugins",
+    request: None,
+    response: Some(Shape::List("PluginInfo")),
+};
+/// The description declares `BasePluginConfiguration` without a single
+/// property, and the POST without a body: plugin fields cannot be checked at
+/// build time, only against the answer at runtime (design §7).
+pub const PLUGIN_CONFIGURATION_READ: Endpoint = Endpoint {
+    method: "GET",
+    path: "/Plugins/{pluginId}/Configuration",
+    request: None,
+    response: Some(Shape::Opaque("BasePluginConfiguration")),
+};
+pub const PLUGIN_CONFIGURATION_WRITE: Endpoint = Endpoint {
+    method: "POST",
+    path: "/Plugins/{pluginId}/Configuration",
+    request: None,
+    response: None,
+};
+pub const ENDPOINTS: [Endpoint; 10] = [
     SYSTEM_INFO,
     CONFIGURATION_READ,
     CONFIGURATION_WRITE,
@@ -67,6 +89,9 @@ pub const ENDPOINTS: [Endpoint; 7] = [
     LIBRARY_OPTIONS_WRITE,
     TASKS,
     TRIGGERS_WRITE,
+    PLUGINS,
+    PLUGIN_CONFIGURATION_READ,
+    PLUGIN_CONFIGURATION_WRITE,
 ];
 
 /// The component each task's spec paths are checked against.
@@ -81,7 +106,17 @@ pub fn wire_types() -> Vec<schemars::Schema> {
         schemars::schema_for!(UpdateLibraryOptionsDto),
         schemars::schema_for!(TaskInfo),
         schemars::schema_for!(TaskTriggerInfo),
+        schemars::schema_for!(PluginInfo),
     ]
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "PascalCase")]
+pub struct PluginInfo {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -478,6 +513,183 @@ impl Task for ScheduledTaskTriggers {
     }
 }
 
+// --- plugin-configurations ---------------------------------------------------
+
+/// Shown instead of a secret's value, in changes and in errors alike.
+const HIDDEN: &str = "(hidden)";
+
+/// One plugin to configure. `secrets` maps a path to the value read from a
+/// systemd credential; the value never appears in a change or an error.
+pub struct PluginTarget {
+    pub id: String,
+    pub name: String,
+    pub set: BTreeMap<String, Value>,
+    pub secrets: BTreeMap<String, Secret>,
+}
+
+pub struct PluginConfigurations {
+    pub plugins: Vec<PluginTarget>,
+}
+
+/// A plugin's configuration as read, keyed like the spec.
+pub struct LoadedPlugin {
+    pub id: String,
+    pub configuration: Value,
+}
+
+fn normalized(id: &str) -> String {
+    id.replace('-', "").to_ascii_lowercase()
+}
+
+impl PluginConfigurations {
+    fn configuration_of<'a>(&self, current: &'a [LoadedPlugin], id: &str) -> Option<&'a Value> {
+        current
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| &p.configuration)
+    }
+
+    fn changes_of(
+        &self,
+        target: &PluginTarget,
+        configuration: &Value,
+        missing: &mut Vec<String>,
+    ) -> Vec<Change> {
+        let mut changes = compare_fields(&target.name, configuration, &target.set, missing);
+        for (path, secret) in &target.secrets {
+            match paths::get(configuration, path) {
+                None => missing.push(format!("{}: {path}", target.name)),
+                Some(Value::String(current)) if current == secret.expose() => {}
+                Some(current) => changes.push(Change {
+                    subject: target.name.clone(),
+                    field: path.clone(),
+                    current: if current == &Value::String(String::new()) {
+                        "(empty)".to_string()
+                    } else {
+                        HIDDEN.to_string()
+                    },
+                    desired: format!("{HIDDEN} from its credential"),
+                }),
+            }
+        }
+        changes
+    }
+}
+
+impl Task for PluginConfigurations {
+    type Current = Vec<LoadedPlugin>;
+
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        probe(t)
+    }
+
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        let reply = t.get(PLUGINS.path)?;
+        expect_status(&PLUGINS, &reply, &[200])?;
+        let installed: Vec<PluginInfo> = decode(PLUGINS.path, &reply.body)?;
+        let mut problems = Vec::new();
+        for target in &self.plugins {
+            let found = installed
+                .iter()
+                .find(|p| p.id.as_deref().map(normalized) == Some(normalized(&target.id)));
+            match found.and_then(|p| p.name.as_deref()) {
+                None => problems.push(format!("plugin {} ({})", target.name, target.id)),
+                Some(name) if name != target.name => problems.push(format!(
+                    "plugin {} is called {name:?}, the spec expects {:?}",
+                    target.id, target.name
+                )),
+                Some(_) => {}
+            }
+        }
+        if !problems.is_empty() {
+            return Err(Error::NotFound(problems));
+        }
+        let mut loaded = Vec::new();
+        for target in &self.plugins {
+            let path = PLUGIN_CONFIGURATION_READ
+                .path
+                .replace("{pluginId}", &target.id);
+            let reply = t.get(&path)?;
+            expect_status_at(PLUGIN_CONFIGURATION_READ.method, &path, &reply, &[200])?;
+            let configuration: Value = decode(&path, &reply.body)?;
+            if !configuration.is_object() {
+                return Err(Error::Decode {
+                    path,
+                    reason: "not an object".to_string(),
+                });
+            }
+            loaded.push(LoadedPlugin {
+                id: target.id.clone(),
+                configuration,
+            });
+        }
+        Ok(loaded)
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        let mut missing = Vec::new();
+        let mut changes = Vec::new();
+        for target in &self.plugins {
+            let Some(configuration) = self.configuration_of(current, &target.id) else {
+                missing.push(format!("{}: configuration", target.name));
+                continue;
+            };
+            changes.extend(self.changes_of(target, configuration, &mut missing));
+        }
+        if missing.is_empty() {
+            Ok(changes)
+        } else {
+            Err(Error::MissingField(missing))
+        }
+    }
+
+    fn notes(&self, _current: &Self::Current) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        for target in &self.plugins {
+            let Some(configuration) = self.configuration_of(current, &target.id) else {
+                continue;
+            };
+            let mut missing = Vec::new();
+            if self
+                .changes_of(target, configuration, &mut missing)
+                .is_empty()
+            {
+                continue;
+            }
+            // The whole configuration goes back: Ratings alone carries more
+            // than a hundred settings made in the web UI.
+            let mut updated = with_fields(&target.name, configuration, &target.set)?;
+            for (path, secret) in &target.secrets {
+                if !paths::set(
+                    &mut updated,
+                    path,
+                    Value::String(secret.expose().to_string()),
+                ) {
+                    return Err(Error::MissingField(vec![format!(
+                        "{}: {path}",
+                        target.name
+                    )]));
+                }
+            }
+            let path = PLUGIN_CONFIGURATION_WRITE
+                .path
+                .replace("{pluginId}", &target.id);
+            let body = serialize(PLUGIN_CONFIGURATION_WRITE.method, &path, &updated)?;
+            let reply = t.post_json(&path, &body)?;
+            expect_status_at(
+                PLUGIN_CONFIGURATION_WRITE.method,
+                &path,
+                &reply,
+                &[200, 204],
+            )?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -685,6 +897,156 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Value>(&written[0].1).unwrap(),
             json!([{"Type": "DailyTrigger", "TimeOfDayTicks": 198000000000i64}])
+        );
+    }
+
+    const PLUGINS_JSON: &str = include_str!("../../tests/fixtures/jellyfin-10.11.11/plugins.json");
+    const OSCARS: &str = "c531afa3de204055aca5a7cc43adf783";
+    const MEDIATHEK: &str = "a31b415a5264419db1528c8192a54994";
+
+    fn plugin_file(id: &str) -> String {
+        std::fs::read_to_string(format!(
+            "{}/tests/fixtures/jellyfin-10.11.11/plugins/{id}.json",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap()
+    }
+
+    fn plugins_transport(oscars: &str, mediathek: &str) -> FakeTransport {
+        FakeTransport::default()
+            .on_get(PLUGINS.path, vec![ok(PLUGINS_JSON)])
+            .on_get(
+                &format!("/Plugins/{OSCARS}/Configuration"),
+                vec![ok(oscars)],
+            )
+            .on_get(
+                &format!("/Plugins/{MEDIATHEK}/Configuration"),
+                vec![ok(mediathek)],
+            )
+    }
+
+    /// The fixtures carry `<masked>` where the key was; a test credential
+    /// with exactly that value is "already set".
+    fn targets(oscars_key: &str) -> PluginConfigurations {
+        PluginConfigurations {
+            plugins: vec![
+                PluginTarget {
+                    id: OSCARS.to_string(),
+                    name: "Jellyfin Oscars".to_string(),
+                    set: BTreeMap::new(),
+                    secrets: [(
+                        "OmdbApiKey".to_string(),
+                        Secret::new(oscars_key.to_string()),
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+                PluginTarget {
+                    id: MEDIATHEK.to_string(),
+                    name: "Mediathek Downloader".to_string(),
+                    set: fields(&[
+                        ("Network.AllowUnknownDomains", json!(false)),
+                        ("WizardCompleted", json!(true)),
+                    ]),
+                    secrets: BTreeMap::new(),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn plugins_recorded_state_is_already_desired() {
+        let task = targets("<masked>");
+        let t = plugins_transport(&plugin_file(OSCARS), &plugin_file(MEDIATHEK));
+        assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn a_changed_secret_is_written_but_never_shown() {
+        let key = "s3cr3t-omdb-value";
+        let task = targets(key);
+        let t = plugins_transport(&plugin_file(OSCARS), &plugin_file(MEDIATHEK))
+            .on_put(vec![Step::Answer(204, String::new())]);
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        assert_eq!(changes.len(), 1);
+        let shown = changes[0].to_string();
+        assert_eq!(
+            shown,
+            "Jellyfin Oscars: OmdbApiKey (hidden) -> (hidden) from its credential"
+        );
+        assert!(!format!("{changes:?}").contains(key));
+        assert!(
+            !format!("{changes:?}").contains("<masked>"),
+            "not even the old value"
+        );
+
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1, "Mediathek already matched");
+        assert_eq!(written[0].0, format!("/Plugins/{OSCARS}/Configuration"));
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        let mut expected: Value = serde_json::from_str(&plugin_file(OSCARS)).unwrap();
+        expected["OmdbApiKey"] = json!(key);
+        assert_eq!(sent, expected, "every other setting goes back untouched");
+    }
+
+    #[test]
+    fn a_plain_field_change_keeps_the_rest_of_the_configuration() {
+        let mut mediathek: Value = serde_json::from_str(&plugin_file(MEDIATHEK)).unwrap();
+        mediathek["Network"]["AllowUnknownDomains"] = json!(true);
+        let task = targets("<masked>");
+        let t = plugins_transport(&plugin_file(OSCARS), &mediathek.to_string())
+            .on_put(vec![Step::Answer(204, String::new())]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(
+            task.diff(&current).unwrap()[0].to_string(),
+            "Mediathek Downloader: Network.AllowUnknownDomains true -> false"
+        );
+        task.write(&t, &current).unwrap();
+        let sent: Value = serde_json::from_str(&t.written.borrow()[0].1).unwrap();
+        assert_eq!(
+            sent,
+            serde_json::from_str::<Value>(&plugin_file(MEDIATHEK)).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_wrong_plugin_id_or_name_is_not_found() {
+        let mut task = targets("<masked>");
+        task.plugins[0].name = "Oscars".to_string();
+        let t = plugins_transport(&plugin_file(OSCARS), &plugin_file(MEDIATHEK));
+        let err = task.read(&t).err().unwrap().to_string();
+        assert!(
+            err.contains(r#"is called "Jellyfin Oscars", the spec expects "Oscars""#),
+            "{err}"
+        );
+
+        let mut task = targets("<masked>");
+        task.plugins[0].id = "00000000000000000000000000000000".to_string();
+        let err = task.read(&t).err().unwrap().to_string();
+        assert!(
+            err.starts_with("not found on the service: plugin Jellyfin Oscars"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_secret_field_the_plugin_lacks_is_an_error_without_the_value() {
+        let mut task = targets("s3cr3t");
+        let secret = task.plugins[0].secrets.remove("OmdbApiKey").unwrap();
+        task.plugins[0]
+            .secrets
+            .insert("OmdbKey".to_string(), secret);
+        let t = plugins_transport(&plugin_file(OSCARS), &plugin_file(MEDIATHEK));
+        let err = task
+            .diff(&task.read(&t).unwrap())
+            .err()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            err,
+            "the answer has no such field: Jellyfin Oscars: OmdbKey"
         );
     }
 

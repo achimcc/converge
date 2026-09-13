@@ -124,6 +124,29 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::PluginConfigurations(plugins) => {
+            // Every secret is read before the first request: a missing
+            // credential is a configuration error, not something to find
+            // out halfway through.
+            let mut targets = Vec::new();
+            for (id, plugin) in plugins {
+                let mut secrets = std::collections::BTreeMap::new();
+                for (path, credential) in &plugin.secrets {
+                    secrets.insert(
+                        path.clone(),
+                        read_credential(credentials, credential).map_err(fail)?,
+                    );
+                }
+                targets.push(jellyfin::PluginTarget {
+                    id: id.clone(),
+                    name: plugin.name.clone(),
+                    set: plugin.set.clone(),
+                    secrets,
+                });
+            }
+            let task = jellyfin::PluginConfigurations { plugins: targets };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
     }
     .map_err(fail)?;
     println!("{label}: service version {}", report.version);
@@ -208,6 +231,9 @@ fn schema_check(args: &[String]) -> ExitCode {
         let (spec_findings, count) = match &spec.desired {
             // Typed tasks: their fields are the wire types checked above.
             Desired::QualityDefinitions(_) | Desired::QualityProfiles(_) => (Vec::new(), 0),
+            // No schema to check against (design §7): only the endpoints and
+            // PluginInfo are, above; the fields are checked at runtime.
+            Desired::PluginConfigurations(_) => (Vec::new(), 0),
             Desired::ServerConfiguration(set) => (
                 schema::check_paths(&document, jellyfin::SERVER_CONFIGURATION, set),
                 set.len(),

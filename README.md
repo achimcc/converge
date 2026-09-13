@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.3.0** — tasks for **Radarr**, **Sonarr** (API v3) and
+Early. **v0.4.0** — tasks for **Radarr**, **Sonarr** (API v3) and
 **Jellyfin** (10.11), each replacing a shell unit on the host it was written
 for:
 
@@ -30,6 +30,7 @@ for:
 | Jellyfin | `server-configuration` | fields of `ServerConfiguration`, by path |
 | Jellyfin | `library-options` | fields of the named libraries' `LibraryOptions`, by path |
 | Jellyfin | `scheduled-task-triggers` | the trigger list of tasks whose key starts with a prefix |
+| Jellyfin | `plugin-configurations` | fields of plugin configurations by path, keys from credentials |
 
 ## A spec
 
@@ -70,6 +71,10 @@ them in code — `ServerConfiguration` alone has 56 properties. The paths are
 checked all the same: at build time against the OpenAPI component (type,
 nullability, enum membership), at runtime against the object Jellyfin
 returns. A path the answer does not carry is an error, never an addition.
+Plugin configurations are the exception the OpenAPI file forces: it
+describes them without a single property, so their fields are checked at
+runtime only — see `docs/design.md` §7. Values for keys come from systemd
+credentials and are never printed.
 
 ```json
 {

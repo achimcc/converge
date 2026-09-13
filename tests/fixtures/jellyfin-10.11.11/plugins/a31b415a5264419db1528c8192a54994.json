@@ -1,0 +1,81 @@
+{
+  "ConfigVersion": 4,
+  "Paths": {
+    "DefaultDownloadPath": "/tank/data/mediathek",
+    "DefaultSubscriptionShowPath": "/tank/data/mediathek/serien",
+    "DefaultSubscriptionMoviePath": "/tank/data/mediathek/filme",
+    "DefaultManualShowPath": "/tank/data/mediathek/serien",
+    "DefaultManualMoviePath": "/tank/data/mediathek/filme",
+    "TempDownloadPath": "/tank/data/mediathek/.unfertig",
+    "UseTopicForMoviePath": false
+  },
+  "Download": {
+    "DownloadSubtitles": true,
+    "ReadRate": 0,
+    "MinFreeDiskSpaceBytes": 1610612736,
+    "ScanLibraryAfterDownload": true
+  },
+  "Search": {
+    "FetchStreamSizes": false,
+    "SearchInFutureBroadcasts": true,
+    "PageSize": 50,
+    "MaxPages": 5
+  },
+  "Network": {
+    "AllowUnknownDomains": false,
+    "AllowHttp": false,
+    "UserAgent": "MediatekViewDL/1"
+  },
+  "Maintenance": {
+    "EnableStrmCleanup": false,
+    "AllowDownloadOnUnknownDiskSpace": false,
+    "AdoptionDurationThreshold": "00:00:15"
+  },
+  "SubscriptionDefaults": {
+    "DownloadSettings": {
+      "UseStreamingUrlFiles": false,
+      "DownloadFullVideoForSecondaryAudio": false,
+      "AllowFallbackToLowerQuality": true,
+      "QualityCheckWithUrl": false,
+      "AlwaysCreateSubfolder": false,
+      "EnhancedDuplicateDetection": false
+    },
+    "MetadataSettings": {
+      "CreateNfo": false,
+      "AppendDateToTitle": false,
+      "AppendTimeToTitle": false,
+      "KeepOriginalTitle": false
+    },
+    "SearchSettings": {},
+    "SeriesSettings": {
+      "EnforceSeriesParsing": false,
+      "AllowAbsoluteEpisodeNumbering": false,
+      "TreatNonEpisodesAsExtras": false,
+      "SaveTrailers": true,
+      "SaveInterviews": true,
+      "SaveGenericExtras": true,
+      "SaveExtrasAsStrm": false
+    },
+    "AccessibilitySettings": {
+      "AllowAudioDescription": false,
+      "AllowSignLanguage": false
+    }
+  },
+  "WizardCompleted": true,
+  "Subscriptions": [],
+  "LastRun": "0001-01-01T00:00:00.0000000Z",
+  "AllowedDomains": [
+    "akamaihd.net",
+    "akamaized.net",
+    "apa.at",
+    "ard-mcdn.de",
+    "ard.de",
+    "ardmediathek.de",
+    "br.de",
+    "daserste.de",
+    "orf.at",
+    "srf.ch",
+    "zdf.de",
+    "kika.de"
+  ]
+}

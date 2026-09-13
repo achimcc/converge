@@ -322,7 +322,7 @@ fn check_body(
     };
     let (component, found, kind, typed) = match shape {
         Shape::One(c) => (c, reference(schema), "one", true),
-        Shape::Document(c) => (c, reference(schema), "one", false),
+        Shape::Document(c) | Shape::Opaque(c) => (c, reference(schema), "one", false),
         Shape::List(c) => {
             let is_array = schema.get("type").and_then(Value::as_str) == Some("array");
             let found = if is_array {
@@ -335,6 +335,15 @@ fn check_body(
     };
     if found != Some(component) {
         findings.push(format!("{label} is not {kind} {component}"));
+        return;
+    }
+    if matches!(shape, Shape::Opaque(_)) {
+        if openapi
+            .pointer(&format!("/components/schemas/{}", escape(component)))
+            .is_none()
+        {
+            findings.push(format!("component {component} does not exist"));
+        }
         return;
     }
     if !typed {

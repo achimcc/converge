@@ -327,7 +327,49 @@ named fields changed; nothing else is touched. Libraries not named, tasks not
 matching the prefix, are left alone. A library name or key prefix that
 matches nothing is an error, not "nothing to do".
 
-## 7. Not in the pilot
+## 7. Plugin configurations and secrets (v0.4.0, 2026-09-13)
+
+Jellyfin plugins keep their settings in objects the OpenAPI file does not
+describe: `GET /Plugins/{pluginId}/Configuration` refers to a
+`BasePluginConfiguration` with no properties, and the POST declares no body.
+**For plugin fields there is no build-time check.** What remains, and what
+this task relies on instead:
+
+- **Identity is checked.** The spec names each plugin by id *and* name;
+  `GET /Plugins` must list that id with exactly that name. A mistyped id or a
+  plugin that is not installed fails before anything is read.
+- **Every path must exist in the answer.** Measured on the host on
+  2026-09-13: the JSON API returns empty strings as `""` — it is the XML file
+  on disk that omits them — so a never-set key is present and can be set; a
+  misspelt path is not, and fails.
+- **Recorded answers** of seven plugins back the tests, masked on the host
+  before they left it (`tests/fixtures/jellyfin-10.11.11/SOURCE.md`).
+
+```json
+{ "service": "jellyfin", "task": "plugin-configurations", "…": "…",
+  "desired": {
+    "c531afa3de204055aca5a7cc43adf783": {
+      "name": "Jellyfin Oscars",
+      "secrets": { "OmdbApiKey": "jellyfin-omdb-key" } },
+    "a31b415a5264419db1528c8192a54994": {
+      "name": "Mediathek Downloader",
+      "set": { "Network.AllowUnknownDomains": false, "WizardCompleted": true } } } }
+```
+
+One spec holds all plugins of a unit, so one readiness probe and one
+deadline cover them.
+
+### Secrets
+
+`secrets` maps a path to the name of a systemd credential. Every credential
+is read before the first request; a missing one stops the run. The value is
+held as `Secret`, compared with the field, and written only inside the
+request body. **It never appears in a change, a note or an error** — a
+differing secret is reported as `(hidden) -> (hidden) from its credential`,
+and not even the *old* value is shown (it may be a key someone else set).
+A path may not be both in `set` and in `secrets`.
+
+## 8. Not in the pilot
 
 - Other services and tasks (Authentik, Seerr, …).
 - TLS, JSON output, a NixOS module.
