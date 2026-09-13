@@ -473,6 +473,85 @@ fn schema_check_passes_the_hosts_trailarr_specs_and_rejects_monitor() {
 }
 
 #[test]
+fn schema_check_for_bindery_validates_its_four_tasks_without_an_openapi_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let spec = |file: &str, task: &str, desired: &str| {
+        let path = dir.path().join(file);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"service":"bindery","base_url":"http://127.0.0.1:8787","api_key_credential":"bindery-api-key","task":"{task}","desired":{desired}}}"#
+            ),
+        )
+        .unwrap();
+        path
+    };
+    let clients = spec(
+        "clients.json",
+        "download-clients",
+        r#"{"clients":{"sabnzbd":{"set":{"host":"10.0.10.10","port":8080},"secret_fields":{"apiKey":"sabnzbd-api-key"}}}}"#,
+    );
+    let instances = spec(
+        "instances.json",
+        "prowlarr-instances",
+        r#"{"instances":{"media-01":{"set":{"syncOnStartup":true},"secret_fields":{"apiKey":"prowlarr-api-key"}}}}"#,
+    );
+    let folders = spec(
+        "folders.json",
+        "root-folders",
+        r#"{"folders":{"/tank/data/media/books":{}}}"#,
+    );
+    let settings = spec(
+        "settings.json",
+        "settings",
+        r#"{"settings":{"import.mode":"copy"}}"#,
+    );
+    let out = schema_check(
+        "bindery",
+        None,
+        &[&clients, &instances, &folders, &settings],
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("bindery: no OpenAPI description exists; 4 spec(s) valid"),
+        "{stdout}"
+    );
+
+    // A secret bindery does not keep write-only, a root folder with fields,
+    // and an ntfy spec handed to bindery are errors.
+    let token = spec(
+        "token.json",
+        "download-clients",
+        r#"{"clients":{"x":{"secret_fields":{"token":"t"}}}}"#,
+    );
+    let folder_fields = spec(
+        "folder-fields.json",
+        "root-folders",
+        r#"{"folders":{"/b":{"set":{"x":1}}}}"#,
+    );
+    for (path, needle) in [
+        (&token, "not one of bindery's write-only fields"),
+        (&folder_fields, "cannot update a root folder"),
+    ] {
+        let out = schema_check("bindery", None, &[path]);
+        assert_eq!(out.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains(needle), "{stderr}");
+    }
+    let out = schema_check("bindery", Some(&trailarr_openapi()), &[&clients]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("bindery publishes no OpenAPI description")
+    );
+}
+
+#[test]
 fn schema_check_for_ntfy_validates_specs_without_an_openapi_file() {
     let dir = tempfile::tempdir().unwrap();
     let text = r#"{"service":"ntfy","base_url":"http://localhost:2586","api_key_credential":"ntfy-token","task":"account-subscriptions","desired":{"base_url":"https://ntfy.rusty-vault.de","topics_credential":"ntfy-abo-topics"}}"#;

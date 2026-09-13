@@ -10,7 +10,7 @@ use converge::{
     engine::{run, Mode, Outcome, Timing},
     error::Error,
     schema,
-    services::{arr, jellyfin, ntfy, providers, servarr, trailarr},
+    services::{arr, bindery, jellyfin, ntfy, providers, servarr, trailarr},
     spec::{Desired, Service, Spec},
 };
 
@@ -18,7 +18,7 @@ const USAGE: &str = "usage:
   converge apply [--deadline <seconds>] <spec.json>...
   converge plan [--deadline <seconds>] <spec.json>...
   converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr> --openapi <file> [--spec <spec.json>]...
-  converge schema-check --service ntfy [--spec <spec.json>]...";
+  converge schema-check --service ntfy|bindery [--spec <spec.json>]...";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -189,6 +189,37 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::BinderyEntries(kind, entries) => {
+            // As for providers: every secret before the first request.
+            let mut targets = Vec::new();
+            for (key, entry) in entries {
+                let mut secret_fields = std::collections::BTreeMap::new();
+                for (field, credential) in &entry.secret_fields {
+                    secret_fields.insert(
+                        field.clone(),
+                        read_credential(credentials, credential).map_err(fail)?,
+                    );
+                }
+                targets.push(bindery::ResourceTarget {
+                    key: key.clone(),
+                    set: entry.set.clone(),
+                    secret_fields,
+                });
+            }
+            let task = bindery::Resources {
+                api: match kind {
+                    converge::spec::BinderyKind::DownloadClients => &bindery::DOWNLOAD_CLIENTS,
+                    converge::spec::BinderyKind::ProwlarrInstances => &bindery::PROWLARR_INSTANCES,
+                    converge::spec::BinderyKind::RootFolders => &bindery::ROOT_FOLDERS,
+                },
+                entries: targets,
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        Desired::BinderySettings(set) => {
+            let task = bindery::Settings { set: set.clone() };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
         Desired::Naming(set) | Desired::MediaManagement(set) => {
             let kind = if matches!(spec.desired, Desired::Naming(_)) {
                 servarr::Kind::Naming
@@ -298,15 +329,15 @@ fn servarr_api(spec: &Spec) -> Result<&'static servarr::Api, Error> {
     })
 }
 
-/// ntfy has no OpenAPI description (design §10): its specs are loaded and
-/// validated, and that is all a build can check.
-fn ntfy_specs_check(specs: &[PathBuf]) -> ExitCode {
+/// ntfy (design §10) and bindery (§14) have no OpenAPI description: their
+/// specs are loaded and validated, and that is all a build can check.
+fn undescribed_specs_check(service: &str, specs: &[PathBuf]) -> ExitCode {
     let mut findings = Vec::new();
     for path in specs {
         match Spec::load(path) {
-            Ok(spec) if spec.service.name() == "ntfy" => {}
+            Ok(spec) if spec.service.name() == service => {}
             Ok(spec) => findings.push(format!(
-                "{}: the spec is for {}, not ntfy",
+                "{}: the spec is for {}, not {service}",
                 path.display(),
                 spec.service.name()
             )),
@@ -315,15 +346,15 @@ fn ntfy_specs_check(specs: &[PathBuf]) -> ExitCode {
     }
     if !findings.is_empty() {
         for finding in &findings {
-            eprintln!("ntfy: {finding}");
+            eprintln!("{service}: {finding}");
         }
         return ExitCode::from(1);
     }
     println!(
-        "ntfy: no OpenAPI description exists; {} spec(s) valid",
+        "{service}: no OpenAPI description exists; {} spec(s) valid",
         specs.len()
     );
-    println!("ntfy: field names are checked by recorded answers and at runtime only");
+    println!("{service}: field names are checked by recorded answers and at runtime only");
     ExitCode::SUCCESS
 }
 
@@ -341,12 +372,12 @@ fn schema_check(args: &[String]) -> ExitCode {
             other => return usage(Some(&format!("unexpected argument {other}"))),
         }
     }
-    if service.as_deref() == Some("ntfy") {
+    if let Some(name @ ("ntfy" | "bindery")) = service.as_deref() {
         return match openapi {
-            Some(_) => usage(Some(
-                "ntfy publishes no OpenAPI description; call schema-check --service ntfy without --openapi",
-            )),
-            None => ntfy_specs_check(&specs),
+            Some(_) => usage(Some(&format!(
+                "{name} publishes no OpenAPI description; call schema-check --service {name} without --openapi"
+            ))),
+            None => undescribed_specs_check(name, &specs),
         };
     }
     let (Some(service), Some(openapi)) = (service, openapi) else {
@@ -453,8 +484,10 @@ fn schema_check(args: &[String]) -> ExitCode {
                 schema::check_paths(&document, trailarr::TRAILER_PROFILE_READ, &settings.set),
                 settings.set.len(),
             ),
-            // Not reachable: the service check above rejects an ntfy spec.
-            Desired::AccountSubscriptions(_) => (Vec::new(), 0),
+            // Not reachable: the service check above rejects ntfy and bindery specs.
+            Desired::AccountSubscriptions(_)
+            | Desired::BinderyEntries(..)
+            | Desired::BinderySettings(_) => (Vec::new(), 0),
             Desired::Naming(set) => (
                 schema::check_paths(&document, servarr::NAMING, set),
                 set.len(),

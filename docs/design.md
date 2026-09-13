@@ -788,10 +788,60 @@ A spec cannot say "write the indexers only if the proxies are there": a
 failing spec does not stop the next one (`src/main.rs`). The host runs the two specs as
 two `ExecStart=` lines, and systemd stops at the first that fails.
 
-## 14. Not in the pilot
+## 14. bindery: download clients, Prowlarr instances, root folders, settings (v0.10.0, 2026-09-13)
+
+bindery (1.33) publishes no OpenAPI description. As for ntfy (§10),
+`schema-check --service bindery` loads and validates the specs and nothing
+more; field names are checked against the answer at runtime and against the
+recorded answers in `tests/fixtures/bindery-1.33.2/`.
+
+| task | read | write |
+|---|---|---|
+| `download-clients` | `GET /api/v1/downloadclient` | `POST` (missing), `PUT …/{id}` |
+| `prowlarr-instances` | `GET /api/v1/prowlarr` | the same under `prowlarr` |
+| `root-folders` | `GET /api/v1/rootfolder` | `POST` (missing); bindery has no update |
+| `settings` | `GET /api/v1/setting/{key}` | `PUT …/{key}` with `{value}` |
+
+```json
+{ "service": "bindery", "task": "download-clients", "…": "…",
+  "desired": { "clients": {
+    "sabnzbd": { "set": { "type": "sabnzbd", "host": "10.0.10.10", "port": 8080 },
+                 "secret_fields": { "apiKey": "sabnzbd-api-key" } } } } }
+```
+
+Readiness is `GET /api/v1/health`: `status: ok` and a version.
+
+### Write-only secrets
+
+Measured on the host on 2026-09-13 and read in bindery's source: `apiKey` and
+`password` are answered as `""`, next to `apiKeyConfigured` and
+`passwordConfigured`. An update decodes the body **over the stored row**, so a
+key left out keeps its value, and an empty secret means "keep the stored one"
+(`applyDownloadClientCredentials`, `resolveWriteOnlyAPIKey`); only an explicit
+`clearApiKey` / `clearPassword` removes one, and converge never sends it. A
+Prowlarr instance whose key actually changes passes it on to every indexer
+synced from it.
+
+So a secret is handed over on every `apply` with a `PUT` that carries **only
+the secret fields** -- nothing else of the row is touched, and bindery evicts
+its pooled client so the new value is used at once. A stale value cannot be
+read; a secret that is not stored at all (its flag false) is a change. A
+`secret_fields` entry must be `apiKey` or `password`, and one bindery answers
+with a value is an error rather than a comparison.
+
+This is the gap the host's shell unit had: it added the SABnzbd client and
+the Prowlarr instance only when they were missing, so a rotated key never
+reached bindery (the same class as the qBittorrent rotation on 2026-09-12).
+
+Before release, `plan` ran on the host with the four specs it deploys and the
+real credentials: `unchanged` for all four. Sabotages that print the secret in
+a hand-over line or send the whole row instead of only the secret turn two
+tests red.
+
+## 15. Not in the pilot
 
 - Other services and tasks (Authentik, Seerr, …).
 - TLS, JSON output, a NixOS module.
 - Deleting things. `converge` only sets what the spec names, and appends
-  list entries (§8), connections (§9), subscriptions (§10), root folders (§11), providers (§12, §13) and tags (§13) it is
+  list entries (§8), connections (§9), subscriptions (§10), root folders (§11, §14), providers (§12, §13), tags (§13) and bindery's entries (§14) it is
   responsible for.

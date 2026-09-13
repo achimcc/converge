@@ -19,8 +19,8 @@ script should have been:
 
 ## Status
 
-Early. **v0.9.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
-**Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11) and **ntfy** (2.26), each
+Early. **v0.10.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+**Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26) and **bindery** (1.33), each
 replacing a shell unit or an OpenTofu resource on the host it was written
 for:
 
@@ -39,6 +39,8 @@ for:
 | Jellyfin | `plugin-configurations` | fields of plugin configurations by path, keys from credentials, entries of shared lists by key |
 | Trailarr | `connections` | connections to Radarr and Sonarr by name: top-level fields, key from a credential; missing ones are added |
 | Trailarr | `trailer-profiles` | fields every trailer profile gets |
+| bindery | `download-clients`, `prowlarr-instances` | entries by name: top-level fields; secrets from credentials handed over on every `apply` in a `PUT` with only the secret (bindery answers them empty) |
+| bindery | `root-folders`, `settings` | root folders by path (added when missing); settings by key |
 | ntfy | `account-subscriptions` | subscriptions of an account; the topics are secrets, read from a credential and never printed |
 
 ## A spec

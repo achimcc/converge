@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "name": "media-01",
+    "url": "http://10.0.10.10:9696",
+    "apiKey": "",
+    "apiKeyConfigured": true,
+    "syncOnStartup": true,
+    "enabled": true,
+    "lastSyncAt": "2026-09-13T18:14:26.163356048Z",
+    "createdAt": "2026-09-01T17:41:45.893301886Z",
+    "updatedAt": "2026-09-13T18:14:26.163356048Z"
+  }
+]

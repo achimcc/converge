@@ -17,6 +17,7 @@ pub enum Service {
     Ntfy,
     Lidarr,
     Prowlarr,
+    Bindery,
 }
 
 impl Service {
@@ -29,13 +30,18 @@ impl Service {
             Service::Ntfy => "ntfy",
             Service::Lidarr => "lidarr",
             Service::Prowlarr => "prowlarr",
+            Service::Bindery => "bindery",
         }
     }
 
     /// The request header the API key travels in.
     pub fn key_header(self) -> &'static str {
         match self {
-            Service::Radarr | Service::Sonarr | Service::Lidarr | Service::Prowlarr => "X-Api-Key",
+            Service::Radarr
+            | Service::Sonarr
+            | Service::Lidarr
+            | Service::Prowlarr
+            | Service::Bindery => "X-Api-Key",
             Service::Jellyfin => "X-Emby-Token",
             Service::Trailarr => "X-API-KEY",
             Service::Ntfy => "Authorization",
@@ -82,6 +88,8 @@ enum TaskName {
     Applications,
     Indexers,
     IndexerProxies,
+    ProwlarrInstances,
+    Settings,
 }
 
 impl TaskName {
@@ -94,12 +102,13 @@ impl TaskName {
             | TaskName::PluginConfigurations => service == Service::Jellyfin,
             TaskName::Connections | TaskName::TrailerProfiles => service == Service::Trailarr,
             TaskName::AccountSubscriptions => service == Service::Ntfy,
-            TaskName::Naming | TaskName::MediaManagement | TaskName::RootFolders => {
-                service.is_servarr()
+            TaskName::Naming | TaskName::MediaManagement => service.is_servarr(),
+            TaskName::RootFolders => service.is_servarr() || service == Service::Bindery,
+            TaskName::DownloadClients => {
+                service.is_servarr() || service == Service::Prowlarr || service == Service::Bindery
             }
-            TaskName::DownloadClients | TaskName::Notifications => {
-                service.is_servarr() || service == Service::Prowlarr
-            }
+            TaskName::Notifications => service.is_servarr() || service == Service::Prowlarr,
+            TaskName::ProwlarrInstances | TaskName::Settings => service == Service::Bindery,
             TaskName::Applications | TaskName::Indexers | TaskName::IndexerProxies => {
                 service == Service::Prowlarr
             }
@@ -328,6 +337,25 @@ const PROVIDER_OWN: [&str; 12] = [
     "testCommand",
 ];
 
+/// One bindery entry (design §14): top-level fields, and secret fields whose
+/// value comes from a credential. bindery answers those empty.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BinderyEntry {
+    #[serde(default)]
+    pub set: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub secret_fields: BTreeMap<String, String>,
+}
+
+/// Which kind of bindery entry a spec names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinderyKind {
+    DownloadClients,
+    ProwlarrInstances,
+    RootFolders,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Desired {
     QualityDefinitions(BTreeMap<String, SizeLimits>),
@@ -347,6 +375,8 @@ pub enum Desired {
     Applications(ProviderSettings),
     Indexers(ProviderSettings),
     IndexerProxies(ProviderSettings),
+    BinderyEntries(BinderyKind, BTreeMap<String, BinderyEntry>),
+    BinderySettings(BTreeMap<String, serde_json::Value>),
 }
 
 /// A non-empty map of plain (undotted) field names, none of them `forbidden`.
@@ -462,6 +492,90 @@ impl Spec {
             )));
         }
         let desired = match raw.task {
+            TaskName::DownloadClients | TaskName::RootFolders | TaskName::ProwlarrInstances
+                if raw.service == Service::Bindery =>
+            {
+                let (kind, wrapper) = match raw.task {
+                    TaskName::DownloadClients => (BinderyKind::DownloadClients, "clients"),
+                    TaskName::ProwlarrInstances => (BinderyKind::ProwlarrInstances, "instances"),
+                    _ => (BinderyKind::RootFolders, "folders"),
+                };
+                let mut outer: BTreeMap<String, BTreeMap<String, BinderyEntry>> =
+                    serde_json::from_value(raw.desired)
+                        .map_err(|e| invalid(format!("desired: {e}")))?;
+                if outer.len() != 1 || !outer.contains_key(wrapper) {
+                    return Err(invalid(format!(
+                        "desired must be an object with exactly the key {wrapper}"
+                    )));
+                }
+                let entries = outer.remove(wrapper).unwrap_or_default();
+                if entries.is_empty() {
+                    return Err(invalid(format!("desired.{wrapper} names nothing")));
+                }
+                for (key, entry) in &entries {
+                    let at = format!("desired.{wrapper}.{key}");
+                    if key.is_empty() {
+                        return Err(invalid(format!("desired.{wrapper}: a key is empty")));
+                    }
+                    if kind == BinderyKind::RootFolders {
+                        if !key.starts_with('/') {
+                            return Err(invalid(format!(
+                                "{at}: a root folder is an absolute path"
+                            )));
+                        }
+                        if !entry.set.is_empty() || !entry.secret_fields.is_empty() {
+                            return Err(invalid(format!(
+                                "{at}: bindery cannot update a root folder, so it takes no fields"
+                            )));
+                        }
+                    }
+                    for (field, credential) in &entry.secret_fields {
+                        if !["apiKey", "password"].contains(&field.as_str()) {
+                            return Err(invalid(format!(
+                                "{at}.secret_fields: {field} is not one of bindery's write-only fields (apiKey, password)"
+                            )));
+                        }
+                        credential_name(credential, &format!("{at}.secret_fields.{field}"))
+                            .map_err(invalid)?;
+                        if entry.set.contains_key(field) {
+                            return Err(invalid(format!(
+                                "{at}: {field} is both in set and in secret_fields"
+                            )));
+                        }
+                    }
+                    for own in ["id", "name", "path", "createdAt", "updatedAt", "health"] {
+                        if entry.set.contains_key(own) {
+                            return Err(invalid(format!("{at}.set: {own} is not set this way")));
+                        }
+                    }
+                }
+                Desired::BinderyEntries(kind, entries)
+            }
+            // Not reachable: `belongs_to` lets it through for bindery only,
+            // and the guarded arm above takes it there.
+            TaskName::ProwlarrInstances => {
+                return Err(invalid("prowlarr-instances is a bindery task".to_string()))
+            }
+            TaskName::Settings => {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Raw {
+                    settings: BTreeMap<String, serde_json::Value>,
+                }
+                let desired: Raw = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if desired.settings.is_empty() {
+                    return Err(invalid("desired.settings names no setting".to_string()));
+                }
+                for key in desired.settings.keys() {
+                    if key.is_empty() || key.contains('/') || key.contains('?') {
+                        return Err(invalid(format!(
+                            "desired.settings: {key:?} is not a setting key"
+                        )));
+                    }
+                }
+                Desired::BinderySettings(desired.settings)
+            }
             TaskName::QualityDefinitions => {
                 let map: BTreeMap<String, SizeLimits> = serde_json::from_value(raw.desired)
                     .map_err(|e| invalid(format!("desired: {e}")))?;
@@ -808,6 +922,10 @@ impl Spec {
             Desired::Applications(_) => "applications",
             Desired::Indexers(_) => "indexers",
             Desired::IndexerProxies(_) => "indexer-proxies",
+            Desired::BinderyEntries(BinderyKind::DownloadClients, _) => "download-clients",
+            Desired::BinderyEntries(BinderyKind::ProwlarrInstances, _) => "prowlarr-instances",
+            Desired::BinderyEntries(BinderyKind::RootFolders, _) => "root-folders",
+            Desired::BinderySettings(_) => "settings",
         }
     }
 }
