@@ -519,6 +519,11 @@ are secrets in this task, held to the same rules as keys:
 - **Read** `GET /v1/account`, of which only `subscriptions` (`base_url`,
   `topic`) is decoded; the account's tokens, sync topic and user name are
   never held. A decoding error says where it failed, not what it found.
+  ntfy 2.26.0 **omits `subscriptions` when there are none**
+  (`json:"subscriptions,omitempty"` in `server/types.go`), so a missing key
+  is an empty list — otherwise an account could never get its first one.
+  `username` must be present instead (only its presence is checked), which
+  tells an account from any other JSON object.
 - **A subscription counts** if one has the desired `base_url` and the topic.
   The same topic under another `base_url` is still a change, plus a note
   naming that `base_url`, which is not secret.

@@ -48,11 +48,18 @@ struct Health {
 }
 
 /// Only the subscriptions. The account object also carries the user's
-/// tokens, its sync topic and its name; they are never decoded.
+/// tokens, its sync topic and its name; they are never kept.
+///
+/// ntfy 2.26.0 omits `subscriptions` when there are none
+/// (`json:"subscriptions,omitempty"` in `server/types.go`), so a missing key
+/// is an empty list. `username` is required instead, and only its presence
+/// is checked: it tells an account answer from any other JSON object.
 #[derive(Deserialize)]
 pub struct Account {
+    #[allow(dead_code)]
+    username: serde::de::IgnoredAny,
     #[serde(default)]
-    pub subscriptions: Option<Vec<Subscription>>,
+    pub subscriptions: Vec<Subscription>,
 }
 
 /// `display_name` is the person's to choose and is never read or written.
@@ -171,9 +178,7 @@ impl Task for AccountSubscriptions {
                 e.column()
             ),
         })?;
-        account
-            .subscriptions
-            .ok_or_else(|| Error::MissingField(vec![format!("{SUBJECT}: subscriptions")]))
+        Ok(account.subscriptions)
     }
 
     fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
@@ -351,13 +356,29 @@ mod tests {
     }
 
     #[test]
-    fn an_account_without_subscriptions_or_of_another_shape_is_an_error_without_values() {
-        let task = task(HOST, "t\n");
-        let err = task.read(&account(r#"{"role":"user"}"#)).err().unwrap();
+    fn an_account_without_subscriptions_gets_its_first_one() {
+        // What ntfy 2.26.0 sends for an account with no subscriptions: the key
+        // is omitted, not an empty list.
+        let mut recorded: Value = serde_json::from_str(ACCOUNT_JSON).unwrap();
+        recorded.as_object_mut().unwrap().remove("subscriptions");
+        let task = task(HOST, "<masked-topic-1>\n");
+        let t = account(&recorded.to_string());
+        let current = task.read(&t).unwrap();
         assert_eq!(
-            err.to_string(),
-            "the answer has no such field: ntfy account: subscriptions"
+            task.diff(&current).unwrap()[0].to_string(),
+            "ntfy account: subscription 1 (missing) -> (added)"
         );
+    }
+
+    #[test]
+    fn an_answer_that_is_no_account_is_an_error_without_values() {
+        let task = task(HOST, "t\n");
+        let err = task
+            .read(&account(r#"{"role":"user"}"#))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(err.contains("not an account"), "{err}");
         let wrong = r#"{"subscriptions":[{"base_url":"x","topic":"leaky-topic","extra":1},{"topic":"leaky-2"}]}"#;
         let err = task.read(&account(wrong)).err().unwrap().to_string();
         assert!(
