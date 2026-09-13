@@ -27,3 +27,13 @@ secret.
 At recording time the host's desired state (`lib/arr-einstellungen.nix`,
 `.lidarr`) matched: media management and the root folder with its profiles
 `Standard` (quality id 3, metadata id 1).
+
+- `downloadclient.json`, `notification.json` — the providers, and
+  `downloadclient-schema.json`, `notification-schema.json` — the templates
+  of the implementations the host uses (QBittorrent, Sabnzbd, Webhook),
+  recorded 2026-09-13 around 18:30 CEST. **Masked on the host** before they
+  left it: every `fields` entry whose `privacy` is not `normal` and whose
+  value is not `********`, `""` or `null` became `"<masked>"` (that hits the
+  `userName` values), and any other string of 24 or more token characters
+  would have become `"<masked-token>"` (none did). Passwords and keys arrive
+  as `********` already.

@@ -41,6 +41,8 @@ pub enum Error {
     MissingField(Vec<String>),
     #[error("not found on the service: {}", .0.join("; "))]
     NotFound(Vec<String>),
+    #[error("the spec does not fit the service: {}", .0.join("; "))]
+    Mismatch(Vec<String>),
     #[error("the service does not know these qualities from the spec: {}", .0.join(", "))]
     UnknownQualities(Vec<String>),
     #[error("written, but after {waited_secs} s these still differ: {}", .remaining.join("; "))]

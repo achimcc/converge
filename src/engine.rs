@@ -62,6 +62,19 @@ pub trait Task {
     fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error>;
     fn notes(&self, current: &Self::Current) -> Vec<String>;
     fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error>;
+
+    /// Values the service hides when it answers (Servarr returns every
+    /// password as `********`), so no diff can see them. `apply` sends them
+    /// after every run, changed or not, and the service compares them itself;
+    /// each returned line names what was handed over, never its value.
+    /// `plan` does not call this.
+    fn hand_over(
+        &self,
+        _t: &dyn Transport,
+        _current: &Self::Current,
+    ) -> Result<Vec<String>, Error> {
+        Ok(Vec::new())
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -103,6 +116,8 @@ pub struct Report {
     pub version: String,
     pub notes: Vec<String>,
     pub outcome: Outcome,
+    /// `apply` only: what `Task::hand_over` sent.
+    pub handed_over: Vec<String>,
 }
 
 /// probe -> read -> diff -> (write -> read back until equal).
@@ -119,10 +134,15 @@ pub fn run<T: Task>(
     let notes = task.notes(&current);
     let changes = task.diff(&current)?;
     if changes.is_empty() {
+        let handed_over = match mode {
+            Mode::Apply => task.hand_over(t, &current)?,
+            Mode::Plan => Vec::new(),
+        };
         return Ok(Report {
             version,
             notes,
             outcome: Outcome::Unchanged,
+            handed_over,
         });
     }
     if mode == Mode::Plan {
@@ -130,18 +150,24 @@ pub fn run<T: Task>(
             version,
             notes,
             outcome: Outcome::Differs(changes),
+            handed_over: Vec::new(),
         });
     }
     task.write(t, &current)?;
     let written = clock.now();
     loop {
         // An accepted write is not a saved one: ask for the content.
-        let remaining = task.diff(&task.read(t)?)?;
+        let now = task.read(t)?;
+        let remaining = task.diff(&now)?;
         if remaining.is_empty() {
+            // Handed over against what was read back, so an entry the write
+            // just added gets its hidden values too.
+            let handed_over = task.hand_over(t, &now)?;
             return Ok(Report {
                 version,
                 notes,
                 outcome: Outcome::Changed(changes),
+                handed_over,
             });
         }
         let waited = clock.now().duration_since(written);
@@ -366,5 +392,108 @@ mod tests {
             .unwrap()
             .to_string();
         assert_eq!(err, "overall deadline of 30 s exceeded");
+    }
+
+    /// A task whose hand-over is visible: it records what it was handed.
+    struct Handing {
+        inner: QualityDefinitions,
+        handed: std::cell::RefCell<Vec<usize>>,
+    }
+
+    impl Task for Handing {
+        type Current = Vec<crate::services::arr::QualityDefinitionResource>;
+        fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+            self.inner.probe(t)
+        }
+        fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+            self.inner.read(t)
+        }
+        fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+            self.inner.diff(current)
+        }
+        fn notes(&self, current: &Self::Current) -> Vec<String> {
+            self.inner.notes(current)
+        }
+        fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+            self.inner.write(t, current)
+        }
+        fn hand_over(
+            &self,
+            _t: &dyn Transport,
+            current: &Self::Current,
+        ) -> Result<Vec<String>, Error> {
+            self.handed.borrow_mut().push(current.len());
+            Ok(vec!["password handed over".to_string()])
+        }
+    }
+
+    fn handing(desired: &str) -> Handing {
+        Handing {
+            inner: task(desired),
+            handed: std::cell::RefCell::new(Vec::new()),
+        }
+    }
+
+    #[test]
+    fn apply_hands_over_when_unchanged_and_after_reading_back_plan_never() {
+        let t = up().on_get(QUALITY_LIST.path, vec![ok(LIST)]);
+        let unchanged = handing(DESIRED);
+        let report = run(
+            Mode::Apply,
+            &unchanged,
+            &t,
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .unwrap();
+        assert_eq!(report.outcome, Outcome::Unchanged);
+        assert_eq!(report.handed_over, ["password handed over"]);
+        assert_eq!(unchanged.handed.borrow().len(), 1);
+
+        let planned = handing(&desired_with_bluray_min(35.0));
+        let report = run(
+            Mode::Plan,
+            &planned,
+            &t,
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .unwrap();
+        assert!(report.handed_over.is_empty());
+        assert!(
+            planned.handed.borrow().is_empty(),
+            "plan hands nothing over"
+        );
+        let report = run(
+            Mode::Plan,
+            &unchanged,
+            &t,
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .unwrap();
+        assert!(report.handed_over.is_empty());
+        assert_eq!(
+            unchanged.handed.borrow().len(),
+            1,
+            "not even when unchanged"
+        );
+
+        let new = list_with_bluray_min(35.0);
+        let t = up()
+            .on_get(QUALITY_LIST.path, vec![ok(LIST), ok(&new)])
+            .on_put(vec![Step::Answer(202, String::new())]);
+        let changed = handing(&desired_with_bluray_min(35.0));
+        let report = run(
+            Mode::Apply,
+            &changed,
+            &t,
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .unwrap();
+        assert!(matches!(report.outcome, Outcome::Changed(_)));
+        assert_eq!(report.handed_over, ["password handed over"]);
+        assert_eq!(changed.handed.borrow().len(), 1, "once, after reading back");
     }
 }

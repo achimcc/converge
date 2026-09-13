@@ -10,14 +10,14 @@ use converge::{
     engine::{run, Mode, Outcome, Timing},
     error::Error,
     schema,
-    services::{arr, jellyfin, ntfy, servarr, trailarr},
-    spec::{Desired, Spec},
+    services::{arr, jellyfin, ntfy, providers, servarr, trailarr},
+    spec::{Desired, Service, Spec},
 };
 
 const USAGE: &str = "usage:
   converge apply [--deadline <seconds>] <spec.json>...
   converge plan [--deadline <seconds>] <spec.json>...
-  converge schema-check --service <radarr|sonarr|lidarr|jellyfin|trailarr> --openapi <file> [--spec <spec.json>]...
+  converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr> --openapi <file> [--spec <spec.json>]...
   converge schema-check --service ntfy [--spec <spec.json>]...";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -191,6 +191,44 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::DownloadClients(desired)
+        | Desired::Notifications(desired)
+        | Desired::Applications(desired) => {
+            let kind = match spec.desired {
+                Desired::DownloadClients(_) => providers::Kind::DownloadClients,
+                Desired::Notifications(_) => providers::Kind::Notifications,
+                _ => providers::Kind::Applications,
+            };
+            let api = providers::ProviderApi::of(spec.service, kind).ok_or_else(|| {
+                fail(Error::SpecInvalid {
+                    path: spec.path.clone(),
+                    reason: format!("{} has no such providers", spec.service.name()),
+                })
+            })?;
+            // Every hidden value before the first request, as for plugins.
+            let mut targets = Vec::new();
+            for (name, entry) in &desired.providers {
+                let mut secret_fields = std::collections::BTreeMap::new();
+                for (field, credential) in &entry.secret_fields {
+                    secret_fields.insert(
+                        field.clone(),
+                        read_credential(credentials, credential).map_err(fail)?,
+                    );
+                }
+                targets.push(providers::ProviderTarget {
+                    name: name.clone(),
+                    implementation: entry.implementation.clone(),
+                    set: entry.set.clone(),
+                    fields: entry.fields.clone(),
+                    secret_fields,
+                });
+            }
+            let task = providers::Providers {
+                api,
+                providers: targets,
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
         Desired::RootFolders(desired) => {
             let task = servarr::RootFolders {
                 api: servarr_api(&spec).map_err(fail)?,
@@ -211,6 +249,9 @@ fn reconcile_one(
     println!("{label}: service version {}", report.version);
     for note in &report.notes {
         println!("{label}: note: {note}");
+    }
+    for line in &report.handed_over {
+        println!("{label}: {line}");
     }
     match report.outcome {
         Outcome::Unchanged => {
@@ -304,12 +345,19 @@ fn schema_check(args: &[String]) -> ExitCode {
         "radarr" | "sonarr" => {
             let mut endpoints = arr::ENDPOINTS.to_vec();
             endpoints.extend(servarr::V3.task_endpoints());
+            endpoints.extend(providers::ProviderApi::endpoints_of(Service::Radarr));
             (endpoints, arr::wire_types())
         }
         "lidarr" => {
             let mut endpoints = vec![servarr::V1.status];
             endpoints.extend(servarr::V1.task_endpoints());
+            endpoints.extend(providers::ProviderApi::endpoints_of(Service::Lidarr));
             (endpoints, servarr::lidarr_wire_types())
+        }
+        "prowlarr" => {
+            let mut endpoints = vec![servarr::V1.status];
+            endpoints.extend(providers::ProviderApi::endpoints_of(Service::Prowlarr));
+            (endpoints, servarr::prowlarr_wire_types())
         }
         "jellyfin" => (jellyfin::ENDPOINTS.to_vec(), jellyfin::wire_types()),
         "trailarr" => (trailarr::ENDPOINTS.to_vec(), trailarr::wire_types()),
@@ -400,6 +448,32 @@ fn schema_check(args: &[String]) -> ExitCode {
                 schema::check_paths(&document, servarr::NAMING, set),
                 set.len(),
             ),
+            // The `fields` entries depend on the implementation and have no
+            // schema (`Field.value` is untyped): only the top-level fields
+            // are checked here, the entries against the answer at runtime.
+            Desired::DownloadClients(desired)
+            | Desired::Notifications(desired)
+            | Desired::Applications(desired) => {
+                let kind = match spec.desired {
+                    Desired::DownloadClients(_) => providers::Kind::DownloadClients,
+                    Desired::Notifications(_) => providers::Kind::Notifications,
+                    _ => providers::Kind::Applications,
+                };
+                match providers::ProviderApi::of(spec.service, kind) {
+                    Some(api) => {
+                        let mut found = Vec::new();
+                        for (name, entry) in &desired.providers {
+                            found.extend(
+                                schema::check_paths(&document, api.component, &entry.set)
+                                    .into_iter()
+                                    .map(|f| format!("{} {name}: {f}", api.subject)),
+                            );
+                        }
+                        (found, desired.providers.values().map(|p| p.set.len()).sum())
+                    }
+                    None => (vec![format!("{} has no such providers", service)], 0),
+                }
+            }
             Desired::MediaManagement(set) => (
                 schema::check_paths(&document, servarr::MEDIA_MANAGEMENT, set),
                 set.len(),

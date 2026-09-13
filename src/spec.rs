@@ -16,6 +16,7 @@ pub enum Service {
     Trailarr,
     Ntfy,
     Lidarr,
+    Prowlarr,
 }
 
 impl Service {
@@ -27,13 +28,14 @@ impl Service {
             Service::Trailarr => "trailarr",
             Service::Ntfy => "ntfy",
             Service::Lidarr => "lidarr",
+            Service::Prowlarr => "prowlarr",
         }
     }
 
     /// The request header the API key travels in.
     pub fn key_header(self) -> &'static str {
         match self {
-            Service::Radarr | Service::Sonarr | Service::Lidarr => "X-Api-Key",
+            Service::Radarr | Service::Sonarr | Service::Lidarr | Service::Prowlarr => "X-Api-Key",
             Service::Jellyfin => "X-Emby-Token",
             Service::Trailarr => "X-API-KEY",
             Service::Ntfy => "Authorization",
@@ -75,6 +77,9 @@ enum TaskName {
     Naming,
     MediaManagement,
     RootFolders,
+    DownloadClients,
+    Notifications,
+    Applications,
 }
 
 impl TaskName {
@@ -90,6 +95,10 @@ impl TaskName {
             TaskName::Naming | TaskName::MediaManagement | TaskName::RootFolders => {
                 service.is_servarr()
             }
+            TaskName::DownloadClients | TaskName::Notifications => {
+                service.is_servarr() || service == Service::Prowlarr
+            }
+            TaskName::Applications => service == Service::Prowlarr,
         }
     }
 }
@@ -267,6 +276,46 @@ const ROOT_FOLDER_OWN: [&str; 6] = [
     "unmappedFolders",
 ];
 
+/// Servarr providers of one kind (download clients, notifications,
+/// Prowlarr's applications) by name.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderSettings {
+    pub providers: BTreeMap<String, ProviderEntry>,
+}
+
+/// One provider: its implementation (`QBittorrent`, `Webhook`, …), top-level
+/// fields of the resource, entries of its `fields` list by name, and entries
+/// whose value comes from a credential. The service answers those with
+/// `********`, so they are handed over on every `apply` and never compared.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderEntry {
+    pub implementation: String,
+    #[serde(default)]
+    pub set: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub fields: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub secret_fields: BTreeMap<String, String>,
+}
+
+/// Top-level fields of a provider the service owns or converge sets itself.
+const PROVIDER_OWN: [&str; 12] = [
+    "id",
+    "name",
+    "implementation",
+    "implementationName",
+    "configContract",
+    "fields",
+    "tags",
+    "infoLink",
+    "link",
+    "message",
+    "presets",
+    "testCommand",
+];
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Desired {
     QualityDefinitions(BTreeMap<String, SizeLimits>),
@@ -281,6 +330,9 @@ pub enum Desired {
     Naming(BTreeMap<String, serde_json::Value>),
     MediaManagement(BTreeMap<String, serde_json::Value>),
     RootFolders(RootFolderSettings),
+    DownloadClients(ProviderSettings),
+    Notifications(ProviderSettings),
+    Applications(ProviderSettings),
 }
 
 /// A non-empty map of plain (undotted) field names, none of them `forbidden`.
@@ -634,6 +686,58 @@ impl Spec {
                 }
                 Desired::RootFolders(desired)
             }
+            TaskName::DownloadClients | TaskName::Notifications | TaskName::Applications => {
+                let desired: ProviderSettings = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if desired.providers.is_empty() {
+                    return Err(invalid("desired.providers names no provider".to_string()));
+                }
+                for (name, provider) in &desired.providers {
+                    if name.is_empty() {
+                        return Err(invalid(
+                            "desired.providers: a provider name is empty".to_string(),
+                        ));
+                    }
+                    let at = format!("desired.providers.{name}");
+                    if provider.implementation.is_empty() {
+                        return Err(invalid(format!("{at}.implementation is empty")));
+                    }
+                    if provider.set.is_empty()
+                        && provider.fields.is_empty()
+                        && provider.secret_fields.is_empty()
+                    {
+                        return Err(invalid(format!("{at} names no field")));
+                    }
+                    if !provider.set.is_empty() {
+                        plain_fields(&provider.set, &format!("{at}.set"), &PROVIDER_OWN)
+                            .map_err(invalid)?;
+                    }
+                    for field in provider.fields.keys() {
+                        if field.is_empty() {
+                            return Err(invalid(format!("{at}.fields: a field name is empty")));
+                        }
+                    }
+                    for (field, credential) in &provider.secret_fields {
+                        if field.is_empty() {
+                            return Err(invalid(format!(
+                                "{at}.secret_fields: a field name is empty"
+                            )));
+                        }
+                        credential_name(credential, &format!("{at}.secret_fields.{field}"))
+                            .map_err(invalid)?;
+                        if provider.fields.contains_key(field) {
+                            return Err(invalid(format!(
+                                "{at}: {field} is both in fields and in secret_fields"
+                            )));
+                        }
+                    }
+                }
+                match raw.task {
+                    TaskName::DownloadClients => Desired::DownloadClients(desired),
+                    TaskName::Notifications => Desired::Notifications(desired),
+                    _ => Desired::Applications(desired),
+                }
+            }
         };
         Ok(Spec {
             path: path.to_path_buf(),
@@ -658,6 +762,9 @@ impl Spec {
             Desired::Naming(_) => "naming",
             Desired::MediaManagement(_) => "media-management",
             Desired::RootFolders(_) => "root-folders",
+            Desired::DownloadClients(_) => "download-clients",
+            Desired::Notifications(_) => "notifications",
+            Desired::Applications(_) => "applications",
         }
     }
 }
@@ -962,6 +1069,7 @@ mod tests {
             Service::Jellyfin,
             Service::Trailarr,
             Service::Lidarr,
+            Service::Prowlarr,
         ] {
             assert_eq!(value(service).expose(), "t0ken", "{service:?}");
         }
@@ -1045,6 +1153,63 @@ mod tests {
         );
         let misspelt = LIDARR_FOLDERS.replace(r#""profiles""#, r#""profile""#);
         assert!(reason(servarr("lidarr", "root-folders", &misspelt)).contains("profile"));
+    }
+
+    const QBITTORRENT: &str = r#"{"providers":{"qBittorrent":{"implementation":"QBittorrent","set":{"enable":true,"priority":1},"fields":{"host":"10.0.20.10","port":8080,"username":"admin","movieCategory":"radarr"},"secret_fields":{"password":"qbittorrent-password"}}}}"#;
+
+    #[test]
+    fn providers_are_strict() {
+        let spec = servarr("radarr", "download-clients", QBITTORRENT).unwrap();
+        assert_eq!(spec.task_name(), "download-clients");
+        let Desired::DownloadClients(desired) = spec.desired else {
+            panic!("wrong task")
+        };
+        let qb = &desired.providers["qBittorrent"];
+        assert_eq!(qb.secret_fields["password"], "qbittorrent-password");
+        assert_eq!(qb.fields["port"], 8080);
+
+        assert!(servarr("prowlarr", "download-clients", QBITTORRENT).is_ok());
+        assert!(servarr("lidarr", "notifications", QBITTORRENT).is_ok());
+        assert!(servarr("prowlarr", "applications", QBITTORRENT).is_ok());
+        assert!(reason(servarr("radarr", "applications", QBITTORRENT)).contains("does not belong"));
+        assert!(reason(servarr("prowlarr", "naming", r#"{"x":1}"#)).contains("does not belong"));
+        assert_eq!(
+            servarr("prowlarr", "applications", QBITTORRENT)
+                .unwrap()
+                .service
+                .key_header(),
+            "X-Api-Key"
+        );
+
+        assert!(
+            reason(servarr("radarr", "download-clients", r#"{"providers":{}}"#))
+                .contains("names no provider")
+        );
+        let nameless = QBITTORRENT.replace(r#""qBittorrent""#, r#""""#);
+        assert!(reason(servarr("radarr", "download-clients", &nameless)).contains("name is empty"));
+        let no_impl = QBITTORRENT.replace(r#""QBittorrent""#, r#""""#);
+        assert!(reason(servarr("radarr", "download-clients", &no_impl))
+            .contains("implementation is empty"));
+        let nothing = r#"{"providers":{"x":{"implementation":"Webhook"}}}"#;
+        assert!(reason(servarr("radarr", "notifications", nothing)).contains("names no field"));
+        for own in ["name", "id", "fields", "implementation", "tags"] {
+            let text = QBITTORRENT.replace(r#""priority""#, &format!(r#""{own}""#));
+            assert!(
+                reason(servarr("radarr", "download-clients", &text))
+                    .contains("is not set this way"),
+                "{own}"
+            );
+        }
+        let both = QBITTORRENT.replace(r#""username":"admin""#, r#""password":"x""#);
+        assert!(reason(servarr("radarr", "download-clients", &both))
+            .contains("both in fields and in secret_fields"));
+        let path_credential = QBITTORRENT.replace("qbittorrent-password", "../x");
+        assert!(
+            reason(servarr("radarr", "download-clients", &path_credential))
+                .contains("is not a credential name")
+        );
+        let misspelt = QBITTORRENT.replace("secret_fields", "secrets");
+        assert!(reason(servarr("radarr", "download-clients", &misspelt)).contains("secrets"));
     }
 
     #[test]

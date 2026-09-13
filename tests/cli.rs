@@ -58,7 +58,7 @@ fn schema_check_passes_for_the_vendored_file() {
     // Exit 0 alone would also pass for a program that does nothing.
     assert!(
         String::from_utf8_lossy(&out.stdout)
-            .contains("radarr: 11 endpoints and their wire types match"),
+            .contains("radarr: 19 endpoints and their wire types match"),
         "{}",
         String::from_utf8_lossy(&out.stdout)
     );
@@ -698,7 +698,7 @@ fn schema_check_passes_lidarr_specs_and_names_a_provider_field_name() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("lidarr: 10 endpoints and their wire types match"),
+        stdout.contains("lidarr: 18 endpoints and their wire types match"),
         "{stdout}"
     );
     // path, name, defaultMonitorOption, defaultQualityProfileId; two fields.
@@ -720,6 +720,153 @@ fn schema_check_passes_lidarr_specs_and_names_a_provider_field_name() {
     assert!(
         stderr.contains(
             "MediaManagementConfigResource.hardlinks_copy: MediaManagementConfigResource has no property hardlinks_copy"
+        ),
+        "{stderr}"
+    );
+}
+
+const PROWLARR_STATUS: &str = include_str!("fixtures/prowlarr-2.5.2.5491/system-status.json");
+const PROWLARR_CLIENTS: &str = include_str!("fixtures/prowlarr-2.5.2.5491/downloadclient.json");
+
+#[test]
+fn a_provider_password_travels_only_in_the_put_body_and_never_in_output() {
+    let server = Server::start(vec![
+        ("GET", "/api/v1/system/status", 200, PROWLARR_STATUS.into()),
+        (
+            "GET",
+            "/api/v1/downloadclient",
+            200,
+            PROWLARR_CLIENTS.into(),
+        ),
+        (
+            "PUT",
+            "/api/v1/downloadclient/2?forceSave=true",
+            202,
+            String::new(),
+        ),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let password = "qb-pass-5d1e-must-not-leak";
+    std::fs::write(dir.path().join("prowlarr-api-key"), "k\n").unwrap();
+    std::fs::write(
+        dir.path().join("qbittorrent-password"),
+        format!("{password}\n"),
+    )
+    .unwrap();
+    let spec = dir.path().join("p.json");
+    std::fs::write(
+        &spec,
+        format!(
+            r#"{{"service":"prowlarr","base_url":"{}","api_key_credential":"prowlarr-api-key","task":"download-clients","desired":{{"providers":{{"qBittorrent":{{"implementation":"QBittorrent","set":{{"enable":true}},"fields":{{"host":"10.0.10.11","port":8080,"category":"prowlarr"}},"secret_fields":{{"password":"qbittorrent-password"}}}}}}}}}}"#,
+            server.base_url()
+        ),
+    )
+    .unwrap();
+    let run = |command: &str| {
+        let out = converge()
+            .arg(command)
+            .arg(&spec)
+            .env("CREDENTIALS_DIRECTORY", dir.path())
+            .output()
+            .unwrap();
+        let all = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !all.contains(password),
+            "the password is in the output: {all}"
+        );
+        (out.status.code(), all)
+    };
+
+    let (code, all) = run("plan");
+    assert_eq!(code, Some(0), "{all}");
+    assert!(
+        all.contains("prowlarr download-clients: unchanged"),
+        "{all}"
+    );
+    assert!(
+        all.contains("note: not in the spec: download client SABnzbd"),
+        "{all}"
+    );
+    assert!(
+        server.requests().iter().all(|r| r.method == "GET"),
+        "plan hands nothing over"
+    );
+
+    let (code, all) = run("apply");
+    assert_eq!(code, Some(0), "{all}");
+    assert!(
+        all.contains("prowlarr download-clients: download client qBittorrent: password handed over from credentials (hidden; the service compares)"),
+        "{all}"
+    );
+    let requests = server.requests();
+    let puts: Vec<_> = requests.iter().filter(|r| r.method == "PUT").collect();
+    assert_eq!(
+        puts.len(),
+        1,
+        "one hand-over, no write: nothing visible differs"
+    );
+    assert!(puts[0].body.contains(password));
+    assert!(requests
+        .iter()
+        .all(|r| !r.path.contains(password) && !r.headers.contains(password)));
+}
+
+#[test]
+fn schema_check_passes_a_prowlarr_applications_spec_and_rejects_an_own_field() {
+    let openapi = format!(
+        "{}/openapi/prowlarr-2.5.2.5491.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let write = |file: &str, set: &str| {
+        let path = dir.path().join(file);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"service":"prowlarr","base_url":"http://localhost:9696","api_key_credential":"k","task":"applications","desired":{{"providers":{{"Radarr":{{"implementation":"Radarr","set":{set},"fields":{{"syncCategories":[2000]}},"secret_fields":{{"apiKey":"radarr-api-key"}}}}}}}}}}"#
+            ),
+        )
+        .unwrap();
+        path
+    };
+    let good = write("good.json", r#"{"syncLevel":"fullSync"}"#);
+    let out = schema_check("prowlarr", Some(&openapi), &[&good]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("prowlarr: 13 endpoints and their wire types match"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("1 spec field(s) in 1 spec(s) match"),
+        "{stdout}"
+    );
+
+    // Prowlarr 2.5.2's description lacks `enable` on ApplicationResource,
+    // although the running service answers with it. The check follows the
+    // description, so a spec cannot set it -- found writing this test.
+    let enable = write("enable.json", r#"{"enable":true}"#);
+    let out = schema_check("prowlarr", Some(&openapi), &[&enable]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr)
+        .contains("ApplicationResource.enable: ApplicationResource has no property enable"));
+
+    let bad = write("bad.json", r#"{"syncLevel":"everything"}"#);
+    let out = schema_check("prowlarr", Some(&openapi), &[&bad]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(
+            "application Radarr: ApplicationResource.syncLevel: \"everything\" is not one of"
         ),
         "{stderr}"
     );

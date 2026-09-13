@@ -618,10 +618,103 @@ and `tests/fixtures/lidarr-3.1.0.4875/`. Before release, `plan` ran on the
 host against all three services with the specs the host deploys, and
 reported `unchanged` for all eight.
 
-## 12. Not in the pilot
+## 12. Servarr providers and hidden values (v0.8.0, 2026-09-13)
+
+Download clients, notifications and Prowlarr's applications are Servarr
+*providers*: a resource with top-level fields (`enable`, `priority`,
+`onDownload`, `syncLevel`, …) and a `fields` list of
+`{name, value, privacy, …}` entries whose names depend on the
+implementation. Prowlarr (API v1) joins as a service for them.
+
+| task | services | read | write |
+|---|---|---|---|
+| `download-clients` | Radarr, Sonarr, Lidarr, Prowlarr | `GET …/downloadclient` | `POST …/downloadclient?forceSave=true` (missing), `PUT …/downloadclient/{id}?forceSave=true` |
+| `notifications` | Radarr, Sonarr, Lidarr, Prowlarr | `GET …/notification` | the same under `notification` |
+| `applications` | Prowlarr | `GET /api/v1/applications` | the same under `applications` |
+
+```json
+{ "service": "radarr", "task": "download-clients", "…": "…",
+  "desired": { "providers": {
+    "qBittorrent": {
+      "implementation": "QBittorrent",
+      "set": { "enable": true, "priority": 1 },
+      "fields": { "host": "10.0.10.11", "port": 8080, "username": "admin",
+                  "movieCategory": "radarr" },
+      "secret_fields": { "password": "qbittorrent-webui-password" } } } } }
+```
+
+### What the service hides
+
+Measured on the host on 2026-09-13 against Radarr 6.3.0.10514, Sonarr
+4.0.19.2979, Lidarr 3.1.0.4875 and Prowlarr 2.5.2.5491: every field with
+`privacy` `password` or `apiKey` is answered as `********`; `userName` is
+answered in the clear. The source says why and what follows:
+
+- `SchemaBuilder.ReadFromSchema`: a field that comes back as `********` keeps
+  the stored value. So a whole resource can be sent back as read without
+  touching a secret -- and **a stale secret cannot be seen by reading.**
+- `ProviderControllerBase.UpdateProvider` in Radarr, Sonarr and Lidarr writes,
+  and tests the connection, only if the definition changed (memberwise
+  `Equals` of the settings). **Prowlarr writes on every update** and tests
+  unless `forceSave` is set, and an update of an application starts a full
+  indexer sync to it (`ApplicationService`).
+
+Decided with the host's owner: secrets are **handed over on every `apply`**,
+not fingerprinted. converge keeps no state; Radarr, Sonarr and Lidarr compare
+for themselves, and a secret changed in the web UI is set back as well. The
+price is a write and an indexer sync per Prowlarr application per run, which
+at a daily timer is nothing Prowlarr does not do on its own.
+
+### The engine: `hand_over`
+
+`Task` gains `hand_over(transport, current) -> lines`, empty by default. The
+engine calls it in `apply` only: after `unchanged`, or after the read-back
+of a write (so a provider just added gets its secret too). `plan` never
+calls it. Each line names what was handed over, never its value:
+`download client qBittorrent: password handed over from credentials (hidden;
+the service compares)`. There is no read-back for a hidden value; Prowlarr's
+own connection test against the stored value (HTTP 200) was the acceptance.
+
+### Providers
+
+- **Found by name.** A provider the spec names and the service lacks is added
+  from the template `GET …/schema` returns for its `implementation`: the
+  template with the name, the `set` fields, the `fields` values and the
+  secrets, without `id`. The templates are read only when something is
+  missing; an empty template list is an error.
+- **An existing provider** must have the spec's implementation; converge does
+  not change one. Every `set` key must be in the answer, every `fields` and
+  `secret_fields` name in its `fields` list, and every secret field must be
+  one the service hides -- a `privacy normal` field is shown and belongs in
+  `fields`, where it is compared. A `fields` entry without `value` is `null`.
+- **Visible differences** are changes (`fields.port 8080 -> 8081`); the write
+  sends the entry as read with the spec's values and the secrets.
+- **Every write sends `forceSave=true`.** No connection test runs: a test
+  against a download client with a stale password is a failed login, and
+  qBittorrent bans the address after a few (the host, 2026-09-12).
+- Writes accept `200`, `201` and `202`. Providers the spec does not name are a
+  note; nothing is deleted.
+- At build time only the `set` fields are checked, against
+  `DownloadClientResource`, `NotificationResource` or `ApplicationResource`.
+  `Field.value` has no type, so the `fields` entries are checked at runtime
+  and against the recorded answers. Prowlarr 2.5.2's description lacks
+  `enable` on `ApplicationResource`, although the service answers with it; a
+  spec cannot set it.
+- A request body that holds a secret is never printed; a failed serialization
+  names the path only.
+
+Recorded answers: `downloadclient*.json` and `notification*.json` in the
+Radarr, Sonarr and Lidarr fixture directories, `tests/fixtures/prowlarr-2.5.2.5491/`,
+masked on the host (`userName` values). Before release, `plan` ran on the
+host with the eight provider specs the host deploys (`unchanged` for all),
+and one `apply` handed Prowlarr's SABnzbd key over: the list stayed
+byte-identical and Prowlarr's connection test with the stored key answered
+200.
+
+## 13. Not in the pilot
 
 - Other services and tasks (Authentik, Seerr, …).
 - TLS, JSON output, a NixOS module.
 - Deleting things. `converge` only sets what the spec names, and appends
-  list entries (§8), connections (§9), subscriptions (§10) and root folders (§11) it is
+  list entries (§8), connections (§9), subscriptions (§10), root folders (§11) and providers (§12) it is
   responsible for.

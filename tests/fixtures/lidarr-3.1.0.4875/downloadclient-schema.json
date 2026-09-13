@@ -1,0 +1,406 @@
+[
+  {
+    "enable": false,
+    "protocol": "torrent",
+    "priority": 1,
+    "removeCompletedDownloads": true,
+    "removeFailedDownloads": true,
+    "name": "",
+    "fields": [
+      {
+        "order": 0,
+        "name": "host",
+        "label": "Host",
+        "value": "localhost",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "port",
+        "label": "Port",
+        "value": 8080,
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "useSsl",
+        "label": "Use SSL",
+        "helpText": "Use a secure connection. See Options -> Web UI -> 'Use HTTPS instead of HTTP' in qBittorrent.",
+        "value": false,
+        "type": "checkbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "urlBase",
+        "label": "Url Base",
+        "helpText": "Adds a prefix to the qBittorrent url, e.g. http://[host]:[port]/[urlBase]/api",
+        "type": "textbox",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 4,
+        "name": "username",
+        "label": "Username",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "userName",
+        "isFloat": false
+      },
+      {
+        "order": 5,
+        "name": "password",
+        "label": "Password",
+        "type": "password",
+        "advanced": false,
+        "privacy": "password",
+        "isFloat": false
+      },
+      {
+        "order": 6,
+        "name": "musicCategory",
+        "label": "Category",
+        "helpText": "Adding a category specific to Lidarr avoids conflicts with unrelated downloads, but it's optional",
+        "value": "lidarr",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 7,
+        "name": "musicImportedCategory",
+        "label": "Post-Import Category",
+        "helpText": "Category for Lidarr to set after it has imported the download. Lidarr will not remove torrents in that category even if seeding finished. Leave blank to keep same category.",
+        "type": "textbox",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 8,
+        "name": "recentMusicPriority",
+        "label": "Recent Priority",
+        "helpText": "Priority to use when grabbing albums released within the last 14 days",
+        "value": 0,
+        "type": "select",
+        "advanced": false,
+        "selectOptions": [
+          {
+            "value": 0,
+            "name": "Last",
+            "order": 0
+          },
+          {
+            "value": 1,
+            "name": "First",
+            "order": 1
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 9,
+        "name": "olderMusicPriority",
+        "label": "Older Priority",
+        "helpText": "Priority to use when grabbing albums released over 14 days ago",
+        "value": 0,
+        "type": "select",
+        "advanced": false,
+        "selectOptions": [
+          {
+            "value": 0,
+            "name": "Last",
+            "order": 0
+          },
+          {
+            "value": 1,
+            "name": "First",
+            "order": 1
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 10,
+        "name": "initialState",
+        "label": "Initial State",
+        "helpText": "Initial state for torrents added to qBittorrent",
+        "value": 0,
+        "type": "select",
+        "advanced": false,
+        "selectOptions": [
+          {
+            "value": 0,
+            "name": "Started",
+            "order": 7,
+            "hint": "(0)"
+          },
+          {
+            "value": 1,
+            "name": "Force Started",
+            "order": 10,
+            "hint": "(1)"
+          },
+          {
+            "value": 2,
+            "name": "Stopped",
+            "order": 13,
+            "hint": "(2)"
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 11,
+        "name": "sequentialOrder",
+        "label": "Sequential Order",
+        "helpText": "Download in sequential order (qBittorrent 4.1.0+)",
+        "value": false,
+        "type": "checkbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 12,
+        "name": "firstAndLast",
+        "label": "First and Last First",
+        "helpText": "Download first and last pieces first (qBittorrent 4.1.0+)",
+        "value": false,
+        "type": "checkbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 13,
+        "name": "contentLayout",
+        "label": "Content Layout",
+        "helpText": "Whether to use qBittorrent's configured content layout, the original layout from the torrent or always create a subfolder (qBittorrent 4.3.2+)",
+        "value": 0,
+        "type": "select",
+        "advanced": false,
+        "selectOptions": [
+          {
+            "value": 0,
+            "name": "Default",
+            "order": 0
+          },
+          {
+            "value": 1,
+            "name": "Original",
+            "order": 1
+          },
+          {
+            "value": 2,
+            "name": "Subfolder",
+            "order": 2
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "qBittorrent",
+    "implementation": "QBittorrent",
+    "configContract": "QBittorrentSettings",
+    "infoLink": "https://wiki.servarr.com/lidarr/supported#qbittorrent",
+    "tags": [],
+    "presets": []
+  },
+  {
+    "enable": false,
+    "protocol": "usenet",
+    "priority": 1,
+    "removeCompletedDownloads": true,
+    "removeFailedDownloads": true,
+    "name": "",
+    "fields": [
+      {
+        "order": 0,
+        "name": "host",
+        "label": "Host",
+        "value": "localhost",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "port",
+        "label": "Port",
+        "value": 8080,
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "useSsl",
+        "label": "Use SSL",
+        "helpText": "Use secure connection when connecting to Sabnzbd",
+        "value": false,
+        "type": "checkbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "urlBase",
+        "label": "Url Base",
+        "helpText": "Adds a prefix to the Sabnzbd url, e.g. http://[host]:[port]/[urlBase]/api",
+        "type": "textbox",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 4,
+        "name": "apiKey",
+        "label": "API Key",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "apiKey",
+        "isFloat": false
+      },
+      {
+        "order": 5,
+        "name": "username",
+        "label": "Username",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "userName",
+        "isFloat": false
+      },
+      {
+        "order": 6,
+        "name": "password",
+        "label": "Password",
+        "type": "password",
+        "advanced": false,
+        "privacy": "password",
+        "isFloat": false
+      },
+      {
+        "order": 7,
+        "name": "musicCategory",
+        "label": "Category",
+        "helpText": "Adding a category specific to Lidarr avoids conflicts with unrelated downloads, but it's optional",
+        "value": "music",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 8,
+        "name": "recentMusicPriority",
+        "label": "Recent Priority",
+        "helpText": "Priority to use when grabbing albums released within the last 14 days",
+        "value": -100,
+        "type": "select",
+        "advanced": false,
+        "selectOptions": [
+          {
+            "value": -100,
+            "name": "Default",
+            "order": -100
+          },
+          {
+            "value": -2,
+            "name": "Paused",
+            "order": -2
+          },
+          {
+            "value": -1,
+            "name": "Low",
+            "order": -1
+          },
+          {
+            "value": 0,
+            "name": "Normal",
+            "order": 0
+          },
+          {
+            "value": 1,
+            "name": "High",
+            "order": 1
+          },
+          {
+            "value": 2,
+            "name": "Force",
+            "order": 2
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 9,
+        "name": "olderMusicPriority",
+        "label": "Older Priority",
+        "helpText": "Priority to use when grabbing albums released over 14 days ago",
+        "value": -100,
+        "type": "select",
+        "advanced": false,
+        "selectOptions": [
+          {
+            "value": -100,
+            "name": "Default",
+            "order": -100
+          },
+          {
+            "value": -2,
+            "name": "Paused",
+            "order": -2
+          },
+          {
+            "value": -1,
+            "name": "Low",
+            "order": -1
+          },
+          {
+            "value": 0,
+            "name": "Normal",
+            "order": 0
+          },
+          {
+            "value": 1,
+            "name": "High",
+            "order": 1
+          },
+          {
+            "value": 2,
+            "name": "Force",
+            "order": 2
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "SABnzbd",
+    "implementation": "Sabnzbd",
+    "configContract": "SabnzbdSettings",
+    "infoLink": "https://wiki.servarr.com/lidarr/supported#sabnzbd",
+    "tags": [],
+    "presets": []
+  }
+]

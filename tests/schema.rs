@@ -409,6 +409,56 @@ fn trailer_profile_fields_are_checked_by_name_and_type() {
     );
 }
 
+// --- Servarr providers --------------------------------------------------------
+
+#[test]
+fn the_provider_endpoints_match_for_all_four_services() {
+    use converge::{services::providers::ProviderApi, spec::Service};
+    for (file, service) in [
+        ("radarr-6.3.0.10514", Service::Radarr),
+        ("sonarr-4.0.19.2979", Service::Sonarr),
+        ("lidarr-3.1.0.4875", Service::Lidarr),
+        ("prowlarr-2.5.2.5491", Service::Prowlarr),
+    ] {
+        let endpoints = ProviderApi::endpoints_of(service);
+        assert!(!endpoints.is_empty());
+        assert_eq!(
+            check(&doc(file), &endpoints, &[]),
+            Vec::<String>::new(),
+            "{file}"
+        );
+    }
+}
+
+#[test]
+fn provider_top_level_fields_are_checked_per_service() {
+    // Lidarr's webhook fires on a release import; Radarr's on a download.
+    assert_eq!(
+        servarr_paths(
+            "lidarr-3.1.0.4875",
+            "NotificationResource",
+            serde_json::json!({"onReleaseImport": true, "onUpgrade": true, "includeHealthWarnings": false})
+        ),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        servarr_paths(
+            "lidarr-3.1.0.4875",
+            "NotificationResource",
+            serde_json::json!({"onDownload": true})
+        ),
+        ["NotificationResource.onDownload: NotificationResource has no property onDownload"]
+    );
+    assert_eq!(
+        servarr_paths(
+            "radarr-6.3.0.10514",
+            "DownloadClientResource",
+            serde_json::json!({"enable": true, "priority": "1"})
+        ),
+        ["DownloadClientResource.priority: expects integer, the spec has a string"]
+    );
+}
+
 // --- Servarr: naming, media management, root folders ------------------------
 
 fn servarr_findings(openapi: &Value, lidarr: bool) -> Vec<String> {

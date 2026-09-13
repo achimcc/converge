@@ -164,6 +164,11 @@ pub fn lidarr_wire_types() -> Vec<schemars::Schema> {
     ]
 }
 
+/// Prowlarr's: only its status answer is typed; providers are documents.
+pub fn prowlarr_wire_types() -> Vec<schemars::Schema> {
+    vec![schemars::schema_for!(crate::services::arr::SystemResource)]
+}
+
 /// A quality profile, read for its id and name. Named after the component so
 /// `schema-check` compares exactly these two fields.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -185,7 +190,11 @@ pub struct MetadataProfileName {
 /// Readiness: the status endpoint answers with a version. A refused key is
 /// fatal; anything else is worth waiting for.
 pub fn probe(t: &dyn Transport, api: &Api) -> Result<String, Probe> {
-    let ep = api.status;
+    probe_status(t, api.status)
+}
+
+/// The same against a status endpoint of any Servarr API (Prowlarr's too).
+pub fn probe_status(t: &dyn Transport, ep: Endpoint) -> Result<String, Probe> {
     let reply = t.get(ep.path).map_err(|e| Probe::NotYet(e.to_string()))?;
     match reply.status {
         200 => {}

@@ -19,8 +19,8 @@ script should have been:
 
 ## Status
 
-Early. **v0.7.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**
-(API v1), **Jellyfin** (10.11), **Trailarr** (0.11) and **ntfy** (2.26), each
+Early. **v0.8.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+**Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11) and **ntfy** (2.26), each
 replacing a shell unit or an OpenTofu resource on the host it was written
 for:
 
@@ -29,6 +29,8 @@ for:
 | Radarr, Sonarr | `quality-definitions` | size limits (MB per minute) per quality |
 | Radarr, Sonarr | `quality-profiles` | qualities every profile must allow |
 | Radarr, Sonarr, Lidarr | `naming`, `media-management` | top-level fields of the configuration document |
+| Radarr, Sonarr, Lidarr, Prowlarr | `download-clients`, `notifications` | providers by name: top-level fields, `fields` entries by name, secrets from credentials handed over on every `apply` |
+| Prowlarr | `applications` | the same for Prowlarr's links to Radarr, Sonarr and Lidarr |
 | Radarr, Sonarr, Lidarr | `root-folders` | root folders by path; Lidarr's with fields and profiles by name; missing ones are added |
 | Jellyfin | `server-configuration` | fields of `ServerConfiguration`, by path |
 | Jellyfin | `library-options` | fields of the named libraries' `LibraryOptions`, by path |
@@ -101,7 +103,7 @@ credentials and are never printed.
 |---|---|---|
 | `converge apply [--deadline <s>] <spec>...` | reconcile, write, read back | 0 done, 1 any spec failed |
 | `converge plan [--deadline <s>] <spec>...` | show what `apply` would change | 0 equal, 2 differs, 1 error |
-| `converge schema-check --service <radarr\|sonarr\|lidarr\|jellyfin\|trailarr> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
+| `converge schema-check --service <radarr\|sonarr\|lidarr\|prowlarr\|jellyfin\|trailarr> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
 | `converge schema-check --service ntfy [--spec <spec>]...` | ntfy publishes no OpenAPI description: only validate the specs (`--openapi` is refused) | 0 / 1 |
 
 Several specs are processed in order; one failing does not skip the next.
