@@ -151,7 +151,14 @@ enum Kind {
     Ref(String),
     /// A JSON type: boolean, integer, number, string, array, object.
     Plain(String),
+    /// One of several JSON types (Trailarr's `UpdateSetting.value`:
+    /// integer, string or boolean).
+    AnyOf(Vec<String>),
     Untyped,
+}
+
+fn is_null_type(schema: &Value) -> bool {
+    schema.get("type").and_then(Value::as_str) == Some("null")
 }
 
 /// What an OpenAPI property is, with references to enum components resolved.
@@ -165,6 +172,27 @@ struct Property<'a> {
 fn describe<'a>(openapi: &'a Value, property: &'a Value) -> Property<'a> {
     let nullable = property.get("nullable").and_then(Value::as_bool) == Some(true);
     let items = property.get("items");
+    // OpenAPI 3.1 (FastAPI, so Trailarr) writes a nullable property as
+    // `anyOf: [<schema>, {type: null}]` instead of `nullable: true`.
+    if let Some(any) = property.get("anyOf").and_then(Value::as_array) {
+        let nullable = nullable || any.iter().any(is_null_type);
+        let others: Vec<&'a Value> = any.iter().filter(|s| !is_null_type(s)).collect();
+        if let [only] = others.as_slice() {
+            let mut inner = describe(openapi, only);
+            inner.nullable |= nullable;
+            return inner;
+        }
+        let types: Option<Vec<String>> = others
+            .iter()
+            .map(|s| s.get("type").and_then(Value::as_str).map(str::to_string))
+            .collect();
+        return Property {
+            kind: types.map_or(Kind::Untyped, Kind::AnyOf),
+            nullable,
+            enumeration: None,
+            items: None,
+        };
+    }
     let plain = |schema: &Value| {
         schema
             .get("type")
@@ -277,6 +305,15 @@ fn check_value(
                 for (i, item) in list.iter().enumerate() {
                     check_value(findings, &format!("{label}[{i}]"), &element, item, openapi);
                 }
+            }
+        }
+        Kind::AnyOf(json_types) => {
+            if !json_types.iter().any(|t| has_type(t, value)) {
+                findings.push(format!(
+                    "{label}: expects one of {}, the spec has {}",
+                    json_types.join(", "),
+                    kind_of(value)
+                ));
             }
         }
         Kind::Untyped => {}
@@ -421,12 +458,24 @@ fn compare(
                     compare_list(findings, &at, our, their.items, defs, openapi);
                 }
             }
+            (RustType::AnyOf(mut our_types), Kind::AnyOf(mut their_types)) => {
+                our_types.sort();
+                their_types.sort();
+                if our_types != their_types {
+                    findings.push(format!(
+                        "{at}: one of {} there, one of {} here",
+                        their_types.join(", "),
+                        our_types.join(", ")
+                    ));
+                }
+            }
             (ours, theirs) => findings.push(format!(
                 "{at}: {} here, {} there",
                 ours.describe(),
                 match theirs {
                     Kind::Ref(r) => format!("a reference to {r}"),
                     Kind::Plain(_) => "a plain type".to_string(),
+                    Kind::AnyOf(types) => format!("one of {}", types.join(", ")),
                     Kind::Untyped => "an untyped schema".to_string(),
                 }
             )),
@@ -467,6 +516,8 @@ fn compare_list(
 enum RustType {
     Plain(String),
     Ref(String),
+    /// An untagged enum of plain values.
+    AnyOf(Vec<String>),
     Unknown,
 }
 
@@ -475,6 +526,7 @@ impl RustType {
         match self {
             RustType::Plain(t) => format!("plain {t}"),
             RustType::Ref(r) => format!("a reference to {r}"),
+            RustType::AnyOf(types) => format!("one of {}", types.join(", ")),
             RustType::Unknown => "an unrecognised schema".to_string(),
         }
     }
@@ -488,15 +540,19 @@ fn rust_type(v: &Value) -> (RustType, bool) {
             false,
         );
     }
-    // `Option<Struct>` is rendered as anyOf [ {$ref}, {type: null} ].
+    // `Option<Struct>` is rendered as anyOf [ {$ref}, {type: null} ], an
+    // untagged enum of plain values as anyOf [ {type}, {type}, … ].
     if let Some(any) = v.get("anyOf").and_then(Value::as_array) {
-        let is_null = |x: &Value| x.get("type").and_then(Value::as_str) == Some("null");
-        let nullable = any.iter().any(is_null);
-        let inner = any.iter().find(|x| !is_null(x));
-        return (
-            inner.map_or(RustType::Unknown, |i| rust_type(i).0),
-            nullable,
-        );
+        let nullable = any.iter().any(is_null_type);
+        let others: Vec<&Value> = any.iter().filter(|x| !is_null_type(x)).collect();
+        if let [only] = others.as_slice() {
+            return (rust_type(only).0, nullable);
+        }
+        let types: Option<Vec<String>> = others
+            .iter()
+            .map(|x| x.get("type").and_then(Value::as_str).map(str::to_string))
+            .collect();
+        return (types.map_or(RustType::Unknown, RustType::AnyOf), nullable);
     }
     match v.get("type") {
         Some(Value::String(t)) => (RustType::Plain(t.clone()), false),

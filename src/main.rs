@@ -10,14 +10,15 @@ use converge::{
     engine::{run, Mode, Outcome, Timing},
     error::Error,
     schema,
-    services::{arr, jellyfin},
+    services::{arr, jellyfin, ntfy, trailarr},
     spec::{Desired, Spec},
 };
 
 const USAGE: &str = "usage:
   converge apply [--deadline <seconds>] <spec.json>...
   converge plan [--deadline <seconds>] <spec.json>...
-  converge schema-check --service <radarr|sonarr|jellyfin> --openapi <file> [--spec <spec.json>]...";
+  converge schema-check --service <radarr|sonarr|jellyfin|trailarr> --openapi <file> [--spec <spec.json>]...
+  converge schema-check --service ntfy [--spec <spec.json>]...";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -90,7 +91,7 @@ fn reconcile_one(
     let transport = HttpTransport::new(
         &spec.base_url,
         spec.service.key_header(),
-        key,
+        spec.service.key_value(key),
         REQUEST_TIMEOUT,
     );
     let report = match &spec.desired {
@@ -148,6 +149,35 @@ fn reconcile_one(
             let task = jellyfin::PluginConfigurations { plugins: targets };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::Connections(desired) => {
+            // As for plugin secrets: every key before the first request.
+            let mut connections = Vec::new();
+            for (name, connection) in &desired.connections {
+                connections.push(trailarr::ConnectionTarget {
+                    name: name.clone(),
+                    set: connection.set.clone(),
+                    api_key: read_credential(credentials, &connection.api_key_credential)
+                        .map_err(fail)?,
+                });
+            }
+            let task = trailarr::Connections { connections };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        Desired::TrailerProfiles(settings) => {
+            let task = trailarr::TrailerProfiles {
+                set: settings.set.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        Desired::AccountSubscriptions(desired) => {
+            let content = read_credential(credentials, &desired.topics_credential).map_err(fail)?;
+            let topics = ntfy::topics(&desired.topics_credential, &content).map_err(fail)?;
+            let task = ntfy::AccountSubscriptions {
+                base_url: desired.base_url.clone(),
+                topics,
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
     }
     .map_err(fail)?;
     println!("{label}: service version {}", report.version);
@@ -179,6 +209,35 @@ fn reconcile_one(
     }
 }
 
+/// ntfy has no OpenAPI description (design §10): its specs are loaded and
+/// validated, and that is all a build can check.
+fn ntfy_specs_check(specs: &[PathBuf]) -> ExitCode {
+    let mut findings = Vec::new();
+    for path in specs {
+        match Spec::load(path) {
+            Ok(spec) if spec.service.name() == "ntfy" => {}
+            Ok(spec) => findings.push(format!(
+                "{}: the spec is for {}, not ntfy",
+                path.display(),
+                spec.service.name()
+            )),
+            Err(e) => findings.push(format!("{}: {e}", path.display())),
+        }
+    }
+    if !findings.is_empty() {
+        for finding in &findings {
+            eprintln!("ntfy: {finding}");
+        }
+        return ExitCode::from(1);
+    }
+    println!(
+        "ntfy: no OpenAPI description exists; {} spec(s) valid",
+        specs.len()
+    );
+    println!("ntfy: field names are checked by recorded answers and at runtime only");
+    ExitCode::SUCCESS
+}
+
 fn schema_check(args: &[String]) -> ExitCode {
     let (mut service, mut openapi, mut specs) = (None, None, Vec::new());
     let mut rest = args.iter();
@@ -193,12 +252,21 @@ fn schema_check(args: &[String]) -> ExitCode {
             other => return usage(Some(&format!("unexpected argument {other}"))),
         }
     }
+    if service.as_deref() == Some("ntfy") {
+        return match openapi {
+            Some(_) => usage(Some(
+                "ntfy publishes no OpenAPI description; call schema-check --service ntfy without --openapi",
+            )),
+            None => ntfy_specs_check(&specs),
+        };
+    }
     let (Some(service), Some(openapi)) = (service, openapi) else {
         return usage(Some("schema-check needs --service and --openapi"));
     };
     let (endpoints, wire): (&[converge::endpoint::Endpoint], _) = match service.as_str() {
         "radarr" | "sonarr" => (&arr::ENDPOINTS, arr::wire_types()),
         "jellyfin" => (&jellyfin::ENDPOINTS, jellyfin::wire_types()),
+        "trailarr" => (&trailarr::ENDPOINTS, trailarr::wire_types()),
         _ => return usage(Some(&format!("unknown service {service:?}"))),
     };
     let document = std::fs::read_to_string(&openapi)
@@ -257,6 +325,31 @@ fn schema_check(args: &[String]) -> ExitCode {
                     triggers.triggers.iter().map(|t| t.len()).sum(),
                 )
             }
+            // A connection's fields are sent when it is added and when it is
+            // updated, so each must be a property of both bodies.
+            Desired::Connections(desired) => {
+                let mut found = Vec::new();
+                for (name, connection) in &desired.connections {
+                    for component in [
+                        trailarr::CONNECTION_CREATE_COMPONENT,
+                        trailarr::CONNECTION_UPDATE_COMPONENT,
+                    ] {
+                        found.extend(
+                            schema::check_paths(&document, component, &connection.set)
+                                .into_iter()
+                                .map(|f| format!("connection {name}: {f}")),
+                        );
+                    }
+                }
+                let count = desired.connections.values().map(|c| c.set.len()).sum();
+                (found, count)
+            }
+            Desired::TrailerProfiles(settings) => (
+                schema::check_paths(&document, trailarr::TRAILER_PROFILE_READ, &settings.set),
+                settings.set.len(),
+            ),
+            // Not reachable: the service check above rejects an ntfy spec.
+            Desired::AccountSubscriptions(_) => (Vec::new(), 0),
         };
         checked_fields += count;
         findings.extend(

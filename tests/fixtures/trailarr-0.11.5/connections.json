@@ -1,0 +1,26 @@
+[
+  {
+    "added_at": "2026-09-05T15:24:48.096729Z",
+    "api_key": "<masked>",
+    "arr_type": "radarr",
+    "external_url": "",
+    "id": 1,
+    "machine_identifier": null,
+    "monitor_new_media": true,
+    "name": "Radarr",
+    "path_mappings": [],
+    "url": "http://127.0.0.1:7878"
+  },
+  {
+    "added_at": "2026-09-05T15:24:48.152602Z",
+    "api_key": "<masked>",
+    "arr_type": "sonarr",
+    "external_url": "",
+    "id": 2,
+    "machine_identifier": null,
+    "monitor_new_media": true,
+    "name": "Sonarr",
+    "path_mappings": [],
+    "url": "http://127.0.0.1:8989"
+  }
+]

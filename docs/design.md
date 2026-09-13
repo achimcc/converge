@@ -407,9 +407,149 @@ entries converge is responsible for and nothing more:
 The recorded SkinManager and JavaScript Injector configurations back the
 tests (`tests/fixtures/jellyfin-10.11.11/SOURCE.md`).
 
-## 9. Not in the pilot
+## 9. Trailarr: connections and trailer profiles (v0.6.0, 2026-09-13)
+
+Trailarr (0.11.5) downloads trailers for what Radarr and Sonarr hold. The
+host configured it with a shell unit that posted two connections and set a
+handful of fields on every trailer profile. Both become tasks:
+
+| task | read | write | desired |
+|---|---|---|---|
+| `connections` | `GET /api/v1/connections/` | `POST /api/v1/connections/` (missing), `PUT /api/v1/connections/{connection_id}` (differing) | `connections`: name → `set` (top-level fields) and `api_key_credential` |
+| `trailer-profiles` | `GET /api/v1/trailerprofiles/` | `POST /api/v1/trailerprofiles/{trailerprofile_id}/setting`, one `{key, value}` per field | `set`: fields every profile gets |
+
+The key travels as `X-API-KEY`. Readiness is `GET /api/v1/settings/` with a
+`version`; that answer also carries Trailarr's own key and the web UI's
+password, so only `version` is decoded — the rest is never held.
+
+```json
+{ "service": "trailarr", "task": "connections", "…": "…",
+  "desired": { "connections": {
+    "Radarr": { "set": { "arr_type": "radarr", "url": "http://127.0.0.1:7878",
+                         "monitor_new_media": true, "external_url": "",
+                         "path_mappings": [] },
+                "api_key_credential": "radarr-api-key" } } } }
+```
+
+### Why level 3 matters here
+
+Trailarr is a FastAPI application: pydantic models validate the body, and a
+field the model does not have is **dropped without a word**. The host's shell
+unit sent `monitor` — a field Trailarr 0.11.5 does not have; its
+`ConnectionCreate` has `monitor_new_media`. The request was accepted every
+time, and whatever the unit meant to set, `monitor_new_media` kept its
+default. This is exactly what the schema check catches:
+`schema-check --service trailarr --spec` walks every `set` field through
+**both** `ConnectionCreate` and `ConnectionUpdate` (a connection's fields are
+sent when it is added and when it is updated), checks the JSON type, and
+checks `arr_type` against the `ArrType` enum. Trailer profile fields are
+checked against `TrailerProfileRead` the same way.
+
+The description is OpenAPI 3.1 and writes a nullable property as
+`anyOf: [<schema>, {type: null}]`, not `nullable: true`; the check reads
+both. `UpdateSetting.value` is `anyOf: [integer, string, boolean]`, and the
+wire type's untagged enum must name the same three types.
+
+### Connections
+
+- **Found by name.** A connection the spec names and the service lacks is
+  `connection Radarr: (missing) -> (added)` and is created with
+  `ConnectionCreate`: `name`, `api_key`, `path_mappings` (the spec's, or
+  empty) and the `set` fields. To add one, `set` must name `arr_type` and
+  `url` — Trailarr has no default for them — or the run fails before writing.
+- **An existing connection** gets one change per differing `set` field; if
+  any differs, one `PUT` with `name`, `api_key`, `path_mappings` and the
+  `set` fields. `path_mappings` is required in `ConnectionUpdate`: the spec's
+  list if it names one, otherwise the connection's own, so an update never
+  empties it by accident.
+- **The key is compared with its credential and never shown**:
+  `api_key (hidden) -> (hidden) from its credential`, or `(empty)` if the
+  service holds none. Trailarr returns the keys of Radarr and Sonarr in the
+  clear; the wire type decodes them straight into `Secret`.
+- `name`, `api_key`, `id` and `added_at` cannot be in `set`. A `set` field the
+  answer does not carry is an error.
+- **An empty list is a valid answer** — unlike everywhere else. A fresh
+  Trailarr has no connections, and every connection the spec names then shows
+  up as a change, so the comparison is never over an empty set.
+- Connections the spec does not name are a note (`not in the spec:
+  connection Lidarr`) and are never touched. Nothing is deleted.
+- Writes answer `201` with a string; `200` is accepted too.
+
+### Trailer profiles
+
+- **Every profile gets the fields.** An empty list is an error, as usual.
+- One change per profile and differing field (`trailer profile 2:
+  always_search false -> true`); long values are cut as in §8.
+- One `POST …/setting` per differing field, because that endpoint sets one
+  setting. The host's shell unit saw it confirm before the value was
+  visible; the engine reads back until it is.
+- `id`, `customfilter` and `customfilter_id` cannot be set this way; values
+  are strings, booleans or integers, which is what `UpdateSetting` takes.
+
+The recorded answers and the OpenAPI file come from the same running
+container (`tests/fixtures/trailarr-0.11.5/SOURCE.md`, `openapi/SOURCE.md`).
+
+## 10. ntfy: account subscriptions with secret topics (v0.6.0, 2026-09-13)
+
+An ntfy account keeps a list of subscriptions, which ntfy's web app loads
+after logging in. The host declares which topics an account is subscribed
+to. **A topic name is all it takes to read a topic**, so topics
+are secrets in this task, held to the same rules as keys:
+
+```json
+{ "service": "ntfy", "base_url": "http://localhost:2586",
+  "api_key_credential": "ntfy-token", "task": "account-subscriptions",
+  "desired": { "base_url": "https://ntfy.rusty-vault.de",
+               "topics_credential": "ntfy-abo-topics" } }
+```
+
+- The **credential** named in `topics_credential` holds one topic per line;
+  blank lines and surrounding whitespace are ignored; at least one topic, none
+  twice. It is read before the first request.
+- **A topic never appears in output** — not in a change, a note, an error or
+  a `Debug` dump. It is named by its number among the credential's non-empty
+  lines: `ntfy account: subscription 3 (missing) -> (added)`. Topics are
+  `Secret`s from the credential file to the request body, answers included.
+- The token travels as `Authorization: Bearer <token>`; the credential holds
+  the bare token (`Service::key_value` adds the prefix for ntfy only).
+- **Readiness** is `GET /v1/health` answering `{"healthy": true}`. ntfy tells
+  its version to administrators only, so the version line says
+  `(not reported)`. The health endpoint needs no token, so a refused token
+  fails at the first read (`GET /v1/account`, 401), not while waiting.
+- **Read** `GET /v1/account`, of which only `subscriptions` (`base_url`,
+  `topic`) is decoded; the account's tokens, sync topic and user name are
+  never held. A decoding error says where it failed, not what it found.
+- **A subscription counts** if one has the desired `base_url` and the topic.
+  The same topic under another `base_url` is still a change, plus a note
+  naming that `base_url`, which is not secret.
+- **Write** `POST /v1/account/subscription` with `{base_url, topic}`, one per
+  missing topic. Never `PATCH`, never `DELETE`, and `display_name` — the
+  person's own label — is neither read nor written.
+- **Error bodies are not shown at all** for this task: ntfy's messages may
+  quote the request, and the request holds a topic.
+
+### No OpenAPI description
+
+ntfy publishes none. As for Jellyfin's plugin configurations (§7), the fields
+are checked by a recorded answer (`tests/fixtures/ntfy-2.26.0/`) and at
+runtime only. `schema-check --service ntfy` therefore takes no `--openapi`
+— passing one is an error rather than silently ignored, so a build cannot
+believe it checked something it did not — and only validates the given specs.
+Every other service still requires `--openapi`.
+
+### Considered and rejected: Grafana
+
+Grafana's organisation roles were considered for the same release and left
+out. Grafana re-syncs a user's org role from OAuth on **every login**: with no
+`role_attribute_path` configured it assigns `auto_assign_org_role`, so a role
+converge wrote would be overwritten at the next login and written again at the
+next timer run — two writers flip-flopping over one field. The fix belongs in
+Grafana's OAuth configuration, not in converge.
+
+## 11. Not in the pilot
 
 - Other services and tasks (Authentik, Seerr, …).
 - TLS, JSON output, a NixOS module.
 - Deleting things. `converge` only sets what the spec names, and appends
-  list entries it is responsible for (§8).
+  list entries (§8), connections (§9) and subscriptions (§10) it is
+  responsible for.

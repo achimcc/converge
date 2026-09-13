@@ -1,0 +1,96 @@
+[
+  {
+    "always_search": true,
+    "audio_format": "aac",
+    "audio_volume_level": 100,
+    "custom_folder": "{media_folder}",
+    "customfilter": {
+      "filter_name": "Movie Trailers",
+      "filter_type": "TRAILER",
+      "filters": [
+        {
+          "customfilter_id": 1,
+          "filter_by": "is_movie",
+          "filter_condition": "EQUALS",
+          "filter_value": "true",
+          "id": 2
+        }
+      ],
+      "id": 1
+    },
+    "customfilter_id": 1,
+    "embed_metadata": true,
+    "enabled": true,
+    "exclude_words": "reaction,review,recap,explained,breakdown,honest trailer,parodie,parody,fan edit,fan trailer,making of,behind the scenes,interview,soundtrack",
+    "file_format": "mp4",
+    "file_name": "{title} ({year})-trailer.{ext}",
+    "folder_enabled": false,
+    "folder_name": "Trailers",
+    "id": 1,
+    "include_words": "",
+    "max_duration": 600,
+    "min_duration": 30,
+    "notify_plex": false,
+    "priority": 0,
+    "remove_silence": false,
+    "retry_count": 2,
+    "search_query": "{title} {year} deutscher trailer",
+    "skip_if_plex_trailer": false,
+    "skip_if_plex_trailer_resolution": 1080,
+    "subtitles_auto_generated": false,
+    "subtitles_enabled": false,
+    "subtitles_format": "srt",
+    "subtitles_language": "en",
+    "uploader_ids": "",
+    "video_format": "h264",
+    "video_resolution": 1080,
+    "ytdlp_extra_options": ""
+  },
+  {
+    "always_search": true,
+    "audio_format": "aac",
+    "audio_volume_level": 100,
+    "custom_folder": "{media_folder}",
+    "customfilter": {
+      "filter_name": "Series Trailers",
+      "filter_type": "TRAILER",
+      "filters": [
+        {
+          "customfilter_id": 2,
+          "filter_by": "is_movie",
+          "filter_condition": "EQUALS",
+          "filter_value": "false",
+          "id": 4
+        }
+      ],
+      "id": 2
+    },
+    "customfilter_id": 2,
+    "embed_metadata": true,
+    "enabled": true,
+    "exclude_words": "reaction,review,recap,explained,breakdown,honest trailer,parodie,parody,fan edit,fan trailer,making of,behind the scenes,interview,soundtrack",
+    "file_format": "mp4",
+    "file_name": "{title} ({year})-trailer.{ext}",
+    "folder_enabled": true,
+    "folder_name": "Trailers",
+    "id": 2,
+    "include_words": "",
+    "max_duration": 600,
+    "min_duration": 30,
+    "notify_plex": false,
+    "priority": 0,
+    "remove_silence": false,
+    "retry_count": 2,
+    "search_query": "{title} {year} deutscher trailer",
+    "skip_if_plex_trailer": false,
+    "skip_if_plex_trailer_resolution": 1080,
+    "subtitles_auto_generated": false,
+    "subtitles_enabled": false,
+    "subtitles_format": "srt",
+    "subtitles_language": "en",
+    "uploader_ids": "",
+    "video_format": "h264",
+    "video_resolution": 1080,
+    "ytdlp_extra_options": ""
+  }
+]

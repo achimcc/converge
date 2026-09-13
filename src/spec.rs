@@ -5,7 +5,7 @@ use std::{
 
 use serde::{Deserialize, Deserializer};
 
-use crate::error::Error;
+use crate::{error::Error, secret::Secret};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -13,6 +13,8 @@ pub enum Service {
     Radarr,
     Sonarr,
     Jellyfin,
+    Trailarr,
+    Ntfy,
 }
 
 impl Service {
@@ -21,6 +23,8 @@ impl Service {
             Service::Radarr => "radarr",
             Service::Sonarr => "sonarr",
             Service::Jellyfin => "jellyfin",
+            Service::Trailarr => "trailarr",
+            Service::Ntfy => "ntfy",
         }
     }
 
@@ -29,6 +33,17 @@ impl Service {
         match self {
             Service::Radarr | Service::Sonarr => "X-Api-Key",
             Service::Jellyfin => "X-Emby-Token",
+            Service::Trailarr => "X-API-KEY",
+            Service::Ntfy => "Authorization",
+        }
+    }
+
+    /// The header's value. The credential holds the bare key; only ntfy wants
+    /// it as a bearer token.
+    pub fn key_value(self, key: Secret) -> Secret {
+        match self {
+            Service::Ntfy => Secret::new(format!("Bearer {}", key.expose())),
+            _ => key,
         }
     }
 
@@ -46,6 +61,23 @@ enum TaskName {
     LibraryOptions,
     ScheduledTaskTriggers,
     PluginConfigurations,
+    Connections,
+    TrailerProfiles,
+    AccountSubscriptions,
+}
+
+impl TaskName {
+    fn belongs_to(self, service: Service) -> bool {
+        match self {
+            TaskName::QualityDefinitions | TaskName::QualityProfiles => service.is_arr(),
+            TaskName::ServerConfiguration
+            | TaskName::LibraryOptions
+            | TaskName::ScheduledTaskTriggers
+            | TaskName::PluginConfigurations => service == Service::Jellyfin,
+            TaskName::Connections | TaskName::TrailerProfiles => service == Service::Trailarr,
+            TaskName::AccountSubscriptions => service == Service::Ntfy,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,6 +186,39 @@ pub struct ListItems {
     pub items: Vec<serde_json::Map<String, serde_json::Value>>,
 }
 
+/// Trailarr's links to Radarr and Sonarr, by connection name.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrailarrConnections {
+    pub connections: BTreeMap<String, ConnectionSettings>,
+}
+
+/// One connection: top-level fields of Trailarr's connection object, and the
+/// credential holding the API key of the service it connects to.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConnectionSettings {
+    pub set: BTreeMap<String, serde_json::Value>,
+    pub api_key_credential: String,
+}
+
+/// Fields every trailer profile gets.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrailerProfileSettings {
+    pub set: BTreeMap<String, serde_json::Value>,
+}
+
+/// Subscriptions an ntfy account must have. The topics are secrets -- a topic
+/// name is all it takes to read a topic -- so the spec only names the
+/// credential that lists them, one per line.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccountSubscriptions {
+    pub base_url: String,
+    pub topics_credential: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Desired {
     QualityDefinitions(BTreeMap<String, SizeLimits>),
@@ -162,6 +227,41 @@ pub enum Desired {
     LibraryOptions(LibrarySettings),
     ScheduledTaskTriggers(TaskTriggers),
     PluginConfigurations(BTreeMap<String, PluginSettings>),
+    Connections(TrailarrConnections),
+    TrailerProfiles(TrailerProfileSettings),
+    AccountSubscriptions(AccountSubscriptions),
+}
+
+/// A non-empty map of plain (undotted) field names, none of them `forbidden`.
+fn plain_fields(
+    map: &BTreeMap<String, serde_json::Value>,
+    what: &str,
+    forbidden: &[&str],
+) -> Result<(), String> {
+    if map.is_empty() {
+        return Err(format!("{what} names no field"));
+    }
+    for name in map.keys() {
+        if name.is_empty() || name.contains('.') {
+            return Err(format!("{what}: {name:?} is not a plain field name"));
+        }
+        if forbidden.contains(&name.as_str()) {
+            return Err(format!(
+                "{what}: {name} is not set this way (these are not: {})",
+                forbidden.join(", ")
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// A name that stays inside `$CREDENTIALS_DIRECTORY`.
+fn credential_name(name: &str, what: &str) -> Result<(), String> {
+    if name.is_empty() || name == "." || name == ".." || name.contains('/') {
+        Err(format!("{what}: {name:?} is not a credential name"))
+    } else {
+        Ok(())
+    }
 }
 
 /// A non-empty map of well-formed dotted paths.
@@ -238,11 +338,7 @@ impl Spec {
                 raw.base_url
             )));
         }
-        let arr_task = matches!(
-            raw.task,
-            TaskName::QualityDefinitions | TaskName::QualityProfiles
-        );
-        if arr_task != raw.service.is_arr() {
+        if !raw.task.belongs_to(raw.service) {
             return Err(invalid(format!(
                 "the task does not belong to service {:?}",
                 raw.service.name()
@@ -361,6 +457,73 @@ impl Spec {
                 }
                 Desired::PluginConfigurations(plugins)
             }
+            TaskName::Connections => {
+                let desired: TrailarrConnections = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if desired.connections.is_empty() {
+                    return Err(invalid(
+                        "desired.connections names no connection".to_string(),
+                    ));
+                }
+                for (name, connection) in &desired.connections {
+                    if name.is_empty() {
+                        return Err(invalid(
+                            "desired.connections: a connection name is empty".to_string(),
+                        ));
+                    }
+                    let at = format!("desired.connections.{name}");
+                    // The name identifies the connection and the key comes
+                    // from its credential; id and added_at are the service's.
+                    plain_fields(
+                        &connection.set,
+                        &format!("{at}.set"),
+                        &["name", "api_key", "id", "added_at"],
+                    )
+                    .map_err(invalid)?;
+                    credential_name(
+                        &connection.api_key_credential,
+                        &format!("{at}.api_key_credential"),
+                    )
+                    .map_err(invalid)?;
+                }
+                Desired::Connections(desired)
+            }
+            TaskName::TrailerProfiles => {
+                let desired: TrailerProfileSettings = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                plain_fields(
+                    &desired.set,
+                    "desired.set",
+                    &["id", "customfilter", "customfilter_id"],
+                )
+                .map_err(invalid)?;
+                // One setting travels as UpdateSetting, whose value is an
+                // integer, a string or a boolean -- nothing else.
+                for (name, value) in &desired.set {
+                    let fits = value.is_boolean() || value.is_string() || value.is_i64();
+                    if !fits {
+                        return Err(invalid(format!(
+                            "desired.set.{name}: a trailer profile setting is a string, a boolean or an integer"
+                        )));
+                    }
+                }
+                Desired::TrailerProfiles(desired)
+            }
+            TaskName::AccountSubscriptions => {
+                let desired: AccountSubscriptions = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if !(desired.base_url.starts_with("http://")
+                    || desired.base_url.starts_with("https://"))
+                {
+                    return Err(invalid(format!(
+                        "desired.base_url must start with http:// or https://, got {:?}",
+                        desired.base_url
+                    )));
+                }
+                credential_name(&desired.topics_credential, "desired.topics_credential")
+                    .map_err(invalid)?;
+                Desired::AccountSubscriptions(desired)
+            }
         };
         Ok(Spec {
             path: path.to_path_buf(),
@@ -379,6 +542,9 @@ impl Spec {
             Desired::LibraryOptions(_) => "library-options",
             Desired::ScheduledTaskTriggers(_) => "scheduled-task-triggers",
             Desired::PluginConfigurations(_) => "plugin-configurations",
+            Desired::Connections(_) => "connections",
+            Desired::TrailerProfiles(_) => "trailer-profiles",
+            Desired::AccountSubscriptions(_) => "account-subscriptions",
         }
     }
 }
@@ -568,6 +734,125 @@ mod tests {
             .contains("both in set and in lists"));
     }
 
+    fn trailarr(task: &str, desired: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"trailarr","base_url":"http://localhost:7889","api_key_credential":"trailarr-api-key","task":"{task}","desired":{desired}}}"#
+        ))
+    }
+
+    fn reason(result: Result<Spec, Error>) -> String {
+        result.expect_err("an error").to_string()
+    }
+
+    const CONNECTIONS: &str = r#"{"connections":{"Radarr":{"set":{"arr_type":"radarr","url":"http://127.0.0.1:7878","monitor_new_media":true,"external_url":"","path_mappings":[]},"api_key_credential":"radarr-api-key"}}}"#;
+
+    #[test]
+    fn trailarr_connections_are_strict() {
+        let spec = trailarr("connections", CONNECTIONS).unwrap();
+        assert_eq!(spec.service.key_header(), "X-API-KEY");
+        assert_eq!(spec.task_name(), "connections");
+        let Desired::Connections(desired) = spec.desired else {
+            panic!("wrong task")
+        };
+        assert_eq!(
+            desired.connections["Radarr"].api_key_credential,
+            "radarr-api-key"
+        );
+
+        let unknown =
+            CONNECTIONS.replace(r#""api_key_credential""#, r#""key":1,"api_key_credential""#);
+        assert!(reason(trailarr("connections", &unknown)).contains("key"));
+        let misspelt = CONNECTIONS.replace("connections", "connection");
+        assert!(reason(trailarr("connections", &misspelt)).contains("connection"));
+        assert!(reason(trailarr("connections", r#"{"connections":{}}"#))
+            .contains("names no connection"));
+        let nameless = CONNECTIONS.replace(r#""Radarr""#, r#""""#);
+        assert!(reason(trailarr("connections", &nameless)).contains("name is empty"));
+        let no_set = r#"{"connections":{"Radarr":{"set":{},"api_key_credential":"k"}}}"#;
+        assert!(reason(trailarr("connections", no_set)).contains("names no field"));
+        for forbidden in ["name", "api_key", "id", "added_at"] {
+            let text = CONNECTIONS.replace(r#""arr_type""#, &format!(r#""{forbidden}""#));
+            assert!(
+                reason(trailarr("connections", &text)).contains("is not set this way"),
+                "{forbidden}"
+            );
+        }
+        let dotted = CONNECTIONS.replace(r#""url""#, r#""a.url""#);
+        assert!(reason(trailarr("connections", &dotted)).contains("not a plain field name"));
+        let path_credential = CONNECTIONS.replace("radarr-api-key", "../radarr-api-key");
+        assert!(
+            reason(trailarr("connections", &path_credential)).contains("is not a credential name")
+        );
+        let no_credential = r#"{"connections":{"Radarr":{"set":{"url":"x"}}}}"#;
+        assert!(reason(trailarr("connections", no_credential)).contains("api_key_credential"));
+    }
+
+    const PROFILE_SET: &str = r#"{"set":{"search_query":"{title} {year} deutscher trailer","always_search":true,"retry_count":2}}"#;
+
+    #[test]
+    fn trailer_profile_settings_are_strict() {
+        let spec = trailarr("trailer-profiles", PROFILE_SET).unwrap();
+        assert_eq!(spec.task_name(), "trailer-profiles");
+        assert!(reason(trailarr("trailer-profiles", r#"{"set":{}}"#)).contains("names no field"));
+        let unknown = PROFILE_SET.replace(r#"{"set""#, r#"{"profiles":[1],"set""#);
+        assert!(reason(trailarr("trailer-profiles", &unknown)).contains("profiles"));
+        for forbidden in ["id", "customfilter", "customfilter_id"] {
+            let text = PROFILE_SET.replace("retry_count", forbidden);
+            assert!(
+                reason(trailarr("trailer-profiles", &text)).contains("is not set this way"),
+                "{forbidden}"
+            );
+        }
+        for value in ["null", "1.5", "[]", r#"{"a":1}"#] {
+            let text = format!(r#"{{"set":{{"retry_count":{value}}}}}"#);
+            assert!(
+                reason(trailarr("trailer-profiles", &text))
+                    .contains("a string, a boolean or an integer"),
+                "{value}"
+            );
+        }
+    }
+
+    fn ntfy(desired: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"ntfy","base_url":"http://localhost:2586","api_key_credential":"ntfy-token","task":"account-subscriptions","desired":{desired}}}"#
+        ))
+    }
+
+    #[test]
+    fn account_subscriptions_are_strict() {
+        let good =
+            r#"{"base_url":"https://ntfy.rusty-vault.de","topics_credential":"ntfy-abo-topics"}"#;
+        let spec = ntfy(good).unwrap();
+        assert_eq!(spec.task_name(), "account-subscriptions");
+        assert_eq!(spec.service.key_header(), "Authorization");
+        let unknown = good.replace(
+            r#""topics_credential""#,
+            r#""topics":["x"],"topics_credential""#,
+        );
+        assert!(reason(ntfy(&unknown)).contains("topics"));
+        assert!(reason(ntfy(r#"{"base_url":"https://x"}"#)).contains("topics_credential"));
+        let bad_url = good.replace("https://ntfy.rusty-vault.de", "ntfy.rusty-vault.de");
+        assert!(reason(ntfy(&bad_url)).contains("must start with http"));
+        let bad_credential = good.replace("ntfy-abo-topics", "a/b");
+        assert!(reason(ntfy(&bad_credential)).contains("is not a credential name"));
+        assert!(reason(ntfy(r#"{}"#)).contains("missing field"));
+    }
+
+    #[test]
+    fn only_ntfy_wants_a_bearer_token() {
+        let value = |service: Service| service.key_value(Secret::new("t0ken".into()));
+        assert_eq!(value(Service::Ntfy).expose(), "Bearer t0ken");
+        for service in [
+            Service::Radarr,
+            Service::Sonarr,
+            Service::Jellyfin,
+            Service::Trailarr,
+        ] {
+            assert_eq!(value(service).expose(), "t0ken", "{service:?}");
+        }
+    }
+
     #[test]
     fn a_task_of_the_wrong_service_is_an_error() {
         let err = parse(&GOOD.replace(r#""radarr""#, r#""jellyfin""#))
@@ -582,6 +867,15 @@ mod tests {
         .err()
         .unwrap()
         .to_string();
+        assert!(err.contains("does not belong to service"), "{err}");
+        let err = reason(trailarr(
+            "account-subscriptions",
+            r#"{"base_url":"https://x","topics_credential":"t"}"#,
+        ));
+        assert!(err.contains("does not belong to service"), "{err}");
+        let err = reason(parse(&format!(
+            r#"{{"service":"ntfy","base_url":"http://localhost:2586","api_key_credential":"k","task":"connections","desired":{CONNECTIONS}}}"#
+        )));
         assert!(err.contains("does not belong to service"), "{err}");
     }
 

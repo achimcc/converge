@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value};
 use crate::{
     client::{expect_status, expect_status_at, Transport},
     endpoint::{Endpoint, Shape},
-    engine::{Change, Probe, Task},
+    engine::{shortened, Change, Probe, Task, HIDDEN},
     error::Error,
     paths,
     secret::Secret,
@@ -516,9 +516,6 @@ impl Task for ScheduledTaskTriggers {
 
 // --- plugin-configurations ---------------------------------------------------
 
-/// Shown instead of a secret's value, in changes and in errors alike.
-const HIDDEN: &str = "(hidden)";
-
 /// One plugin to configure. `secrets` maps a path to the value read from a
 /// systemd credential; the value never appears in a change or an error.
 /// `lists` names entries of lists other writers share (design §8).
@@ -528,19 +525,6 @@ pub struct PluginTarget {
     pub set: BTreeMap<String, Value>,
     pub secrets: BTreeMap<String, Secret>,
     pub lists: BTreeMap<String, ListItems>,
-}
-
-/// A value short enough for one line of a change. A script of three
-/// kilobytes says nothing more in full than its beginning and its length.
-fn shortened(value: &Value) -> String {
-    const KEEP: usize = 60;
-    let text = value.to_string();
-    let length = text.chars().count();
-    if length <= KEEP + 20 {
-        return text;
-    }
-    let start: String = text.chars().take(KEEP).collect();
-    format!("{start}… ({length} characters)")
 }
 
 /// `name=value` of a keyed item, for changes and errors.

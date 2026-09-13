@@ -19,9 +19,9 @@ script should have been:
 
 ## Status
 
-Early. **v0.5.0** — tasks for **Radarr**, **Sonarr** (API v3) and
-**Jellyfin** (10.11), each replacing a shell unit on the host it was written
-for:
+Early. **v0.6.0** — tasks for **Radarr**, **Sonarr** (API v3), **Jellyfin**
+(10.11), **Trailarr** (0.11) and **ntfy** (2.26), each replacing a shell unit
+on the host it was written for:
 
 | service | task | desired state |
 |---|---|---|
@@ -31,6 +31,9 @@ for:
 | Jellyfin | `library-options` | fields of the named libraries' `LibraryOptions`, by path |
 | Jellyfin | `scheduled-task-triggers` | the trigger list of tasks whose key starts with a prefix |
 | Jellyfin | `plugin-configurations` | fields of plugin configurations by path, keys from credentials, entries of shared lists by key |
+| Trailarr | `connections` | connections to Radarr and Sonarr by name: top-level fields, key from a credential; missing ones are added |
+| Trailarr | `trailer-profiles` | fields every trailer profile gets |
+| ntfy | `account-subscriptions` | subscriptions of an account; the topics are secrets, read from a credential and never printed |
 
 ## A spec
 
@@ -95,9 +98,18 @@ credentials and are never printed.
 |---|---|---|
 | `converge apply [--deadline <s>] <spec>...` | reconcile, write, read back | 0 done, 1 any spec failed |
 | `converge plan [--deadline <s>] <spec>...` | show what `apply` would change | 0 equal, 2 differs, 1 error |
-| `converge schema-check --service <radarr\|sonarr\|jellyfin> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
+| `converge schema-check --service <radarr\|sonarr\|jellyfin\|trailarr> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
+| `converge schema-check --service ntfy [--spec <spec>]...` | ntfy publishes no OpenAPI description: only validate the specs (`--openapi` is refused) | 0 / 1 |
 
 Several specs are processed in order; one failing does not skip the next.
+
+Trailarr drops body fields its models do not have without a word — the
+host's old shell unit sent `monitor` where Trailarr 0.11.5 has
+`monitor_new_media`. `schema-check --spec` checks every field a connection
+spec sets against both `ConnectionCreate` and `ConnectionUpdate`, so that
+typo fails the build (`docs/design.md` §9). For ntfy, whose topic names grant
+read access, output names a topic only by its line in the credential:
+`ntfy account: subscription 3 (missing) -> (added)` (§10).
 
 ```
 radarr quality-definitions: service version 6.3.0.10514

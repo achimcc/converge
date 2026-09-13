@@ -256,3 +256,155 @@ fn a_missing_wire_type_is_found() {
         "{found:?}"
     );
 }
+
+fn trailarr() -> Value {
+    doc("trailarr-0.11.5")
+}
+
+fn trailarr_findings(openapi: &Value) -> Vec<String> {
+    use converge::services::trailarr;
+    check(openapi, &trailarr::ENDPOINTS, &trailarr::wire_types())
+}
+
+fn trailarr_paths(component: &str, desired: Value) -> Vec<String> {
+    let map = desired.as_object().unwrap().clone().into_iter().collect();
+    converge::schema::check_paths(&trailarr(), component, &map)
+}
+
+#[test]
+fn the_trailarr_endpoints_and_wire_types_match() {
+    assert_eq!(trailarr_findings(&trailarr()), Vec::<String>::new());
+}
+
+#[test]
+fn a_renamed_trailarr_property_is_found_directly_and_inside_a_list() {
+    let mut d = trailarr();
+    let props = properties(&mut d, "ConnectionRead");
+    let v = props.remove("api_key").unwrap();
+    props.insert("apikey".into(), v);
+    // PathMappingCRU is only reached through the list in the request bodies.
+    properties(&mut d, "PathMappingCRU").remove("path_to");
+    assert_eq!(
+        trailarr_findings(&d),
+        [
+            "ConnectionRead.api_key: not in the OpenAPI description",
+            "PathMappingCRU.path_to: not in the OpenAPI description"
+        ]
+    );
+}
+
+#[test]
+fn the_setting_value_must_keep_its_three_types() {
+    let mut d = trailarr();
+    properties(&mut d, "UpdateSetting")["value"]["anyOf"]
+        .as_array_mut()
+        .unwrap()
+        .remove(2);
+    assert_eq!(
+        trailarr_findings(&d),
+        ["UpdateSetting.value: one of integer, string there, one of boolean, integer, string here"]
+    );
+}
+
+#[test]
+fn nullable_as_any_of_needs_an_option() {
+    // OpenAPI 3.1 writes nullable as anyOf [..., {type: null}].
+    let mut d = trailarr();
+    properties(&mut d, "ConnectionRead")["name"] =
+        serde_json::json!({"anyOf": [{"type": "string"}, {"type": "null"}]});
+    assert_eq!(
+        trailarr_findings(&d),
+        ["ConnectionRead.name: nullable there, but not an Option here"]
+    );
+}
+
+fn host_connection() -> Value {
+    serde_json::json!({
+        "arr_type": "radarr", "url": "http://127.0.0.1:7878",
+        "monitor_new_media": true, "external_url": "", "path_mappings": []
+    })
+}
+
+#[test]
+fn the_hosts_connection_fields_are_properties_of_both_bodies() {
+    for component in ["ConnectionCreate", "ConnectionUpdate"] {
+        assert_eq!(
+            trailarr_paths(component, host_connection()),
+            Vec::<String>::new(),
+            "{component}"
+        );
+    }
+    let mapping = serde_json::json!({"path_mappings": [{"path_from": "/a", "path_to": "/b"}]});
+    assert_eq!(
+        trailarr_paths("ConnectionUpdate", mapping),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn monitor_is_not_a_trailarr_field() {
+    // What the host's shell unit sent for years; pydantic ignored it.
+    for component in ["ConnectionCreate", "ConnectionUpdate"] {
+        assert_eq!(
+            trailarr_paths(component, serde_json::json!({"monitor": true})),
+            [format!(
+                "{component}.monitor: {component} has no property monitor"
+            )]
+        );
+    }
+}
+
+#[test]
+fn an_arr_type_outside_the_enum_and_a_wrong_type_are_found() {
+    for component in ["ConnectionCreate", "ConnectionUpdate"] {
+        assert_eq!(
+            trailarr_paths(component, serde_json::json!({"arr_type": "lidarr"})),
+            [format!(
+                "{component}.arr_type: \"lidarr\" is not one of radarr, sonarr, plex"
+            )]
+        );
+        assert_eq!(
+            trailarr_paths(component, serde_json::json!({"monitor_new_media": "yes"})),
+            [format!(
+                "{component}.monitor_new_media: expects boolean, the spec has a string"
+            )]
+        );
+    }
+    // null is allowed where the update says anyOf [..., null], not on create.
+    assert_eq!(
+        trailarr_paths("ConnectionUpdate", serde_json::json!({"url": null})),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        trailarr_paths("ConnectionCreate", serde_json::json!({"url": null})),
+        ["ConnectionCreate.url: is not nullable, the spec has null"]
+    );
+    let bad_mapping = serde_json::json!({"path_mappings": [{"from": "/a"}]});
+    assert_eq!(
+        trailarr_paths("ConnectionCreate", bad_mapping),
+        ["ConnectionCreate.path_mappings[0].from: PathMappingCRU has no property from"]
+    );
+}
+
+#[test]
+fn trailer_profile_fields_are_checked_by_name_and_type() {
+    let host = serde_json::json!({
+        "search_query": "{title} {year} deutscher trailer", "always_search": true,
+        "exclude_words": "reaction,review", "file_format": "mp4",
+        "video_format": "h264", "audio_format": "aac"
+    });
+    assert_eq!(
+        trailarr_paths("TrailerProfileRead", host),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        trailarr_paths(
+            "TrailerProfileRead",
+            serde_json::json!({"retry_count": "2", "search": "x"})
+        ),
+        [
+            "TrailerProfileRead.retry_count: expects integer, the spec has a string",
+            "TrailerProfileRead.search: TrailerProfileRead has no property search"
+        ]
+    );
+}

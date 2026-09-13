@@ -5,7 +5,9 @@ use std::{
 
 use crate::{client::Transport, clock::Clock, error::Error};
 
-/// One field that differs between the service and the spec.
+/// One field that differs between the service and the spec. A change about
+/// the subject as a whole (`connection Radarr: (missing) -> (added)`) has an
+/// empty `field`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Change {
     pub subject: String,
@@ -16,12 +18,31 @@ pub struct Change {
 
 impl fmt::Display for Change {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.field.is_empty() {
+            return write!(f, "{}: {} -> {}", self.subject, self.current, self.desired);
+        }
         write!(
             f,
             "{}: {} {} -> {}",
             self.subject, self.field, self.current, self.desired
         )
     }
+}
+
+/// Shown instead of a secret's value, in changes and in errors alike.
+pub const HIDDEN: &str = "(hidden)";
+
+/// A value short enough for one line of a change. A script of three
+/// kilobytes says nothing more in full than its beginning and its length.
+pub fn shortened(value: &serde_json::Value) -> String {
+    const KEEP: usize = 60;
+    let text = value.to_string();
+    let length = text.chars().count();
+    if length <= KEEP + 20 {
+        return text;
+    }
+    let start: String = text.chars().take(KEEP).collect();
+    format!("{start}… ({length} characters)")
 }
 
 /// Why a readiness probe did not return a version.
