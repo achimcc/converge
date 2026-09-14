@@ -104,6 +104,23 @@ component its document is (`docs/design.md` §15).
 }
 ```
 
+A named configuration names its key and the fields by path; `schema-check`
+checks `KnownProxies` against `NetworkConfiguration`, because that is the
+document the key `network` stands for:
+
+```json
+{
+  "service": "jellyfin",
+  "base_url": "http://localhost:8096",
+  "api_key_credential": "jellyfin-api-key",
+  "task": "named-configuration",
+  "desired": {
+    "key": "network",
+    "set": { "KnownProxies": ["10.0.20.11"], "EnableUPnP": false }
+  }
+}
+```
+
 ## Commands
 
 | command | does | exit |
@@ -142,6 +159,8 @@ radarr quality-definitions: changed 1 field(s), read back and confirmed
    types derive their JSON schema; `schema-check` compares it with the
    service's `openapi.json`. Run it in your build against the exact version
    you deploy, and an upgrade that renames a field fails before the deploy.
+   ntfy and bindery publish no such description; for them `schema-check`
+   validates the specs, and only the first two checks apply to their fields.
 
 OpenAPI describes names, not behaviour: Radarr's file lists `200` for the
 update, the service answers `202`. That is what reading back is for.
