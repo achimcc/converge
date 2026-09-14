@@ -16,7 +16,7 @@ use crate::{
     error::Error,
     paths,
     secret::Secret,
-    spec::{ListItems, NamedKey},
+    spec::{ListItems, NamedKey, LIBRARY_IDS},
 };
 
 pub const SYSTEM_INFO: Endpoint = Endpoint {
@@ -397,6 +397,22 @@ impl Task for NamedConfiguration {
 
 // --- library-options -------------------------------------------------------
 
+/// Every library, each with a name. An empty answer is an error: no task
+/// that names libraries has anything to do without them.
+fn read_folders(t: &dyn Transport) -> Result<Vec<VirtualFolderInfo>, Error> {
+    let path = FOLDERS.path.to_string();
+    let reply = t.get(FOLDERS.path)?;
+    expect_status(&FOLDERS, &reply, &[200])?;
+    let folders: Vec<VirtualFolderInfo> = decode(FOLDERS.path, &reply.body)?;
+    if folders.is_empty() {
+        return Err(Error::EmptyList { path });
+    }
+    if let Some(index) = folders.iter().position(|f| f.name.is_none()) {
+        return Err(Error::MissingName { path, index });
+    }
+    Ok(folders)
+}
+
 pub struct LibraryOptions {
     pub libraries: Vec<String>,
     pub set: BTreeMap<String, Value>,
@@ -420,17 +436,7 @@ impl Task for LibraryOptions {
     }
 
     fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
-        let path = FOLDERS.path.to_string();
-        let reply = t.get(FOLDERS.path)?;
-        expect_status(&FOLDERS, &reply, &[200])?;
-        let folders: Vec<VirtualFolderInfo> = decode(FOLDERS.path, &reply.body)?;
-        if folders.is_empty() {
-            return Err(Error::EmptyList { path });
-        }
-        if let Some(index) = folders.iter().position(|f| f.name.is_none()) {
-            return Err(Error::MissingName { path, index });
-        }
-        Ok(folders)
+        read_folders(t)
     }
 
     fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
@@ -710,31 +716,95 @@ pub struct PluginConfigurations {
     pub plugins: Vec<PluginTarget>,
 }
 
-/// A plugin's configuration as read, keyed like the spec.
+/// A plugin's configuration as read, keyed like the spec, with the fields
+/// the spec sets -- library names already turned into ids.
 pub struct LoadedPlugin {
     pub id: String,
     pub configuration: Value,
+    pub set: BTreeMap<String, Value>,
 }
 
 fn normalized(id: &str) -> String {
     id.replace('-', "").to_ascii_lowercase()
 }
 
+/// Whether `value` holds a `{"$library_ids": [...]}` anywhere.
+fn names_libraries(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => map.contains_key(LIBRARY_IDS) || map.values().any(names_libraries),
+        Value::Array(items) => items.iter().any(names_libraries),
+        _ => false,
+    }
+}
+
+/// `value` with every `{"$library_ids": [names]}` replaced by the ids of
+/// those libraries, in the order named (design §16). The spec has checked the
+/// marker's shape; a name the service does not know, or knows twice, goes to
+/// `problems` together with `at`.
+fn resolve_library_ids(
+    value: &Value,
+    folders: &[VirtualFolderInfo],
+    at: &str,
+    problems: &mut Vec<String>,
+) -> Value {
+    match value {
+        Value::Object(map) => match map.get(LIBRARY_IDS).and_then(Value::as_array) {
+            Some(names) => Value::Array(
+                names
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .filter_map(|name| {
+                        let found: Vec<&str> = folders
+                            .iter()
+                            .filter(|f| f.name.as_deref() == Some(name))
+                            .filter_map(|f| f.item_id.as_deref())
+                            .collect();
+                        match found.as_slice() {
+                            [id] => Some(Value::String((*id).to_string())),
+                            [] => {
+                                problems.push(format!("library {name:?} ({at})"));
+                                None
+                            }
+                            _ => {
+                                problems.push(format!(
+                                    "library {name:?} ({at}) is there {} times",
+                                    found.len()
+                                ));
+                                None
+                            }
+                        }
+                    })
+                    .collect(),
+            ),
+            None => Value::Object(
+                map.iter()
+                    .map(|(k, v)| (k.clone(), resolve_library_ids(v, folders, at, problems)))
+                    .collect(),
+            ),
+        },
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|v| resolve_library_ids(v, folders, at, problems))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 impl PluginConfigurations {
-    fn configuration_of<'a>(&self, current: &'a [LoadedPlugin], id: &str) -> Option<&'a Value> {
-        current
-            .iter()
-            .find(|p| p.id == id)
-            .map(|p| &p.configuration)
+    fn loaded<'a>(&self, current: &'a [LoadedPlugin], id: &str) -> Option<&'a LoadedPlugin> {
+        current.iter().find(|p| p.id == id)
     }
 
     fn changes_of(
         &self,
         target: &PluginTarget,
-        configuration: &Value,
+        loaded: &LoadedPlugin,
         missing: &mut Vec<String>,
     ) -> Vec<Change> {
-        let mut changes = compare_fields(&target.name, configuration, &target.set, missing);
+        let configuration = &loaded.configuration;
+        let mut changes = compare_fields(&target.name, configuration, &loaded.set, missing);
         for (path, secret) in &target.secrets {
             match paths::get(configuration, path) {
                 None => missing.push(format!("{}: {path}", target.name)),
@@ -792,8 +862,35 @@ impl Task for PluginConfigurations {
         if !problems.is_empty() {
             return Err(Error::NotFound(problems));
         }
-        let mut loaded = Vec::new();
+        // Library ids exist only once the libraries do, so they are looked
+        // up on every read -- and only when a spec names a library at all.
+        let folders = if self
+            .plugins
+            .iter()
+            .any(|p| p.set.values().any(names_libraries))
+        {
+            read_folders(t)?
+        } else {
+            Vec::new()
+        };
+        let mut sets = Vec::new();
         for target in &self.plugins {
+            let set: BTreeMap<String, Value> = target
+                .set
+                .iter()
+                .map(|(path, value)| {
+                    let at = format!("{}: {path}", target.name);
+                    let resolved = resolve_library_ids(value, &folders, &at, &mut problems);
+                    (path.clone(), resolved)
+                })
+                .collect();
+            sets.push(set);
+        }
+        if !problems.is_empty() {
+            return Err(Error::NotFound(problems));
+        }
+        let mut loaded = Vec::new();
+        for (target, set) in self.plugins.iter().zip(sets) {
             let path = PLUGIN_CONFIGURATION_READ
                 .path
                 .replace("{pluginId}", &target.id);
@@ -809,6 +906,7 @@ impl Task for PluginConfigurations {
             loaded.push(LoadedPlugin {
                 id: target.id.clone(),
                 configuration,
+                set,
             });
         }
         Ok(loaded)
@@ -818,11 +916,11 @@ impl Task for PluginConfigurations {
         let mut missing = Vec::new();
         let mut changes = Vec::new();
         for target in &self.plugins {
-            let Some(configuration) = self.configuration_of(current, &target.id) else {
+            let Some(loaded) = self.loaded(current, &target.id) else {
                 missing.push(format!("{}: configuration", target.name));
                 continue;
             };
-            changes.extend(self.changes_of(target, configuration, &mut missing));
+            changes.extend(self.changes_of(target, loaded, &mut missing));
         }
         if missing.is_empty() {
             Ok(changes)
@@ -837,19 +935,16 @@ impl Task for PluginConfigurations {
 
     fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
         for target in &self.plugins {
-            let Some(configuration) = self.configuration_of(current, &target.id) else {
+            let Some(loaded) = self.loaded(current, &target.id) else {
                 continue;
             };
             let mut missing = Vec::new();
-            if self
-                .changes_of(target, configuration, &mut missing)
-                .is_empty()
-            {
+            if self.changes_of(target, loaded, &mut missing).is_empty() {
                 continue;
             }
             // The whole configuration goes back: Ratings alone carries more
             // than a hundred settings made in the web UI.
-            let mut updated = with_fields(&target.name, configuration, &target.set)?;
+            let mut updated = with_fields(&target.name, &loaded.configuration, &loaded.set)?;
             for (path, secret) in &target.secrets {
                 if !paths::set(
                     &mut updated,
@@ -1457,5 +1552,183 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(err.starts_with("not found on the service"), "{err}");
+    }
+
+    // --- library ids by name (design §16) ---------------------------------
+
+    const LDAP: &str = "958aad6637844d2ab89aa7b6fab6e25c";
+    const SSO: &str = "505ce9d1d91642fa86ca673ef241d7df";
+
+    fn library_ids(names: &[&str]) -> Value {
+        json!({ LIBRARY_IDS: names })
+    }
+
+    const BASIC: [&str; 5] = [
+        "Filme",
+        "Musik",
+        "Serien",
+        "Mediathek Serien",
+        "Mediathek Filme",
+    ];
+
+    /// The recorded state, named by library instead of by id.
+    fn sign_in(basic: &[&str]) -> PluginConfigurations {
+        PluginConfigurations {
+            plugins: vec![
+                PluginTarget {
+                    id: LDAP.to_string(),
+                    name: "LDAP-Auth".to_string(),
+                    set: fields(&[
+                        ("EnabledFolders", library_ids(basic)),
+                        ("UseSsl", json!(true)),
+                    ]),
+                    secrets: BTreeMap::new(),
+                    lists: BTreeMap::new(),
+                },
+                PluginTarget {
+                    id: SSO.to_string(),
+                    name: "SSO-Auth".to_string(),
+                    set: fields(&[
+                        ("OidConfigs.authentik.EnabledFolders", library_ids(basic)),
+                        (
+                            "OidConfigs.authentik.FolderRoleMapping",
+                            json!([
+                                { "Role": "Medien", "Folders": library_ids(&[
+                                    "Filme", "Mediathek Filme", "Mediathek Serien", "Musik", "Serien"]) },
+                                { "Role": "Privat", "Folders": library_ids(&["Privat"]) },
+                            ]),
+                        ),
+                    ]),
+                    secrets: BTreeMap::new(),
+                    lists: BTreeMap::new(),
+                },
+            ],
+        }
+    }
+
+    fn sign_in_transport(ldap: &str) -> FakeTransport {
+        FakeTransport::default()
+            .on_get(PLUGINS.path, vec![ok(PLUGINS_JSON)])
+            .on_get(FOLDERS.path, vec![ok(FOLDERS_JSON)])
+            .on_get(&format!("/Plugins/{LDAP}/Configuration"), vec![ok(ldap)])
+            .on_get(
+                &format!("/Plugins/{SSO}/Configuration"),
+                vec![ok(&plugin_file(SSO))],
+            )
+            .on_put(vec![Step::Answer(204, String::new())])
+    }
+
+    #[test]
+    fn library_names_resolve_to_the_recorded_ids() {
+        let task = sign_in(&BASIC);
+        let t = sign_in_transport(&plugin_file(LDAP));
+        assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn a_library_list_in_another_order_is_written_as_ids() {
+        let reordered = [
+            "Filme",
+            "Serien",
+            "Musik",
+            "Mediathek Serien",
+            "Mediathek Filme",
+        ];
+        let task = sign_in(&reordered);
+        let t = sign_in_transport(&plugin_file(LDAP));
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        let fields: Vec<String> = changes
+            .iter()
+            .map(|c| format!("{}: {}", c.subject, c.field))
+            .collect();
+        assert_eq!(
+            fields,
+            [
+                "LDAP-Auth: EnabledFolders",
+                "SSO-Auth: OidConfigs.authentik.EnabledFolders"
+            ]
+        );
+        assert!(
+            !changes[0].desired.contains(LIBRARY_IDS),
+            "the change shows ids, not the marker: {}",
+            changes[0].desired
+        );
+
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 2);
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        let mut expected: Value = serde_json::from_str(&plugin_file(LDAP)).unwrap();
+        expected["EnabledFolders"] = json!([
+            "7a2175bccb1f1a94152cbd2b2bae8f6d",
+            "43cfe12fe7d9d8d21251e0964e0232e2",
+            "8a05b0252259a1dbd62df97522638439",
+            "c70af6a113b51f9aab8594b81d74f1b7",
+            "7ee571d485deaa484dcede65597cd699"
+        ]);
+        assert_eq!(sent, expected, "ids in the order named, the rest untouched");
+        let sso: Value = serde_json::from_str(&written[1].1).unwrap();
+        let recorded: Value = serde_json::from_str(&plugin_file(SSO)).unwrap();
+        assert_eq!(
+            sso["OidConfigs"]["authentik"]["FolderRoleMapping"],
+            recorded["OidConfigs"]["authentik"]["FolderRoleMapping"],
+            "a marker nested in a list resolves too"
+        );
+        assert_eq!(
+            sso["OidConfigs"]["authentik"]["CanonicalLinks"],
+            recorded["OidConfigs"]["authentik"]["CanonicalLinks"],
+            "the plugin's own links go back as read"
+        );
+    }
+
+    #[test]
+    fn an_unknown_library_is_not_found_before_anything_is_written() {
+        let task = sign_in(&["Filme", "Filem"]);
+        let t = sign_in_transport(&plugin_file(LDAP));
+        let err = task.read(&t).err().unwrap().to_string();
+        assert_eq!(
+            err,
+            "not found on the service: library \"Filem\" (LDAP-Auth: EnabledFolders); \
+             library \"Filem\" (SSO-Auth: OidConfigs.authentik.EnabledFolders)"
+        );
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn an_empty_library_list_from_the_service_is_an_error() {
+        let task = sign_in(&BASIC);
+        let t = sign_in_transport(&plugin_file(LDAP)).on_get(FOLDERS.path, vec![ok("[]")]);
+        let err = task.read(&t).err().unwrap().to_string();
+        assert_eq!(err, "/Library/VirtualFolders returned an empty list");
+    }
+
+    #[test]
+    fn a_library_name_the_service_carries_twice_is_not_guessed() {
+        let mut folders: Vec<Value> = serde_json::from_str(FOLDERS_JSON).unwrap();
+        let mut copy = folders
+            .iter()
+            .find(|f| f["Name"] == "Musik")
+            .unwrap()
+            .clone();
+        copy["ItemId"] = json!("00000000000000000000000000000000");
+        folders.push(copy);
+        let task = sign_in(&BASIC);
+        let t = sign_in_transport(&plugin_file(LDAP))
+            .on_get(FOLDERS.path, vec![ok(&Value::Array(folders).to_string())]);
+        let err = task.read(&t).err().unwrap().to_string();
+        assert!(
+            err.contains(r#"library "Musik" (LDAP-Auth: EnabledFolders) is there 2 times"#),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn without_a_marker_the_libraries_are_not_asked() {
+        // `plugins_transport` scripts no /Library/VirtualFolders: a request
+        // there would panic.
+        let task = targets("<masked>");
+        let t = plugins_transport(&plugin_file(OSCARS), &plugin_file(MEDIATHEK));
+        assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
     }
 }

@@ -1,0 +1,72 @@
+{
+  "OidConfigs": {
+    "authentik": {
+      "AdminRoles": [
+        "Verwaltung"
+      ],
+      "CanonicalLinks": {
+        "user-1": "<masked>",
+        "user-2": "<masked>",
+        "user-3": "<masked>",
+        "user-4": "<masked>",
+        "user-5": "<masked>",
+        "user-6": "<masked>",
+        "user-7": "<masked>"
+      },
+      "DefaultProvider": "<masked>",
+      "DefaultUsernameClaim": "<masked>",
+      "DisableHttps": false,
+      "DisablePushedAuthorization": false,
+      "DoNotLoadProfile": false,
+      "DoNotValidateEndpoints": false,
+      "DoNotValidateIssuerName": false,
+      "EnableAllFolders": false,
+      "EnableAuthorization": true,
+      "EnableFolderRoles": true,
+      "EnableLiveTv": false,
+      "EnableLiveTvManagement": false,
+      "EnableLiveTvRoles": false,
+      "Enabled": true,
+      "EnabledFolders": [
+        "7a2175bccb1f1a94152cbd2b2bae8f6d",
+        "8a05b0252259a1dbd62df97522638439",
+        "43cfe12fe7d9d8d21251e0964e0232e2",
+        "c70af6a113b51f9aab8594b81d74f1b7",
+        "7ee571d485deaa484dcede65597cd699"
+      ],
+      "FolderRoleMapping": [
+        {
+          "Folders": [
+            "7a2175bccb1f1a94152cbd2b2bae8f6d",
+            "7ee571d485deaa484dcede65597cd699",
+            "c70af6a113b51f9aab8594b81d74f1b7",
+            "8a05b0252259a1dbd62df97522638439",
+            "43cfe12fe7d9d8d21251e0964e0232e2"
+          ],
+          "Role": "Medien"
+        },
+        {
+          "Folders": [
+            "23c568cf922e8a8bbf6133ad307b5fb8"
+          ],
+          "Role": "Privat"
+        }
+      ],
+      "NewPath": true,
+      "OidClientId": "<masked>",
+      "OidEndpoint": "<masked>",
+      "OidScopes": [
+        "openid",
+        "profile",
+        "email"
+      ],
+      "OidSecret": "<masked>",
+      "RoleClaim": "<masked>",
+      "Roles": [
+        "Medien"
+      ],
+      "SchemeOverride": "<masked>"
+    }
+  },
+  "SamlConfigs": {}
+}

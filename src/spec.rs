@@ -464,6 +464,61 @@ fn field_paths(map: &BTreeMap<String, serde_json::Value>, what: &str) -> Result<
     }
 }
 
+/// In a plugin's `set`, `{"$library_ids": ["Filme", "Serien"]}` anywhere in a
+/// value stands for the ids of those libraries, looked up when the task
+/// reads (design §16). Library ids exist only once the libraries do, so a
+/// spec cannot carry them.
+pub const LIBRARY_IDS: &str = "$library_ids";
+
+/// Whether `value` holds an object key starting with `$` anywhere.
+fn has_marker(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.keys().any(|k| k.starts_with('$')) || map.values().any(has_marker)
+        }
+        serde_json::Value::Array(items) => items.iter().any(has_marker),
+        _ => false,
+    }
+}
+
+/// Every marker in `value` well-formed: `$library_ids` alone in its object,
+/// with a non-empty list of distinct, non-empty names. Any other key
+/// starting with `$` is a misspelt marker, not a plugin field.
+fn library_markers(value: &serde_json::Value) -> Result<(), String> {
+    use serde_json::Value;
+    match value {
+        Value::Array(items) => items.iter().try_for_each(library_markers),
+        Value::Object(map) => {
+            let Some(names) = map.get(LIBRARY_IDS) else {
+                if let Some(key) = map.keys().find(|k| k.starts_with('$')) {
+                    return Err(format!("unknown marker {key}"));
+                }
+                return map.values().try_for_each(library_markers);
+            };
+            if map.len() != 1 {
+                return Err(format!("{LIBRARY_IDS} stands alone in its object"));
+            }
+            let names: Option<Vec<&str>> = names.as_array().and_then(|list| {
+                list.iter()
+                    .map(|n| n.as_str().filter(|s| !s.is_empty()))
+                    .collect()
+            });
+            let Some(names) = names else {
+                return Err(format!("{LIBRARY_IDS} takes a list of library names"));
+            };
+            if names.is_empty() {
+                return Err(format!("{LIBRARY_IDS} names no library"));
+            }
+            let mut seen = std::collections::BTreeSet::new();
+            match names.into_iter().find(|n| !seen.insert(*n)) {
+                Some(twice) => Err(format!("{LIBRARY_IDS} names {twice} twice")),
+                None => Ok(()),
+            }
+        }
+        _ => Ok(()),
+    }
+}
+
 /// A well-formed keyed list: a dotted path, a key every item carries as a
 /// string, no key twice, and at least one field besides the key.
 fn list_items(path: &str, list: &ListItems) -> Result<(), String> {
@@ -708,6 +763,10 @@ impl Spec {
                     if !plugin.set.is_empty() {
                         field_paths(&plugin.set, &format!("{at}.set")).map_err(invalid)?;
                     }
+                    for (path, value) in &plugin.set {
+                        library_markers(value)
+                            .map_err(|e| invalid(format!("{at}.set.{path}: {e}")))?;
+                    }
                     for (path, credential) in &plugin.secrets {
                         if crate::paths::segments(path).is_none() {
                             return Err(invalid(format!(
@@ -727,6 +786,11 @@ impl Spec {
                     }
                     for (path, list) in &plugin.lists {
                         list_items(path, list).map_err(|e| invalid(format!("{at}.lists: {e}")))?;
+                        if list.items.iter().any(|item| item.values().any(has_marker)) {
+                            return Err(invalid(format!(
+                                "{at}.lists.{path}: a marker works only in set"
+                            )));
+                        }
                         if plugin.set.contains_key(path) || plugin.secrets.contains_key(path) {
                             return Err(invalid(format!(
                                 "{at}: {path} is both in set and in lists"
@@ -1160,6 +1224,54 @@ mod tests {
         let path_credential =
             r#"{"c531afa3de204055aca5a7cc43adf783":{"name":"X","secrets":{"A":"../x"}}}"#;
         assert!(jellyfin("plugin-configurations", path_credential).is_err());
+    }
+
+    #[test]
+    fn library_id_markers_are_strict() {
+        let spec = |set: &str| {
+            jellyfin(
+                "plugin-configurations",
+                &format!(
+                    r#"{{"958aad6637844d2ab89aa7b6fab6e25c":{{"name":"LDAP-Auth","set":{set}}}}}"#
+                ),
+            )
+        };
+        let reason = |set: &str| spec(set).err().unwrap().to_string();
+        assert!(spec(r#"{"EnabledFolders":{"$library_ids":["Filme","Serien"]}}"#).is_ok());
+        assert!(spec(
+            r#"{"A.FolderRoleMapping":[{"Role":"Medien","Folders":{"$library_ids":["Filme"]}}]}"#
+        )
+        .is_ok());
+        assert!(reason(r#"{"EnabledFolders":{"$library_ids":[]}}"#)
+            .contains("desired.958aad6637844d2ab89aa7b6fab6e25c.set.EnabledFolders: $library_ids names no library"));
+        assert!(
+            reason(r#"{"EnabledFolders":{"$library_ids":["Filme","Filme"]}}"#)
+                .contains("$library_ids names Filme twice")
+        );
+        assert!(
+            reason(r#"{"EnabledFolders":{"$library_ids":["Filme",""]}}"#)
+                .contains("$library_ids takes a list of library names")
+        );
+        assert!(reason(r#"{"EnabledFolders":{"$library_ids":"Filme"}}"#)
+            .contains("$library_ids takes a list of library names"));
+        assert!(
+            reason(r#"{"EnabledFolders":{"$library_ids":["Filme"],"Other":1}}"#)
+                .contains("$library_ids stands alone in its object")
+        );
+        assert!(
+            reason(r#"{"A":[{"Folders":{"$library_id":["Filme"]}}]}"#).contains(
+                "desired.958aad6637844d2ab89aa7b6fab6e25c.set.A: unknown marker $library_id"
+            )
+        );
+        let in_a_list = jellyfin(
+            "plugin-configurations",
+            r#"{"f5a34f7b2e8a4e6aa7223a216a81b374":{"name":"X","lists":{"L":{"key":"Name","items":[{"Name":"a","F":{"$library_ids":["Filme"]}}]}}}}"#,
+        );
+        assert!(in_a_list
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("a marker works only in set"));
     }
 
     #[test]

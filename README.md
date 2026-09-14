@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.11.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.12.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26) and **bindery** (1.33), each
 replacing a shell unit or an OpenTofu resource on the host it was written
 for:
@@ -37,7 +37,7 @@ for:
 | Jellyfin | `named-configuration` | fields of a named configuration (`network`, `branding`), by path, checked against its component |
 | Jellyfin | `library-options` | fields of the named libraries' `LibraryOptions`, by path |
 | Jellyfin | `scheduled-task-triggers` | the trigger list of tasks whose key starts with a prefix |
-| Jellyfin | `plugin-configurations` | fields of plugin configurations by path, keys from credentials, entries of shared lists by key |
+| Jellyfin | `plugin-configurations` | fields of plugin configurations by path, keys from credentials, entries of shared lists by key, library ids by library name |
 | Trailarr | `connections` | connections to Radarr and Sonarr by name: top-level fields, key from a credential; missing ones are added |
 | Trailarr | `trailer-profiles` | fields every trailer profile gets |
 | bindery | `download-clients`, `prowlarr-instances` | entries by name: top-level fields; secrets from credentials handed over on every `apply` in a `PUT` with only the secret (bindery answers them empty) |
@@ -117,6 +117,28 @@ document the key `network` stands for:
   "desired": {
     "key": "network",
     "set": { "KnownProxies": ["10.0.20.11"], "EnableUPnP": false }
+  }
+}
+```
+
+Plugins that name libraries by id get them by name: `{"$library_ids": [...]}`
+stands, at any depth of a `set` value, for the ids of those libraries in the
+order named, looked up on every run. An unknown name fails before anything is
+written (`docs/design.md` §16):
+
+```json
+{
+  "service": "jellyfin",
+  "base_url": "http://localhost:8096",
+  "api_key_credential": "jellyfin-api-key",
+  "task": "plugin-configurations",
+  "desired": {
+    "958aad6637844d2ab89aa7b6fab6e25c": {
+      "name": "LDAP-Auth",
+      "set": { "EnableAllFolders": false,
+               "EnabledFolders": { "$library_ids": ["Filme", "Serien"] } },
+      "secrets": { "LdapBindPassword": "jellyfin-ldap-bind-password" }
+    }
   }
 }
 ```

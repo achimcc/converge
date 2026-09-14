@@ -880,7 +880,65 @@ all, so a spec naming it fails at runtime with "the answer has no such field"
 — the same rule as everywhere (a missing path is never added), and on this
 host the field is not set.
 
-## 16. Not in the pilot
+## 16. Library ids by name (v0.12.0, 2026-09-14)
+
+Jellyfin's sign-in plugins decide which libraries an account sees, and they
+name libraries by **id**: LDAP-Auth's `EnabledFolders`, SSO-Auth's
+`OidConfigs.<provider>.EnabledFolders` and the `Folders` of each entry in
+`OidConfigs.<provider>.FolderRoleMapping`. An id exists only once the
+library does, and a rebuilt host gets new ones — a spec cannot carry them.
+The host's shell unit looked them up in `/Library/VirtualFolders` and pasted
+them into an XML file.
+
+In a plugin's `set`, a value may therefore hold a marker wherever an id list
+belongs, at any depth:
+
+```json
+"505ce9d1d91642fa86ca673ef241d7df": {
+  "name": "SSO-Auth",
+  "set": {
+    "OidConfigs.authentik.EnabledFolders": { "$library_ids": ["Filme", "Serien"] },
+    "OidConfigs.authentik.FolderRoleMapping": [
+      { "Role": "Medien",  "Folders": { "$library_ids": ["Filme", "Serien"] } },
+      { "Role": "Privat",  "Folders": { "$library_ids": ["Privat"] } } ] },
+  "secrets": { "OidConfigs.authentik.OidSecret": "jellyfin-oidc-secret" } }
+```
+
+- **Resolved on every read**, from `GET /Library/VirtualFolders`, to the list
+  of `ItemId`s **in the order named**; the diff, the change lines and the
+  write see only ids. A spec without a marker never asks for the libraries.
+- **A name the service does not know is an error before anything is
+  written**, and so is a name two libraries carry; so is an empty library
+  list. Leaving an unknown library out would take it away from everyone the
+  list grants it to.
+- **The spec is checked first**: `$library_ids` stands alone in its object and
+  lists distinct, non-empty names. Any other key starting with `$` is a
+  misspelt marker and an error. Markers work in `set` only, not in `lists`
+  items.
+- The list is compared as a whole, like any other value: the same ids in
+  another order are a change.
+
+### What the recorded answers showed
+
+`OidConfigs` is a JSON object keyed by provider name, and the role mapping is
+`FolderRoleMapping` (the property name). The XML file on disk calls it
+`FolderRoleMappings`, twice nested — a spec written from the file would fail
+at runtime with "the answer has no such field", which is the point of that
+rule. Both plugins read their configuration from the plugin instance on every
+request, and Jellyfin's `POST /Plugins/{id}/Configuration` replaces that
+instance's configuration, so no restart is needed after a write (read in the
+sources of LDAP-Auth 23 and SSO-Auth 4.0.0.4).
+
+SSO-Auth writes `CanonicalLinks` itself when someone signs in. converge sends
+the object back as read, so they stay — unless a sign-in lands between the
+read and the write, which a whole-object API cannot rule out.
+
+A provider missing from `OidConfigs` is a missing path like any other:
+converge does not create it. Creating it is a bootstrap step for the host
+(SSO-Auth's own `POST /sso/OID/Add/{provider}`).
+
+## 17. Not in the pilot
+
 
 - Other services and tasks (Authentik, Seerr, …).
 - TLS, JSON output, a NixOS module.

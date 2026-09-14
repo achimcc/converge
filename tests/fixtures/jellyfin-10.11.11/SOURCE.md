@@ -71,3 +71,22 @@ own sign-in button (public in the host repository).
 Note what the branding answer does NOT carry: `CustomCss` is null on this
 instance, and Jellyfin omits null values — the answer has exactly
 `LoginDisclaimer` and `SplashscreenEnabled`.
+
+## LDAP-Auth and SSO-Auth (recorded 2026-09-14 around 14:20 CEST)
+
+- `plugins/958aad6637844d2ab89aa7b6fab6e25c.json` — LDAP-Auth 23.0.0.0
+- `plugins/505ce9d1d91642fa86ca673ef241d7df.json` — SSO-Auth 4.0.0.4
+
+**Masked more strictly than the others.** Both carry a password and a
+directory layout, so on the host `jq` replaced EVERY string with
+`"<masked>"`, except the library ids in `EnabledFolders` and `Folders`
+(the same ids as `virtual-folders.json`, checked equal at recording time), the
+group names in `Roles`, `AdminRoles` and `FolderRoleMapping[].Role`, and the
+three `OidScopes`. The keys of `CanonicalLinks` are account names; they were
+renamed `user-1` … `user-7`. Numbers, booleans and the shape are as recorded,
+keys sorted (`jq -S`).
+
+Two things these answers show that the XML files on disk do not:
+`OidConfigs` is an object keyed by provider name (`authentik`), and the role
+mapping is `FolderRoleMapping` (singular, the property name) — the XML file
+calls it `FolderRoleMappings`. `PortOverride` is null and therefore absent.
