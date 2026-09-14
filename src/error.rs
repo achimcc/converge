@@ -50,6 +50,10 @@ pub enum Error {
         waited_secs: u64,
         remaining: Vec<String>,
     },
+    /// The service is in a state converge will not write in, however long it
+    /// waits.
+    #[error("refused: {0}")]
+    Refused(String),
     #[error("overall deadline of {secs} s exceeded")]
     Deadline { secs: u64 },
 }

@@ -750,7 +750,15 @@ fn koel_gets_a_bearer_token_and_json_and_neither_token_nor_logo_is_shown() {
     // A PNG signature and a mark that would show in the base64 of the logo.
     let logo = dir.path().join("logo.png");
     std::fs::write(&logo, b"\x89PNG\r\n\x1a\nlogo-mark-never-print-me").unwrap();
+    // The recorded account, with include_public_media turned off: only then
+    // does converge read the list as the account's own stations.
+    let me = include_str!("fixtures/koel-9.11.3/me.json").replace(
+        r#""include_public_media": true"#,
+        r#""include_public_media": false"#,
+    );
+    assert!(me.contains(r#""include_public_media": false"#));
     let server = Server::start(vec![
+        ("GET", "/api/me", 200, me),
         ("GET", "/api/radio/stations", 200, RECORDED.into()),
         ("POST", "/api/radio/stations", 422, INVALID.into()),
     ]);
@@ -828,6 +836,47 @@ fn koel_gets_a_bearer_token_and_json_and_neither_token_nor_logo_is_shown() {
         "{all}"
     );
     assert_eq!(server.requests().len(), before);
+
+    // The account as recorded (include_public_media on): the list could hold
+    // a person's public station of the same name, so apply stops before it
+    // writes anything.
+    let theirs = Server::start(vec![
+        (
+            "GET",
+            "/api/me",
+            200,
+            include_str!("fixtures/koel-9.11.3/me.json").into(),
+        ),
+        (
+            "GET",
+            "/api/radio/stations",
+            200,
+            include_str!("fixtures/koel-9.11.3/constructed-radio-stations.json").into(),
+        ),
+        (
+            "PUT",
+            "/api/radio/stations/01K52Z6P7B8C9D0E1F2G3H4J5K",
+            200,
+            "{}".into(),
+        ),
+    ]);
+    let spec = koel_spec(
+        dir.path(),
+        "theirs.json",
+        &theirs.base_url(),
+        r#"[{"name":"Somebody's own","url":"https://example.org/other.mp3","is_public":true}]"#,
+    );
+    let (code, all) = run("apply", &spec);
+    assert_eq!(code, Some(1), "{all}");
+    assert!(
+        all.contains("koel radio-stations: error: refused: the account's preference include_public_media is on"),
+        "{all}"
+    );
+    assert!(
+        theirs.requests().iter().all(|r| r.method == "GET"),
+        "{:?}",
+        theirs.requests()
+    );
 }
 
 #[test]

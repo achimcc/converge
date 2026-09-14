@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.14.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.14.1** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2) and **Koel** (9.11), each
 replacing a shell unit or an OpenTofu resource on the host it was written
 for:
@@ -47,7 +47,7 @@ for:
 | Seerr | `jellyfin` | the link to Jellyfin (key from a credential, compared) and the libraries Seerr scans, by name -- exactly these |
 | Seerr | `radarr-servers`, `sonarr-servers` | entries by name: top-level fields, key from a credential; quality profile and root folder by name, resolved through Seerr's connection test; missing entries are added |
 | Seerr | `webhook` | the webhook agent: fields by path, the payload template as an object (stored the way the agent parses it), header values from credentials |
-| Koel | `radio-stations` | stations by name, every field written whole; a logo from an image file, sent only where a station has none; missing stations are added |
+| Koel | `radio-stations` | the account's own stations by name (refused while its `include_public_media` is on), every field written whole; a logo from an image file (at most 2 MiB), sent only where a station has none; missing stations are added |
 
 ## A spec
 
@@ -154,7 +154,10 @@ travels as `Authorization: Bearer`, and every request asks for JSON — without
 Every write carries the whole entry, because Koel's update makes a station
 private when `is_public` is left out; `logo_file` is read on every run and
 sent only when the station has no logo, since Koel stores images under random
-names (`docs/design.md` §18):
+names. The list Koel answers also holds other people's public stations and
+names no owner, so converge refuses to run until the token's account has
+`include_public_media` off — then every station in it is the account's own
+(`docs/design.md` §18):
 
 ```json
 {

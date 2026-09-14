@@ -18,6 +18,15 @@ process that made the requests.
 - `unauthenticated.json` — the same request without a token, with
   `Accept: application/json`: HTTP 401, `{"error":"Unauthenticated."}`.
 
+- `me.json` — `GET /api/me` of the same account with the same kind of token,
+  recorded 2026-09-14 in the evening for v0.14.1. **Every non-empty string is
+  masked** (`"<masked>"`) except `type`, `role` and the `abilities` list —
+  the answer carries the account's Subsonic key, e-mail address and a Last.fm
+  session key preference. Numbers, booleans, nulls, keys and order as
+  answered. It shows `preferences.include_public_media: true` (Koel's
+  default) — the state in which the list also holds other people's public
+  stations.
+
 Also measured, not kept as a file: `GET /api/ping` answers HTTP 200 with an
 empty body and `Content-Type: text/html` (no token needed); without
 `Accept: application/json`, a request without a token is answered

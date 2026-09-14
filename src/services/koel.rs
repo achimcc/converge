@@ -22,6 +22,10 @@ use crate::{
 };
 
 pub const STATIONS: &str = "/api/radio/stations";
+pub const ME: &str = "/api/me";
+
+/// The largest logo file converge sends: 2 MiB (design §18).
+pub const LOGO_MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 /// Koel tells its version only in `GET /api/data`, which creates a queue
 /// row for the account on its first call; it is not asked.
@@ -106,6 +110,41 @@ pub fn decode_stations(path: &str, body: &str) -> Result<Vec<RadioStationResourc
         .collect()
 }
 
+/// Refuses unless the token's account has `include_public_media` off.
+///
+/// `GET /api/radio/stations` lists the account's own stations and, with that
+/// preference on (Koel's default), every public station of its organization
+/// (`RadioStationBuilder::accessible`). The answer names no owner
+/// (`RadioStationResource`), and `permissions.edit` is true for an
+/// administrator on every station -- so a spec station whose name matches a
+/// person's public station would be written onto that person's station.
+/// With the preference off the list is `whereBelongsTo` the account: every
+/// station in it is its own.
+///
+/// `GET /api/me` also answers the account's Subsonic key and e-mail address;
+/// only the one field is read, and no part of the body reaches an error.
+fn check_only_own_stations_listed(t: &dyn Transport) -> Result<(), Error> {
+    let reply = t.get(ME)?;
+    expect_status_at("GET", ME, &reply, &[200])?;
+    // A syntax error from serde_json names a line and a column, never text.
+    let account: Value = serde_json::from_str(&reply.body).map_err(|e| Error::Decode {
+        path: ME.to_string(),
+        reason: format!("not JSON ({e})"),
+    })?;
+    match account
+        .pointer("/preferences/include_public_media")
+        .and_then(Value::as_bool)
+    {
+        Some(false) => Ok(()),
+        Some(true) => Err(Error::Refused(format!(
+            "the account's preference include_public_media is on, so GET {STATIONS} also lists other people's public stations, and Koel does not say whose a station is -- set include_public_media to false for the account the token belongs to"
+        ))),
+        None => Err(Error::MissingField(vec![format!(
+            "{ME}: preferences.include_public_media (a boolean)"
+        )])),
+    }
+}
+
 /// Readiness and the token in one request: the list itself. A refused token
 /// and an answer that is not JSON stay that way however long one waits.
 pub fn probe(t: &dyn Transport) -> Result<String, Probe> {
@@ -129,8 +168,14 @@ pub fn probe(t: &dyn Transport) -> Result<String, Probe> {
 /// type). The type comes from the content: a store path's name says little.
 pub fn logo(path: &Path) -> Result<Logo, String> {
     let file = path.display().to_string();
-    let bytes = std::fs::read(path)
-        .map_err(|e| format!("logo_file {file} cannot be read ({})", e.kind()))?;
+    let unreadable = |e: std::io::Error| format!("logo_file {file} cannot be read ({})", e.kind());
+    let size = std::fs::metadata(path).map_err(unreadable)?.len();
+    if size > LOGO_MAX_BYTES {
+        return Err(format!(
+            "logo_file {file} is {size} bytes, more than the {LOGO_MAX_BYTES} (2 MiB) converge sends -- Koel scales a logo to 640 pixels wide anyway"
+        ));
+    }
+    let bytes = std::fs::read(path).map_err(unreadable)?;
     if bytes.is_empty() {
         return Err(format!("logo_file {file} is empty"));
     }
@@ -186,9 +231,10 @@ fn subject(name: &str) -> String {
 }
 
 impl RadioStations {
-    /// The one station of that name, `None` when there is none. Two of them
-    /// -- a person's public station besides the one kept here -- are an
-    /// error: nothing tells them apart.
+    /// The one station of that name, `None` when there is none. `read` has
+    /// made sure the list holds only the account's own stations
+    /// (`check_only_own_stations_listed`); two of them with one name are an
+    /// error, since nothing tells them apart.
     fn find<'a>(
         current: &'a [RadioStationResource],
         name: &str,
@@ -283,9 +329,12 @@ impl Task for RadioStations {
         probe(t)
     }
 
-    /// An empty list is valid: a fresh Koel has no station, and every one the
+    /// The account first: only with `include_public_media` off is every
+    /// station in the list the account's own (design §18). Then the list; an
+    /// empty one is valid -- a fresh Koel has no station, and every one the
     /// spec names then shows up as a change.
     fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        check_only_own_stations_listed(t)?;
         let reply = t.get(STATIONS)?;
         expect_status_at("GET", STATIONS, &reply, &[200])?;
         decode_stations(STATIONS, &reply.body)
@@ -402,8 +451,82 @@ mod tests {
         }
     }
 
+    const ME_RECORDED: &str = include_str!("../../tests/fixtures/koel-9.11.3/me.json");
+
+    /// The recorded `GET /api/me` with `include_public_media` as given.
+    fn me(include_public_media: bool) -> String {
+        let mut me: Value = serde_json::from_str(ME_RECORDED).unwrap();
+        me["preferences"]["include_public_media"] = json!(include_public_media);
+        me.to_string()
+    }
+
+    /// An account whose list holds only its own stations.
     fn koel(list: &str) -> FakeTransport {
-        FakeTransport::default().on_get(STATIONS, vec![ok(list)])
+        FakeTransport::default()
+            .on_get(ME, vec![ok(&me(false))])
+            .on_get(STATIONS, vec![ok(list)])
+    }
+
+    #[test]
+    fn the_recorded_account_lists_public_stations_so_nothing_is_read_or_written() {
+        // Recorded: the library account has the default, `true`. The list
+        // then carries a person's public station, and a spec station of the
+        // same name must not become a PUT onto it.
+        let mut theirs = fsk();
+        theirs.name = "Somebody's own".to_string();
+        theirs.url = "https://example.org/other.mp3".to_string();
+        let task = RadioStations {
+            stations: vec![theirs],
+        };
+        for mode in [Mode::Apply, Mode::Plan] {
+            let t = FakeTransport::default()
+                .on_get(ME, vec![ok(ME_RECORDED)])
+                .on_get(STATIONS, vec![ok(CONSTRUCTED)])
+                .on_put(vec![ok("{}")]);
+            let err = run(mode, &task, &t, &FakeClock::new(), Timing::default())
+                .err()
+                .unwrap()
+                .to_string();
+            assert_eq!(
+                err,
+                "refused: the account's preference include_public_media is on, so GET /api/radio/stations also lists other people's public stations, and Koel does not say whose a station is -- set include_public_media to false for the account the token belongs to"
+            );
+            assert!(t.written.borrow().is_empty(), "{mode:?} wrote");
+        }
+    }
+
+    #[test]
+    fn the_account_answer_is_checked_and_never_shown() {
+        let task = RadioStations {
+            stations: vec![fsk()],
+        };
+        let mark = "subsonic-key-7f3a9c-never-print-me";
+        let mut without: Value = serde_json::from_str(ME_RECORDED).unwrap();
+        without["subsonic_api_key"] = json!(mark);
+        without["preferences"]
+            .as_object_mut()
+            .unwrap()
+            .remove("include_public_media");
+        let t = koel(RECORDED).on_get(ME, vec![ok(&without.to_string())]);
+        let err = task.read(&t).err().unwrap().to_string();
+        assert_eq!(
+            err,
+            "the answer has no such field: /api/me: preferences.include_public_media (a boolean)"
+        );
+        without["preferences"]["include_public_media"] = json!(mark);
+        let t = koel(RECORDED).on_get(ME, vec![ok(&without.to_string())]);
+        let err = task.read(&t).err().unwrap().to_string();
+        assert!(!err.contains(mark), "{err}");
+
+        let t = koel(RECORDED).on_get(ME, vec![ok("<!DOCTYPE html>")]);
+        let err = task.read(&t).err().unwrap().to_string();
+        assert!(
+            err.starts_with("/api/me: the answer does not have the expected shape: not JSON"),
+            "{err}"
+        );
+        let t = koel(RECORDED).on_get(ME, vec![Step::Answer(401, UNAUTHENTICATED.into())]);
+        let err = task.read(&t).err().unwrap().to_string();
+        assert_eq!(err, "GET /api/me answered HTTP 401");
     }
 
     fn sent(t: &FakeTransport, index: usize) -> (String, Value) {
@@ -647,6 +770,7 @@ mod tests {
             "favorite": false, "permissions": {"edit": true, "delete": true}}])
             .to_string();
         let t = FakeTransport::default()
+            .on_get(ME, vec![ok(&me(false))])
             .on_get(
                 STATIONS,
                 vec![ok(RECORDED), ok(RECORDED), ok(RECORDED), ok(&after)],
@@ -675,6 +799,25 @@ mod tests {
             assert_eq!(base64(plain.as_bytes()), encoded, "{plain}");
         }
         assert_eq!(base64(&[0xfb, 0xff, 0xfe]), "+//+");
+    }
+
+    #[test]
+    fn a_logo_file_above_the_ceiling_is_refused_before_it_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.png");
+        let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+        bytes.resize(LOGO_MAX_BYTES as usize, 0);
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(logo(&path).is_ok(), "exactly the ceiling is fine");
+        bytes.push(0);
+        std::fs::write(&path, &bytes).unwrap();
+        assert_eq!(
+            logo(&path).err().unwrap(),
+            format!(
+                "logo_file {} is 2097153 bytes, more than the 2097152 (2 MiB) converge sends -- Koel scales a logo to 640 pixels wide anyway",
+                path.display()
+            )
+        );
     }
 
     #[test]

@@ -1027,7 +1027,7 @@ branding was left out on purpose. Radio stations are the task:
 
 | task | read | write | desired |
 |---|---|---|---|
-| `radio-stations` | `GET /api/radio/stations` | `POST /api/radio/stations` (missing, 201), `PUT /api/radio/stations/{id}` (differing, 200) | `stations`: a list of `name`, `url`, `description`, `is_public`, `homepage_url`, `logo_file` |
+| `radio-stations` | `GET /api/me` (`include_public_media` must be off), `GET /api/radio/stations` | `POST /api/radio/stations` (missing, 201), `PUT /api/radio/stations/{id}` (differing, 200) | `stations`: a list of `name`, `url`, `description`, `is_public`, `homepage_url`, `logo_file` |
 
 ```json
 {
@@ -1068,14 +1068,51 @@ Laravel's validation errors (`{"message": …, "errors": {field: [messages]}}`)
 join Servarr's shape in `validation_messages`: the fields and their messages
 are shown, the summary and everything else in the body are not.
 
-### Found by name, written whole
+### Found by name
 
 A station is found by `name`. Koel's own uniqueness is the URL per account,
 but stream URLs change; keyed by URL, a new URL would add a second station and
-leave the old one. The spec refuses a name or a URL given twice. If Koel
-answers **two** stations of one name — the list also carries other people's
-public stations — the task fails before anything is written: nothing in the
-answer tells converge which one it keeps.
+leave the old one. The spec refuses a name or a URL given twice.
+
+### Only the account's own stations (v0.14.1)
+
+**The guarantee: converge writes only to stations the token's account owns,
+and adds stations only for that account.** It holds because of what the list
+contains, not because of anything a station carries:
+
+- `GET /api/radio/stations` answers the account's own stations and — with
+  the account's preference `include_public_media` on, Koel's default — every
+  **public station of every account in the organization**
+  (`RadioStationBuilder::accessible`). With the preference off it is
+  `whereBelongsTo` the account: its own stations and nothing else.
+- The answer names **no owner** (`RadioStationResource`: no `user_id`,
+  `user` or `owner`), and `permissions.edit` cannot stand in for one: an
+  administrator — the account the host uses — may edit every station of the
+  organization (`RadioStationPolicy::edit`, `MANAGE_RADIO_STATIONS`), so it
+  is `true` everywhere. Comparing an owner id with `GET /api/me` is
+  therefore impossible.
+- So before every read of the list (`plan`, `apply` and each read-back)
+  converge reads `GET /api/me` and **refuses** unless
+  `preferences.include_public_media` is `false` — a boolean it must find, or
+  the run fails naming the field. v0.14.0 did not: a spec station named like
+  one person's public station would have been matched and `PUT` onto that
+  person's station, silently (fixed in v0.14.1; the recorded account had the
+  default `true`). The host sets the preference for its account once
+  (`PATCH /api/me/preferences`, or in its own setup).
+
+`GET /api/me` also answers the account's Subsonic key and e-mail address. Only
+the one field is read; a decode error names line and column, never text.
+
+**Ambiguity** is left only among the account's own stations: two of its
+stations with one name (created by hand) make the task fail before anything
+is written, since nothing tells converge which one is meant.
+
+What the guarantee does not cover: someone switching the preference on
+between converge's read and its write (a window of one run), and a person
+editing or deleting the account's stations through Koel — the next run
+writes the spec back or adds the station again (with a new id).
+
+### Written whole
 
 **`PUT` carries the whole entry.** `RadioStationUpdateRequest` reads
 `is_public` with `boolean()` (absent is `false`), `description` with
@@ -1104,6 +1141,13 @@ is there; a changed line says `logo (none) -> (from <file>)` and never shows
 the data. On `PUT` without a logo change the field is left out, which Koel
 reads as "keep".
 
+A logo file above **2 MiB** is refused before it is read, naming its size.
+Koel scales a logo down to 640 pixels wide (`ImageWritingConfig`), so a
+larger file buys nothing, and as a `data:` URI it grows by a third: 2 MiB of
+file is about 2.7 MiB of body — inside PHP's stock `post_max_size` (8 MiB)
+and nginx's NixOS default `client_max_body_size` (10 MiB), which a Koel host
+may keep.
+
 ### No deletion, no description
 
 A station removed from the spec stays, like every other entry (§19);
@@ -1116,9 +1160,11 @@ the specs only, as for ntfy, bindery and Seerr. The field names come from
 empty (`tests/fixtures/koel-9.11.3/`), so a constructed list of three
 stations carries the shape of an entry.
 
-Before release, `plan` ran inside the host's Koel container with a token
-created for the run: one station `(missing) -> (added)`, exit 2; with a wrong
-token HTTP 401 at once, exit 1.
+Before release of v0.14.0, `plan` ran inside the host's Koel container with
+a token created for the run: one station `(missing) -> (added)`, exit 2; with
+a wrong token HTTP 401 at once, exit 1. For v0.14.1 `GET /api/me` was recorded
+from the same account (every string masked): `include_public_media` `true`,
+so v0.14.1 refuses there until the host turns it off.
 
 ## 19. Not in the pilot
 
