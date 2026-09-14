@@ -77,6 +77,7 @@ enum TaskName {
     LibraryOptions,
     ScheduledTaskTriggers,
     PluginConfigurations,
+    NamedConfiguration,
     Connections,
     TrailerProfiles,
     AccountSubscriptions,
@@ -99,7 +100,8 @@ impl TaskName {
             TaskName::ServerConfiguration
             | TaskName::LibraryOptions
             | TaskName::ScheduledTaskTriggers
-            | TaskName::PluginConfigurations => service == Service::Jellyfin,
+            | TaskName::PluginConfigurations
+            | TaskName::NamedConfiguration => service == Service::Jellyfin,
             TaskName::Connections | TaskName::TrailerProfiles => service == Service::Trailarr,
             TaskName::AccountSubscriptions => service == Service::Ntfy,
             TaskName::Naming | TaskName::MediaManagement => service.is_servarr(),
@@ -184,6 +186,45 @@ pub struct ProfilePolicy {
 pub struct LibrarySettings {
     pub libraries: Vec<String>,
     pub set: BTreeMap<String, serde_json::Value>,
+}
+
+/// A Jellyfin named configuration (`/System/Configuration/{key}`) and fields
+/// by path in it. Only keys whose document the OpenAPI description names are
+/// accepted: the generic endpoint declares its answer as binary, so the paths
+/// are checked against the component the key maps to (design §15).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NamedConfigurationSettings {
+    pub key: NamedKey,
+    pub set: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NamedKey {
+    Network,
+    Branding,
+}
+
+impl NamedKey {
+    /// The key as it goes into the path.
+    pub fn path_segment(self) -> &'static str {
+        match self {
+            NamedKey::Network => "network",
+            NamedKey::Branding => "branding",
+        }
+    }
+
+    /// The OpenAPI component the document's paths are checked against. For
+    /// branding that is the DTO the write endpoint accepts: the stored
+    /// `BrandingOptions` has one more field (`SplashscreenLocation`) the API
+    /// does not let a client set.
+    pub fn component(self) -> &'static str {
+        match self {
+            NamedKey::Network => "NetworkConfiguration",
+            NamedKey::Branding => "BrandingOptionsDto",
+        }
+    }
 }
 
 /// The complete trigger list of every scheduled task whose key starts with
@@ -364,6 +405,7 @@ pub enum Desired {
     LibraryOptions(LibrarySettings),
     ScheduledTaskTriggers(TaskTriggers),
     PluginConfigurations(BTreeMap<String, PluginSettings>),
+    NamedConfiguration(NamedConfigurationSettings),
     Connections(TrailarrConnections),
     TrailerProfiles(TrailerProfileSettings),
     AccountSubscriptions(AccountSubscriptions),
@@ -611,6 +653,12 @@ impl Spec {
                     .map_err(|e| invalid(format!("desired: {e}")))?;
                 field_paths(&map, "desired").map_err(invalid)?;
                 Desired::ServerConfiguration(map)
+            }
+            TaskName::NamedConfiguration => {
+                let settings: NamedConfigurationSettings = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                field_paths(&settings.set, "desired.set").map_err(invalid)?;
+                Desired::NamedConfiguration(settings)
             }
             TaskName::LibraryOptions => {
                 let settings: LibrarySettings = serde_json::from_value(raw.desired)
@@ -911,6 +959,7 @@ impl Spec {
             Desired::LibraryOptions(_) => "library-options",
             Desired::ScheduledTaskTriggers(_) => "scheduled-task-triggers",
             Desired::PluginConfigurations(_) => "plugin-configurations",
+            Desired::NamedConfiguration(_) => "named-configuration",
             Desired::Connections(_) => "connections",
             Desired::TrailerProfiles(_) => "trailer-profiles",
             Desired::AccountSubscriptions(_) => "account-subscriptions",
@@ -1018,6 +1067,50 @@ mod tests {
         )
         .unwrap();
         assert_eq!(spec.task_name(), "scheduled-task-triggers");
+    }
+
+    #[test]
+    fn parses_named_configurations_by_key() {
+        let spec = jellyfin(
+            "named-configuration",
+            r#"{"key":"network","set":{"KnownProxies":["10.0.20.11"]}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "named-configuration");
+        match &spec.desired {
+            Desired::NamedConfiguration(s) => {
+                assert_eq!(s.key, NamedKey::Network);
+                assert_eq!(s.key.component(), "NetworkConfiguration");
+                assert_eq!(s.key.path_segment(), "network");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let spec = jellyfin(
+            "named-configuration",
+            r#"{"key":"branding","set":{"LoginDisclaimer":"x"}}"#,
+        )
+        .unwrap();
+        match &spec.desired {
+            Desired::NamedConfiguration(s) => assert_eq!(s.key.component(), "BrandingOptionsDto"),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn named_configuration_specs_are_strict() {
+        let unknown = jellyfin("named-configuration", r#"{"key":"encoding","set":{"A":1}}"#);
+        assert!(unknown.is_err(), "a key without a checked component");
+        let empty = jellyfin("named-configuration", r#"{"key":"network","set":{}}"#);
+        assert!(empty.is_err(), "empty set");
+        let bad = jellyfin(
+            "named-configuration",
+            r#"{"key":"network","set":{"A..B":1}}"#,
+        );
+        assert!(bad.is_err(), "bad path");
+        let other_service = parse(
+            r#"{"service":"radarr","base_url":"http://x","api_key_credential":"k","task":"named-configuration","desired":{"key":"network","set":{"A":1}}}"#,
+        );
+        assert!(other_service.is_err(), "Jellyfin only");
     }
 
     #[test]

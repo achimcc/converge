@@ -103,7 +103,7 @@ fn schema_check_reads_jellyfin_specs_and_rejects_a_trigger_type_outside_the_enum
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("jellyfin: 10 endpoints and their wire types match"),
+        stdout.contains("jellyfin: 12 endpoints and their wire types match"),
         "{stdout}"
     );
     assert!(
@@ -128,6 +128,63 @@ fn schema_check_reads_jellyfin_specs_and_rejects_a_trigger_type_outside_the_enum
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("TaskTriggerInfo[0].Type: \"Daily\" is not one of"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn schema_check_checks_a_named_configuration_against_the_component_of_its_key() {
+    let openapi = format!(
+        "{}/openapi/jellyfin-10.11.11.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let spec = |name: &str, key: &str, set: &str| {
+        let path = dir.path().join(name);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"service":"jellyfin","base_url":"http://localhost:8096","api_key_credential":"k","task":"named-configuration","desired":{{"key":"{key}","set":{set}}}}}"#
+            ),
+        )
+        .unwrap();
+        path
+    };
+    let check = |path: &std::path::Path| {
+        converge()
+            .args([
+                "schema-check",
+                "--service",
+                "jellyfin",
+                "--openapi",
+                &openapi,
+                "--spec",
+            ])
+            .arg(path)
+            .output()
+            .unwrap()
+    };
+
+    let good = spec(
+        "good.json",
+        "network",
+        r#"{"KnownProxies":["10.0.20.11"],"EnableUPnP":false}"#,
+    );
+    let out = check(&good);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("2 spec field(s) in 1 spec(s) match"),
+        "{stdout}"
+    );
+
+    // A branding field is not a network field: the key decides the component.
+    let wrong_key = spec("wrong-key.json", "network", r#"{"LoginDisclaimer":"x"}"#);
+    let out = check(&wrong_key);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("NetworkConfiguration.LoginDisclaimer: NetworkConfiguration has no property LoginDisclaimer"),
         "{stderr}"
     );
 }

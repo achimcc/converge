@@ -56,3 +56,18 @@ JavaScript identifiers; every `Token` is a variable name in a script.
 
 GetAvatar was recorded too and deliberately left out: its `UserAvatars` says
 which person picked which picture.
+
+## Named configurations (recorded 2026-09-14 around 09:30 CEST)
+
+- `system-configuration-network.json` — `GET /System/Configuration/network`
+- `system-configuration-branding.json` — `GET /System/Configuration/branding`
+
+Verbatim, recorded the same way (the key passed to curl with `-K` from a
+process substitution instead of `-H`, so it is not in `argv`). The only field
+whose name suggests a secret is `CertificatePassword`; it is the empty string,
+checked on the host before the answer left it. `LoginDisclaimer` is the host's
+own sign-in button (public in the host repository).
+
+Note what the branding answer does NOT carry: `CustomCss` is null on this
+instance, and Jellyfin omits null values — the answer has exactly
+`LoginDisclaimer` and `SplashscreenEnabled`.

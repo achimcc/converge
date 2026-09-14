@@ -838,7 +838,49 @@ real credentials: `unchanged` for all four. Sabotages that print the secret in
 a hand-over line or send the whole row instead of only the secret turn two
 tests red.
 
-## 15. Not in the pilot
+## 15. Jellyfin named configurations (v0.11.0, 2026-09-14)
+
+Jellyfin keeps more than `ServerConfiguration`: named documents under
+`/System/Configuration/{key}`. The host needs two of them. `network` carries
+`KnownProxies` — empty on the host although a reverse proxy sits in front, so
+Jellyfin saw every client as the proxy's address — and `EnableUPnP`, which the
+host set once during setup and nobody holds since. `branding` carries the
+sign-in button in `LoginDisclaimer`, which another tool rewrote on every run
+without ever converging.
+
+| task | read | write | desired |
+|---|---|---|---|
+| `named-configuration` | `GET /System/Configuration/{key}` | `POST /System/Configuration/{key}` | `key` and `set`: path → value |
+
+The same engine and the same rules as `server-configuration` (§6): the whole
+document goes back with only the named fields changed, a path the answer does
+not carry is an error.
+
+### Why the key is an enum
+
+The generic endpoint declares its answer as `string (binary)` and its body
+without a schema: there is nothing to check a path against. So `key` accepts
+only keys whose document the description names, and each maps to a component:
+
+| key | component |
+|---|---|
+| `network` | `NetworkConfiguration` |
+| `branding` | `BrandingOptionsDto` |
+
+For branding it is the DTO and not the stored `BrandingOptions`: the POST
+lands on Jellyfin's dedicated `/System/Configuration/Branding` (route matching
+ignores case), which accepts `BrandingOptionsDto` and leaves out
+`SplashscreenLocation`. A key outside the table is a spec error; adding one is
+a release with its component, not a string in a spec.
+
+### Null means absent
+
+Jellyfin omits null values. The recorded branding answer has no `CustomCss` at
+all, so a spec naming it fails at runtime with "the answer has no such field"
+— the same rule as everywhere (a missing path is never added), and on this
+host the field is not set.
+
+## 16. Not in the pilot
 
 - Other services and tasks (Authentik, Seerr, …).
 - TLS, JSON output, a NixOS module.

@@ -16,7 +16,7 @@ use crate::{
     error::Error,
     paths,
     secret::Secret,
-    spec::ListItems,
+    spec::{ListItems, NamedKey},
 };
 
 pub const SYSTEM_INFO: Endpoint = Endpoint {
@@ -35,6 +35,22 @@ pub const CONFIGURATION_WRITE: Endpoint = Endpoint {
     method: "POST",
     path: "/System/Configuration",
     request: Some(Shape::Document("ServerConfiguration")),
+    response: None,
+};
+/// A named configuration (`network`, `branding`, ...). The description
+/// declares the answer as binary and the body without a schema, so only the
+/// endpoints are checked here; a spec's paths are checked against the
+/// component its key maps to (`NamedKey::component`, design §15).
+pub const NAMED_CONFIGURATION_READ: Endpoint = Endpoint {
+    method: "GET",
+    path: "/System/Configuration/{key}",
+    request: None,
+    response: None,
+};
+pub const NAMED_CONFIGURATION_WRITE: Endpoint = Endpoint {
+    method: "POST",
+    path: "/System/Configuration/{key}",
+    request: None,
     response: None,
 };
 pub const FOLDERS: Endpoint = Endpoint {
@@ -82,10 +98,12 @@ pub const PLUGIN_CONFIGURATION_WRITE: Endpoint = Endpoint {
     request: None,
     response: None,
 };
-pub const ENDPOINTS: [Endpoint; 10] = [
+pub const ENDPOINTS: [Endpoint; 12] = [
     SYSTEM_INFO,
     CONFIGURATION_READ,
     CONFIGURATION_WRITE,
+    NAMED_CONFIGURATION_READ,
+    NAMED_CONFIGURATION_WRITE,
     FOLDERS,
     LIBRARY_OPTIONS_WRITE,
     TASKS,
@@ -310,6 +328,70 @@ impl Task for ServerConfiguration {
         )?;
         let reply = t.post_json(CONFIGURATION_WRITE.path, &body)?;
         expect_status(&CONFIGURATION_WRITE, &reply, &[200, 204])
+    }
+}
+
+// --- named-configuration ---------------------------------------------------
+
+/// One named configuration, replaced as a whole like `ServerConfiguration`:
+/// read, change the named fields, post the object back.
+///
+/// For `branding` the POST lands on Jellyfin's dedicated route
+/// (`/System/Configuration/Branding`, route matching ignores case), which
+/// takes `BrandingOptionsDto`; the answer of the GET is the stored
+/// `BrandingOptions`, whose extra `SplashscreenLocation` the DTO drops.
+pub struct NamedConfiguration {
+    pub key: NamedKey,
+    pub set: BTreeMap<String, Value>,
+}
+
+impl NamedConfiguration {
+    fn path(&self, endpoint: &Endpoint) -> String {
+        endpoint.path.replace("{key}", self.key.path_segment())
+    }
+}
+
+impl Task for NamedConfiguration {
+    type Current = Value;
+
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        probe(t)
+    }
+
+    fn read(&self, t: &dyn Transport) -> Result<Value, Error> {
+        let path = self.path(&NAMED_CONFIGURATION_READ);
+        let reply = t.get(&path)?;
+        expect_status_at(NAMED_CONFIGURATION_READ.method, &path, &reply, &[200])?;
+        let document: Value = decode(&path, &reply.body)?;
+        if !document.is_object() {
+            return Err(Error::Decode {
+                path,
+                reason: "not an object".to_string(),
+            });
+        }
+        Ok(document)
+    }
+
+    fn diff(&self, current: &Value) -> Result<Vec<Change>, Error> {
+        let mut missing = Vec::new();
+        let changes = compare_fields(self.key.component(), current, &self.set, &mut missing);
+        if missing.is_empty() {
+            Ok(changes)
+        } else {
+            Err(Error::MissingField(missing))
+        }
+    }
+
+    fn notes(&self, _current: &Value) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn write(&self, t: &dyn Transport, current: &Value) -> Result<(), Error> {
+        let updated = with_fields(self.key.component(), current, &self.set)?;
+        let path = self.path(&NAMED_CONFIGURATION_WRITE);
+        let body = serialize(NAMED_CONFIGURATION_WRITE.method, &path, &updated)?;
+        let reply = t.post_json(&path, &body)?;
+        expect_status_at(NAMED_CONFIGURATION_WRITE.method, &path, &reply, &[200, 204])
     }
 }
 
@@ -811,6 +893,10 @@ mod tests {
         include_str!("../../tests/fixtures/jellyfin-10.11.11/virtual-folders.json");
     const TASKS_JSON: &str =
         include_str!("../../tests/fixtures/jellyfin-10.11.11/scheduled-tasks.json");
+    const NETWORK: &str =
+        include_str!("../../tests/fixtures/jellyfin-10.11.11/system-configuration-network.json");
+    const BRANDING: &str =
+        include_str!("../../tests/fixtures/jellyfin-10.11.11/system-configuration-branding.json");
 
     fn fields(pairs: &[(&str, Value)]) -> BTreeMap<String, Value> {
         pairs
@@ -881,6 +967,67 @@ mod tests {
         assert_eq!(written[0].0, "/System/Configuration");
         let sent: Value = serde_json::from_str(&written[0].1).unwrap();
         assert_eq!(sent, serde_json::from_str::<Value>(CONFIG).unwrap());
+    }
+
+    #[test]
+    fn named_configuration_reads_and_writes_the_key_it_names() {
+        let task = NamedConfiguration {
+            key: NamedKey::Network,
+            set: fields(&[
+                ("KnownProxies", json!(["10.0.20.11"])),
+                ("EnableUPnP", json!(false)),
+            ]),
+        };
+        let t = FakeTransport::default()
+            .on_get("/System/Configuration/network", vec![ok(NETWORK)])
+            .on_put(vec![Step::Answer(204, String::new())]);
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            changes[0].to_string(),
+            r#"NetworkConfiguration: KnownProxies [] -> ["10.0.20.11"]"#
+        );
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written[0].0, "/System/Configuration/network");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        let expected = with(NETWORK, |v| v["KnownProxies"] = json!(["10.0.20.11"]));
+        assert_eq!(sent, serde_json::from_str::<Value>(&expected).unwrap());
+    }
+
+    #[test]
+    fn named_configuration_recorded_branding_is_already_desired() {
+        let recorded: Value = serde_json::from_str(BRANDING).unwrap();
+        let task = NamedConfiguration {
+            key: NamedKey::Branding,
+            set: fields(&[
+                ("LoginDisclaimer", recorded["LoginDisclaimer"].clone()),
+                ("SplashscreenEnabled", json!(false)),
+            ]),
+        };
+        let t =
+            FakeTransport::default().on_get("/System/Configuration/branding", vec![ok(BRANDING)]);
+        assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn named_configuration_a_null_jellyfin_omitted_is_missing_not_added() {
+        let task = NamedConfiguration {
+            key: NamedKey::Branding,
+            set: fields(&[("CustomCss", json!(""))]),
+        };
+        let t =
+            FakeTransport::default().on_get("/System/Configuration/branding", vec![ok(BRANDING)]);
+        let err = task
+            .diff(&task.read(&t).unwrap())
+            .err()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            err,
+            "the answer has no such field: BrandingOptionsDto: CustomCss"
+        );
     }
 
     #[test]

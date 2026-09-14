@@ -122,6 +122,13 @@ fn reconcile_one(
             let task = jellyfin::ServerConfiguration { set: set.clone() };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::NamedConfiguration(settings) => {
+            let task = jellyfin::NamedConfiguration {
+                key: settings.key,
+                set: settings.set.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
         Desired::LibraryOptions(settings) => {
             let task = jellyfin::LibraryOptions {
                 libraries: settings.libraries.clone(),
@@ -442,6 +449,10 @@ fn schema_check(args: &[String]) -> ExitCode {
             Desired::ServerConfiguration(set) => (
                 schema::check_paths(&document, jellyfin::SERVER_CONFIGURATION, set),
                 set.len(),
+            ),
+            Desired::NamedConfiguration(settings) => (
+                schema::check_paths(&document, settings.key.component(), &settings.set),
+                settings.set.len(),
             ),
             Desired::LibraryOptions(settings) => (
                 schema::check_paths(&document, jellyfin::LIBRARY_OPTIONS, &settings.set),

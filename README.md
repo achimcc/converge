@@ -34,6 +34,7 @@ for:
 | Prowlarr | `indexers`, `indexer-proxies` | the same, added from a named template; tags by label (missing labels are added); secrets the service shows are compared, never printed |
 | Radarr, Sonarr, Lidarr | `root-folders` | root folders by path; Lidarr's with fields and profiles by name; missing ones are added |
 | Jellyfin | `server-configuration` | fields of `ServerConfiguration`, by path |
+| Jellyfin | `named-configuration` | fields of a named configuration (`network`, `branding`), by path, checked against its component |
 | Jellyfin | `library-options` | fields of the named libraries' `LibraryOptions`, by path |
 | Jellyfin | `scheduled-task-triggers` | the trigger list of tasks whose key starts with a prefix |
 | Jellyfin | `plugin-configurations` | fields of plugin configurations by path, keys from credentials, entries of shared lists by key |

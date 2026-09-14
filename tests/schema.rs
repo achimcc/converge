@@ -130,6 +130,28 @@ fn a_known_path_with_the_right_type_passes() {
 }
 
 #[test]
+fn named_configuration_components_are_checked_like_documents() {
+    let found = paths(
+        "NetworkConfiguration",
+        serde_json::json!({"KnownProxies": ["10.0.20.11"], "EnableUPnP": false}),
+    );
+    assert_eq!(found, Vec::<String>::new());
+    let found = paths(
+        "BrandingOptionsDto",
+        serde_json::json!({"LoginDisclaimer": "<a href=\"/sso\">x</a>", "SplashscreenEnabled": false}),
+    );
+    assert_eq!(found, Vec::<String>::new());
+    let found = paths(
+        "NetworkConfiguration",
+        serde_json::json!({"KnownProxies": "10.0.20.11"}),
+    );
+    assert_eq!(
+        found,
+        ["NetworkConfiguration.KnownProxies: expects array, the spec has a string"]
+    );
+}
+
+#[test]
 fn a_misspelt_segment_is_found_with_the_component_it_is_missing_from() {
     let found = paths(
         "ServerConfiguration",
