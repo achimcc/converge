@@ -1,0 +1,20 @@
+[
+  {
+    "activeDirectory": "/tank/data/media/movies",
+    "activeProfileId": 7,
+    "activeProfileName": "Dual Language, sonst Deutsch (1080p)",
+    "apiKey": "<masked>",
+    "baseUrl": "",
+    "externalUrl": "",
+    "hostname": "<masked>",
+    "id": 0,
+    "is4k": false,
+    "isDefault": true,
+    "minimumAvailability": "released",
+    "name": "Radarr",
+    "port": 7878,
+    "preventSearch": false,
+    "syncEnabled": true,
+    "useSsl": false
+  }
+]

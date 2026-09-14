@@ -1,0 +1,17 @@
+{
+  "embedPoster": true,
+  "enabled": true,
+  "options": {
+    "authHeader": "",
+    "customHeaders": [
+      {
+        "key": "X-Webhook-Token",
+        "value": "<masked>"
+      }
+    ],
+    "jsonPayload": "{\"notification_type\":\"{{notification_type}}\",\"subject\":\"{{subject}}\",\"{{request}}\":{\"request_id\":\"{{request_id}}\"}}",
+    "supportVariables": false,
+    "webhookUrl": "<masked>"
+  },
+  "types": 24
+}

@@ -1,0 +1,37 @@
+{
+  "apiKey": "<masked>",
+  "externalHostname": "<masked>",
+  "ip": "<masked>",
+  "jellyfinForgotPasswordUrl": "",
+  "libraries": [
+    {
+      "enabled": true,
+      "id": "7a2175bccb1f1a94152cbd2b2bae8f6d",
+      "name": "Filme",
+      "type": "movie"
+    },
+    {
+      "enabled": true,
+      "id": "7ee571d485deaa484dcede65597cd699",
+      "name": "Mediathek Filme",
+      "type": "movie"
+    },
+    {
+      "enabled": true,
+      "id": "c70af6a113b51f9aab8594b81d74f1b7",
+      "name": "Mediathek Serien",
+      "type": "show"
+    },
+    {
+      "enabled": true,
+      "id": "43cfe12fe7d9d8d21251e0964e0232e2",
+      "name": "Serien",
+      "type": "show"
+    }
+  ],
+  "name": "Jellyfin",
+  "port": 8096,
+  "serverId": "<masked>",
+  "urlBase": "",
+  "useSsl": false
+}

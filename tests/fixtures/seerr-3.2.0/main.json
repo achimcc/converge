@@ -1,0 +1,28 @@
+{
+  "apiKey": "<masked>",
+  "applicationTitle": "Wunschliste",
+  "applicationUrl": "<masked>",
+  "blocklistLanguage": "",
+  "blocklistRegion": "",
+  "blocklistedTags": "",
+  "blocklistedTagsLimit": 50,
+  "cacheImages": false,
+  "defaultPermissions": 8992,
+  "defaultQuotas": {
+    "movie": {},
+    "tv": {}
+  },
+  "discoverRegion": "DE",
+  "enableSpecialEpisodes": false,
+  "hideAvailable": false,
+  "hideBlocklisted": false,
+  "localLogin": false,
+  "locale": "de",
+  "mediaServerLogin": true,
+  "mediaServerType": 2,
+  "newPlexLogin": true,
+  "originalLanguage": "",
+  "partialRequestsEnabled": true,
+  "streamingRegion": "DE",
+  "youtubeUrl": ""
+}

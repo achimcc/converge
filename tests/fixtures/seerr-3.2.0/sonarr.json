@@ -1,0 +1,25 @@
+[
+  {
+    "activeAnimeDirectory": null,
+    "activeAnimeLanguageProfileId": null,
+    "activeAnimeProfileId": null,
+    "activeAnimeProfileName": null,
+    "activeDirectory": "/tank/data/media/series",
+    "activeLanguageProfileId": 1,
+    "activeProfileId": 7,
+    "activeProfileName": "Dual Language, sonst Deutsch (1080p)",
+    "apiKey": "<masked>",
+    "baseUrl": "",
+    "enableSeasonFolders": true,
+    "externalUrl": "",
+    "hostname": "<masked>",
+    "id": 0,
+    "is4k": false,
+    "isDefault": true,
+    "name": "Sonarr",
+    "port": 8989,
+    "preventSearch": false,
+    "syncEnabled": true,
+    "useSsl": false
+  }
+]

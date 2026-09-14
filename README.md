@@ -19,8 +19,8 @@ script should have been:
 
 ## Status
 
-Early. **v0.12.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
-**Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26) and **bindery** (1.33), each
+Early. **v0.13.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+**Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33) and **Seerr** (3.2), each
 replacing a shell unit or an OpenTofu resource on the host it was written
 for:
 
@@ -43,6 +43,10 @@ for:
 | bindery | `download-clients`, `prowlarr-instances` | entries by name: top-level fields; secrets from credentials handed over on every `apply` in a `PUT` with only the secret (bindery answers them empty) |
 | bindery | `root-folders`, `settings` | root folders by path (added when missing); settings by key |
 | ntfy | `account-subscriptions` | subscriptions of an account; the topics are secrets, read from a credential and never printed |
+| Seerr | `main` | top-level fields of the main settings (merged) |
+| Seerr | `jellyfin` | the link to Jellyfin (key from a credential, compared) and the libraries Seerr scans, by name -- exactly these |
+| Seerr | `radarr-servers`, `sonarr-servers` | entries by name: top-level fields, key from a credential; quality profile and root folder by name, resolved through Seerr's connection test; missing entries are added |
+| Seerr | `webhook` | the webhook agent: fields by path, the payload template as an object (stored the way the agent parses it), header values from credentials |
 
 ## A spec
 
@@ -150,7 +154,7 @@ written (`docs/design.md` §16):
 | `converge apply [--deadline <s>] <spec>...` | reconcile, write, read back | 0 done, 1 any spec failed |
 | `converge plan [--deadline <s>] <spec>...` | show what `apply` would change | 0 equal, 2 differs, 1 error |
 | `converge schema-check --service <radarr\|sonarr\|lidarr\|prowlarr\|jellyfin\|trailarr> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
-| `converge schema-check --service <ntfy\|bindery> [--spec <spec>]...` | ntfy and bindery publish no OpenAPI description: only validate the specs (`--openapi` is refused) | 0 / 1 |
+| `converge schema-check --service <ntfy\|bindery\|seerr> [--spec <spec>]...` | ntfy and bindery publish no OpenAPI description, Seerr's misnames its fields: only validate the specs (`--openapi` is refused) | 0 / 1 |
 
 Several specs are processed in order; one failing does not skip the next.
 

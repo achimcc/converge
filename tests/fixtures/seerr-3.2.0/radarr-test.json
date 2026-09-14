@@ -1,0 +1,32 @@
+{
+  "profiles": [
+    {
+      "id": 7,
+      "name": "Dual Language, sonst Deutsch (1080p)"
+    },
+    {
+      "id": 8,
+      "name": "Dual Language, sonst Deutsch (4K, sonst 1080p)"
+    },
+    {
+      "id": 9,
+      "name": "Dual Language, sonst Originalsprache (1080p)"
+    },
+    {
+      "id": 10,
+      "name": "Dual Language, sonst Originalsprache (4K, sonst 1080p)"
+    },
+    {
+      "id": 11,
+      "name": "Rarität, Originalsprache (auch SD)"
+    }
+  ],
+  "rootFolders": [
+    {
+      "id": 1,
+      "path": "/tank/data/media/movies"
+    }
+  ],
+  "tags": [],
+  "urlBase": ""
+}

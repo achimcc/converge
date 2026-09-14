@@ -609,6 +609,91 @@ fn schema_check_for_bindery_validates_its_four_tasks_without_an_openapi_file() {
 }
 
 #[test]
+fn schema_check_for_seerr_validates_its_five_tasks_without_an_openapi_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let spec = |file: &str, task: &str, desired: &str| {
+        let path = dir.path().join(file);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"service":"seerr","base_url":"http://127.0.0.1:5055","api_key_credential":"seerr-api-key","task":"{task}","desired":{desired}}}"#
+            ),
+        )
+        .unwrap();
+        path
+    };
+    let main = spec(
+        "main.json",
+        "main",
+        r#"{"set":{"locale":"de","newPlexLogin":true}}"#,
+    );
+    let jellyfin = spec(
+        "jellyfin.json",
+        "jellyfin",
+        r#"{"set":{"ip":"10.0.30.10","port":8096},"api_key_credential":"jellyfin-api-key-seerr","libraries":["Filme","Serien"]}"#,
+    );
+    let servers = r#"{"servers":{"Radarr":{"set":{"hostname":"10.0.10.10","port":7878},"api_key_credential":"radarr-api-key","profile":"HD","root_folder":"/tank/data/media/movies"}}}"#;
+    let radarr = spec("radarr.json", "radarr-servers", servers);
+    let sonarr = spec(
+        "sonarr.json",
+        "sonarr-servers",
+        &servers.replace("Radarr", "Sonarr"),
+    );
+    let webhook = spec(
+        "webhook.json",
+        "webhook",
+        r#"{"set":{"enabled":true,"types":24},"payload":{"subject":"{{subject}}"},"headers":{"X-Webhook-Token":"signal-webhook-marke"}}"#,
+    );
+    let out = schema_check(
+        "seerr",
+        None,
+        &[&main, &jellyfin, &radarr, &sonarr, &webhook],
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("seerr: no OpenAPI description exists; 5 spec(s) valid"),
+        "{stdout}"
+    );
+
+    // A resolved field in set, a library list that would disable every
+    // library, and the payload set as a plain field are errors.
+    let resolved = spec(
+        "resolved.json",
+        "radarr-servers",
+        &servers.replace(r#""port":7878"#, r#""port":7878,"activeProfileId":7"#),
+    );
+    let no_library = spec(
+        "no-library.json",
+        "jellyfin",
+        r#"{"set":{"ip":"10.0.30.10","port":8096},"api_key_credential":"jf","libraries":[]}"#,
+    );
+    let payload_as_field = spec(
+        "payload-as-field.json",
+        "webhook",
+        r#"{"set":{"options.jsonPayload":"{}"},"payload":{"a":1}}"#,
+    );
+    for (path, needle) in [
+        (&resolved, "activeProfileId is not set this way"),
+        (&no_library, "names no library"),
+        (&payload_as_field, "options.jsonPayload is not set this way"),
+    ] {
+        let out = schema_check("seerr", None, &[path]);
+        assert_eq!(out.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains(needle), "{stderr}");
+    }
+    let out = schema_check("seerr", Some(&trailarr_openapi()), &[&main]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("seerr publishes no OpenAPI description"));
+}
+
+#[test]
 fn schema_check_for_ntfy_validates_specs_without_an_openapi_file() {
     let dir = tempfile::tempdir().unwrap();
     let text = r#"{"service":"ntfy","base_url":"http://localhost:2586","api_key_credential":"ntfy-token","task":"account-subscriptions","desired":{"base_url":"https://ntfy.rusty-vault.de","topics_credential":"ntfy-abo-topics"}}"#;

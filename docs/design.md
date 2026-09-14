@@ -937,7 +937,88 @@ A provider missing from `OidConfigs` is a missing path like any other:
 converge does not create it. Creating it is a bootstrap step for the host
 (SSO-Auth's own `POST /sso/OID/Add/{provider}`).
 
-## 17. Not in the pilot
+## 17. Seerr: main, Jellyfin and libraries, Radarr/Sonarr entries, webhook (v0.13.0, 2026-09-14)
+
+Seerr (3.2) keeps its settings in `settings.json` and changes them through
+`/api/v1/settings/...`. The host wrote that file with `jq` before every start
+— looking up ids in Radarr, Sonarr and Jellyfin itself — and restarted Seerr
+to pick a rotated key up. Four tasks replace the part that is not bootstrap:
+
+| task | read | write | desired |
+|---|---|---|---|
+| `main` | `GET /settings/main` | `POST /settings/main` (merges) | `set`: top-level fields, not `apiKey` |
+| `jellyfin` | `GET /settings/jellyfin` | `POST /settings/jellyfin` (tests the connection, fills `serverId` and `name`); `GET /settings/jellyfin/library?enable=<ids>` | `set`, `api_key_credential`, `libraries`: names — exactly these are enabled |
+| `radarr-servers`, `sonarr-servers` | `GET /settings/{kind}` | `POST` (missing), `PUT /settings/{kind}/{id}` (replaces the entry) | `servers`: name → `set`, `api_key_credential`, `profile`, `root_folder` |
+| `webhook` | `GET /settings/notifications/webhook` | `POST` (replaces) | `set` by path, `payload` (object), `headers`: name → credential |
+
+Readiness: `GET /api/v1/status` answers a version without a key.
+
+### The key is a person
+
+`X-Api-Key` does not authenticate on its own: `middleware/auth.js` looks up
+**user 1** for it, the administrator the first sign-in creates. Until then
+every settings route answers 403 — so the probe treats 403 as fatal, not as
+"not yet". And that first sign-in (`routes/auth.js`) needs `jellyfin.ip`,
+`port` and `apiKey` in the file already, then fills `serverId`, `name` and a
+fresh Jellyfin token itself. Five fields therefore stay a bootstrap the host
+writes before the first start, only when missing; everything else is
+converge's after the first sign-in.
+
+### What the description gets wrong
+
+Seerr ships `seerr-api.yml`, and its components misname what the running
+service answers: `JellyfinSettings` has `hostname` and `serverID` where the
+answer carries `ip`, `port`, `useSsl`, `urlBase`, `serverId`, `apiKey`;
+`MainSettings` lacks `locale`, `discoverRegion`, `streamingRegion`,
+`cacheImages`; `WebhookSettings` lacks `embedPoster`. Only the Radarr and
+Sonarr components match. A build check against that file would reject
+fields that exist and pass ones that do not, so `schema-check --service
+seerr` validates the specs and nothing more, as for ntfy and bindery, and
+the recorded answers in `tests/fixtures/seerr-3.2.0/` carry the names.
+
+### Names, resolved by Seerr itself
+
+`activeProfileId` is a Radarr number and `activeDirectory` a Radarr path;
+the libraries are Jellyfin ids. None of them belongs in a spec (§16), and
+converge does not talk to a third service to find them: Seerr's own
+`POST /settings/{kind}/test` asks Radarr or Sonarr with the entry's
+connection fields and answers `profiles` and `rootFolders` without storing
+anything — it runs on every read, so a profile renamed in Radarr is an error
+that names what the service has, before anything is compared. (Sonarr has no
+`/{id}/profiles` route; the test serves both.) For the libraries,
+`GET /settings/jellyfin/library?sync=true&enable=<ids>` makes Seerr fetch
+the list from Jellyfin with its own type filter; a name still unknown
+afterwards is an error.
+
+**The route without `enable=` disables every library** — its last line runs
+unconditionally. `library_query` always carries the parameter, a test holds
+it there, and the spec refuses an empty list.
+
+### Secrets Seerr shows
+
+`GET /settings/radarr` answers `apiKey` in the clear, as do `jellyfin` and
+the webhook's `customHeaders[].value`. They are compared against the
+credential and never printed (§13): a difference is `(hidden) -> (hidden)
+from its credential`. `PUT` replaces the whole entry, so the entry as read
+goes back with the named fields changed — a field the spec does not name
+(Sonarr's `activeLanguageProfileId`, say) survives.
+
+### The payload, encoded twice
+
+The webhook agent decodes `jsonPayload` from base64 and then parses it
+**twice** (`JSON.parse(JSON.parse(text))`); the route stores
+`base64(jsonPayload)` of the request field after checking it parses once.
+Seerr's own web UI sends the template as JSON text, so what it stores parses
+once and the agent fails on it — silently, into the log. converge sends the
+template's JSON as a JSON string literal, which is exactly what the agent
+wants; `GET` answers the inner text as a string (recorded: a string equal to
+the host's template), or an object when the UI stored it, which is reported
+as a change. The template itself is an object in the spec.
+
+Before release, `plan` ran on the host with its five specs and the real
+credentials: `unchanged` for all five.
+
+## 18. Not in the pilot
 
 
 - Other services and tasks (Authentik, Seerr, …).

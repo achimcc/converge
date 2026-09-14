@@ -10,7 +10,7 @@ use converge::{
     engine::{run, Mode, Outcome, Timing},
     error::Error,
     schema,
-    services::{arr, bindery, jellyfin, ntfy, providers, servarr, trailarr},
+    services::{arr, bindery, jellyfin, ntfy, providers, seerr, servarr, trailarr},
     spec::{Desired, Service, Spec},
 };
 
@@ -18,7 +18,7 @@ const USAGE: &str = "usage:
   converge apply [--deadline <seconds>] <spec.json>...
   converge plan [--deadline <seconds>] <spec.json>...
   converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr> --openapi <file> [--spec <spec.json>]...
-  converge schema-check --service ntfy|bindery [--spec <spec.json>]...";
+  converge schema-check --service ntfy|bindery|seerr [--spec <spec.json>]...";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -196,6 +196,52 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::SeerrMain(set) => {
+            let task = seerr::Main { set: set.clone() };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        Desired::SeerrJellyfin(desired) => {
+            let task = seerr::Jellyfin {
+                set: desired.set.clone(),
+                api_key: read_credential(credentials, &desired.api_key_credential).map_err(fail)?,
+                libraries: desired.libraries.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        Desired::SeerrServers(kind, servers) => {
+            // As for plugin secrets: every key before the first request.
+            let mut targets = Vec::new();
+            for (name, server) in servers {
+                targets.push(seerr::ServerTarget {
+                    name: name.clone(),
+                    set: server.set.clone(),
+                    api_key: read_credential(credentials, &server.api_key_credential)
+                        .map_err(fail)?,
+                    profile: server.profile.clone(),
+                    root_folder: server.root_folder.clone(),
+                });
+            }
+            let task = seerr::Servers {
+                kind: *kind,
+                servers: targets,
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        Desired::SeerrWebhook(desired) => {
+            let mut headers = std::collections::BTreeMap::new();
+            for (key, credential) in &desired.headers {
+                headers.insert(
+                    key.clone(),
+                    read_credential(credentials, credential).map_err(fail)?,
+                );
+            }
+            let task = seerr::Webhook {
+                set: desired.set.clone(),
+                payload: desired.payload.clone(),
+                headers,
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
         Desired::BinderyEntries(kind, entries) => {
             // As for providers: every secret before the first request.
             let mut targets = Vec::new();
@@ -336,8 +382,9 @@ fn servarr_api(spec: &Spec) -> Result<&'static servarr::Api, Error> {
     })
 }
 
-/// ntfy (design §10) and bindery (§14) have no OpenAPI description: their
-/// specs are loaded and validated, and that is all a build can check.
+/// ntfy (design §10) and bindery (§14) have no OpenAPI description, and
+/// Seerr's (§17) misnames the fields its answers carry: their specs are
+/// loaded and validated, and that is all a build can check.
 fn undescribed_specs_check(service: &str, specs: &[PathBuf]) -> ExitCode {
     let mut findings = Vec::new();
     for path in specs {
@@ -379,7 +426,7 @@ fn schema_check(args: &[String]) -> ExitCode {
             other => return usage(Some(&format!("unexpected argument {other}"))),
         }
     }
-    if let Some(name @ ("ntfy" | "bindery")) = service.as_deref() {
+    if let Some(name @ ("ntfy" | "bindery" | "seerr")) = service.as_deref() {
         return match openapi {
             Some(_) => usage(Some(&format!(
                 "{name} publishes no OpenAPI description; call schema-check --service {name} without --openapi"
@@ -495,10 +542,15 @@ fn schema_check(args: &[String]) -> ExitCode {
                 schema::check_paths(&document, trailarr::TRAILER_PROFILE_READ, &settings.set),
                 settings.set.len(),
             ),
-            // Not reachable: the service check above rejects ntfy and bindery specs.
+            // Not reachable: the service check above rejects ntfy, bindery
+            // and Seerr specs.
             Desired::AccountSubscriptions(_)
             | Desired::BinderyEntries(..)
-            | Desired::BinderySettings(_) => (Vec::new(), 0),
+            | Desired::BinderySettings(_)
+            | Desired::SeerrMain(_)
+            | Desired::SeerrJellyfin(_)
+            | Desired::SeerrServers(..)
+            | Desired::SeerrWebhook(_) => (Vec::new(), 0),
             Desired::Naming(set) => (
                 schema::check_paths(&document, servarr::NAMING, set),
                 set.len(),

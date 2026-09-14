@@ -18,6 +18,7 @@ pub enum Service {
     Lidarr,
     Prowlarr,
     Bindery,
+    Seerr,
 }
 
 impl Service {
@@ -31,6 +32,7 @@ impl Service {
             Service::Lidarr => "lidarr",
             Service::Prowlarr => "prowlarr",
             Service::Bindery => "bindery",
+            Service::Seerr => "seerr",
         }
     }
 
@@ -41,7 +43,8 @@ impl Service {
             | Service::Sonarr
             | Service::Lidarr
             | Service::Prowlarr
-            | Service::Bindery => "X-Api-Key",
+            | Service::Bindery
+            | Service::Seerr => "X-Api-Key",
             Service::Jellyfin => "X-Emby-Token",
             Service::Trailarr => "X-API-KEY",
             Service::Ntfy => "Authorization",
@@ -91,6 +94,11 @@ enum TaskName {
     IndexerProxies,
     ProwlarrInstances,
     Settings,
+    Main,
+    Jellyfin,
+    RadarrServers,
+    SonarrServers,
+    Webhook,
 }
 
 impl TaskName {
@@ -114,6 +122,11 @@ impl TaskName {
             TaskName::Applications | TaskName::Indexers | TaskName::IndexerProxies => {
                 service == Service::Prowlarr
             }
+            TaskName::Main
+            | TaskName::Jellyfin
+            | TaskName::RadarrServers
+            | TaskName::SonarrServers
+            | TaskName::Webhook => service == Service::Seerr,
         }
     }
 }
@@ -286,6 +299,64 @@ pub struct TrailerProfileSettings {
     pub set: BTreeMap<String, serde_json::Value>,
 }
 
+/// Which of Seerr's server lists a `*-servers` task is about (design §17).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeerrKind {
+    Radarr,
+    Sonarr,
+}
+
+impl SeerrKind {
+    /// The path segment under `/api/v1/settings/`.
+    pub fn path(self) -> &'static str {
+        match self {
+            SeerrKind::Radarr => "radarr",
+            SeerrKind::Sonarr => "sonarr",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SeerrKind::Radarr => "Radarr",
+            SeerrKind::Sonarr => "Sonarr",
+        }
+    }
+}
+
+/// Seerr's link to Jellyfin: the connection fields, the credential holding
+/// Jellyfin's key, and the libraries Seerr scans -- exactly these, by name.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SeerrJellyfin {
+    pub set: BTreeMap<String, serde_json::Value>,
+    pub api_key_credential: String,
+    pub libraries: Vec<String>,
+}
+
+/// One of Seerr's Radarr or Sonarr entries: top-level fields, the credential
+/// holding the service's key, and the quality profile and root folder by
+/// name -- Seerr's connection test turns them into id and path.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SeerrServer {
+    pub set: BTreeMap<String, serde_json::Value>,
+    pub api_key_credential: String,
+    pub profile: String,
+    pub root_folder: String,
+}
+
+/// Seerr's webhook agent: fields by path, the payload template as an
+/// object, and custom headers whose values come from credentials.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SeerrWebhook {
+    #[serde(default)]
+    pub set: BTreeMap<String, serde_json::Value>,
+    pub payload: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+}
+
 /// Subscriptions an ntfy account must have. The topics are secrets -- a topic
 /// name is all it takes to read a topic -- so the spec only names the
 /// credential that lists them, one per line.
@@ -419,6 +490,10 @@ pub enum Desired {
     IndexerProxies(ProviderSettings),
     BinderyEntries(BinderyKind, BTreeMap<String, BinderyEntry>),
     BinderySettings(BTreeMap<String, serde_json::Value>),
+    SeerrMain(BTreeMap<String, serde_json::Value>),
+    SeerrJellyfin(SeerrJellyfin),
+    SeerrServers(SeerrKind, BTreeMap<String, SeerrServer>),
+    SeerrWebhook(SeerrWebhook),
 }
 
 /// A non-empty map of plain (undotted) field names, none of them `forbidden`.
@@ -672,6 +747,132 @@ impl Spec {
                     }
                 }
                 Desired::BinderySettings(desired.settings)
+            }
+            TaskName::Main => {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Raw {
+                    set: BTreeMap<String, serde_json::Value>,
+                }
+                let desired: Raw = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                // The key is Seerr's own; the host sets it before the first start.
+                plain_fields(&desired.set, "desired.set", &["apiKey"]).map_err(invalid)?;
+                Desired::SeerrMain(desired.set)
+            }
+            TaskName::Jellyfin => {
+                let desired: SeerrJellyfin = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                // serverId and name are what the connection test fills in.
+                plain_fields(
+                    &desired.set,
+                    "desired.set",
+                    &["apiKey", "libraries", "serverId", "name"],
+                )
+                .map_err(invalid)?;
+                credential_name(&desired.api_key_credential, "desired.api_key_credential")
+                    .map_err(invalid)?;
+                if desired.libraries.is_empty() {
+                    return Err(invalid(
+                        "desired.libraries names no library -- that would disable every one"
+                            .to_string(),
+                    ));
+                }
+                let mut seen = std::collections::BTreeSet::new();
+                for name in &desired.libraries {
+                    if name.is_empty() {
+                        return Err(invalid("desired.libraries: a name is empty".to_string()));
+                    }
+                    if !seen.insert(name.as_str()) {
+                        return Err(invalid(format!("desired.libraries names {name} twice")));
+                    }
+                }
+                Desired::SeerrJellyfin(desired)
+            }
+            TaskName::RadarrServers | TaskName::SonarrServers => {
+                let kind = match raw.task {
+                    TaskName::RadarrServers => SeerrKind::Radarr,
+                    _ => SeerrKind::Sonarr,
+                };
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Raw {
+                    servers: BTreeMap<String, SeerrServer>,
+                }
+                let desired: Raw = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if desired.servers.is_empty() {
+                    return Err(invalid("desired.servers names no server".to_string()));
+                }
+                for (name, server) in &desired.servers {
+                    if name.is_empty() {
+                        return Err(invalid(
+                            "desired.servers: a server name is empty".to_string(),
+                        ));
+                    }
+                    let at = format!("desired.servers.{name}");
+                    // The name is the key, the key comes from the credential, the
+                    // id is Seerr's, and the three active* fields are resolved.
+                    plain_fields(
+                        &server.set,
+                        &format!("{at}.set"),
+                        &[
+                            "id",
+                            "name",
+                            "apiKey",
+                            "activeProfileId",
+                            "activeProfileName",
+                            "activeDirectory",
+                        ],
+                    )
+                    .map_err(invalid)?;
+                    for needed in ["hostname", "port"] {
+                        if !server.set.contains_key(needed) {
+                            return Err(invalid(format!(
+                                "{at}.set needs {needed}: the connection test uses it"
+                            )));
+                        }
+                    }
+                    credential_name(
+                        &server.api_key_credential,
+                        &format!("{at}.api_key_credential"),
+                    )
+                    .map_err(invalid)?;
+                    if server.profile.is_empty() {
+                        return Err(invalid(format!("{at}.profile is empty")));
+                    }
+                    if !server.root_folder.starts_with('/') {
+                        return Err(invalid(format!("{at}.root_folder is an absolute path")));
+                    }
+                }
+                Desired::SeerrServers(kind, desired.servers)
+            }
+            TaskName::Webhook => {
+                let desired: SeerrWebhook = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if !desired.set.is_empty() {
+                    field_paths(&desired.set, "desired.set").map_err(invalid)?;
+                }
+                for own in ["options.jsonPayload", "options.customHeaders"] {
+                    if desired.set.contains_key(own) {
+                        return Err(invalid(format!(
+                            "desired.set: {own} is not set this way (payload and headers are)"
+                        )));
+                    }
+                }
+                if desired.payload.is_empty() {
+                    return Err(invalid("desired.payload is empty".to_string()));
+                }
+                for (key, credential) in &desired.headers {
+                    if key.is_empty() {
+                        return Err(invalid(
+                            "desired.headers: a header name is empty".to_string(),
+                        ));
+                    }
+                    credential_name(credential, &format!("desired.headers.{key}"))
+                        .map_err(invalid)?;
+                }
+                Desired::SeerrWebhook(desired)
             }
             TaskName::QualityDefinitions => {
                 let map: BTreeMap<String, SizeLimits> = serde_json::from_value(raw.desired)
@@ -1039,6 +1240,11 @@ impl Spec {
             Desired::BinderyEntries(BinderyKind::ProwlarrInstances, _) => "prowlarr-instances",
             Desired::BinderyEntries(BinderyKind::RootFolders, _) => "root-folders",
             Desired::BinderySettings(_) => "settings",
+            Desired::SeerrMain(_) => "main",
+            Desired::SeerrJellyfin(_) => "jellyfin",
+            Desired::SeerrServers(SeerrKind::Radarr, _) => "radarr-servers",
+            Desired::SeerrServers(SeerrKind::Sonarr, _) => "sonarr-servers",
+            Desired::SeerrWebhook(_) => "webhook",
         }
     }
 }
@@ -1272,6 +1478,93 @@ mod tests {
             .unwrap()
             .to_string()
             .contains("a marker works only in set"));
+    }
+
+    fn seerr(task: &str, desired: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"seerr","base_url":"http://localhost:5055","api_key_credential":"k","task":"{task}","desired":{desired}}}"#
+        ))
+    }
+
+    #[test]
+    fn seerr_specs_are_strict() {
+        let reason = |r: Result<Spec, Error>| r.err().unwrap().to_string();
+        assert_eq!(
+            seerr("main", r#"{"set":{"locale":"de"}}"#)
+                .unwrap()
+                .task_name(),
+            "main"
+        );
+        assert!(reason(seerr("main", r#"{"set":{"apiKey":"x"}}"#))
+            .contains("apiKey is not set this way"));
+
+        let jf = r#"{"set":{"ip":"10.0.30.10","port":8096},"api_key_credential":"jf","libraries":["Filme","Serien"]}"#;
+        assert_eq!(seerr("jellyfin", jf).unwrap().task_name(), "jellyfin");
+        assert!(reason(seerr(
+            "jellyfin",
+            &jf.replace(r#"["Filme","Serien"]"#, "[]")
+        ))
+        .contains("names no library"));
+        assert!(
+            reason(seerr("jellyfin", &jf.replace(r#""Serien""#, r#""Filme""#)))
+                .contains("names Filme twice")
+        );
+        assert!(reason(seerr(
+            "jellyfin",
+            &jf.replace(r#""port":8096"#, r#""port":8096,"serverId":"x""#)
+        ))
+        .contains("serverId is not set this way"));
+
+        let servers = r#"{"servers":{"Radarr":{"set":{"hostname":"10.0.10.10","port":7878},"api_key_credential":"rk","profile":"HD","root_folder":"/tank/movies"}}}"#;
+        assert_eq!(
+            seerr("radarr-servers", servers).unwrap().task_name(),
+            "radarr-servers"
+        );
+        assert_eq!(
+            seerr("sonarr-servers", servers).unwrap().task_name(),
+            "sonarr-servers"
+        );
+        assert!(reason(seerr(
+            "radarr-servers",
+            &servers.replace(r#""port":7878"#, r#""port":7878,"activeProfileId":7"#)
+        ))
+        .contains("activeProfileId is not set this way"));
+        assert!(reason(seerr(
+            "radarr-servers",
+            &servers.replace(r#","port":7878"#, "")
+        ))
+        .contains("set needs port"));
+        assert!(reason(seerr(
+            "radarr-servers",
+            &servers.replace("/tank/movies", "movies")
+        ))
+        .contains("root_folder is an absolute path"));
+        assert!(reason(seerr(
+            "radarr-servers",
+            &servers.replace(r#""profile":"HD""#, r#""profile":"" "#)
+        ))
+        .contains("profile is empty"));
+        assert!(reason(seerr("radarr-servers", r#"{"servers":{}}"#)).contains("names no server"));
+
+        let webhook = r#"{"set":{"enabled":true,"options.webhookUrl":"http://x/seerr"},"payload":{"a":"{{a}}"},"headers":{"X-Webhook-Token":"marke"}}"#;
+        assert_eq!(seerr("webhook", webhook).unwrap().task_name(), "webhook");
+        assert!(reason(seerr(
+            "webhook",
+            &webhook.replace(r#""enabled":true"#, r#""options.jsonPayload":"x""#)
+        ))
+        .contains("options.jsonPayload is not set this way"));
+        assert!(
+            reason(seerr("webhook", &webhook.replace(r#"{"a":"{{a}}"}"#, "{}")))
+                .contains("payload is empty")
+        );
+        assert!(reason(seerr(
+            "webhook",
+            &webhook.replace(r#""marke""#, r#""../x""#)
+        ))
+        .contains("not a credential name"));
+        // A Seerr task for another service, and vice versa.
+        assert!(reason(seerr("quality-definitions", "{}")).contains("does not belong"));
+        assert!(reason(jellyfin("main", r#"{"set":{"locale":"de"}}"#)).contains("does not belong"));
     }
 
     #[test]
