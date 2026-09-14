@@ -10,7 +10,7 @@ use converge::{
     engine::{run, Mode, Outcome, Timing},
     error::Error,
     schema,
-    services::{arr, bindery, jellyfin, ntfy, providers, seerr, servarr, trailarr},
+    services::{arr, bindery, jellyfin, koel, ntfy, providers, seerr, servarr, trailarr},
     spec::{Desired, Service, Spec},
 };
 
@@ -18,7 +18,7 @@ const USAGE: &str = "usage:
   converge apply [--deadline <seconds>] <spec.json>...
   converge plan [--deadline <seconds>] <spec.json>...
   converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr> --openapi <file> [--spec <spec.json>]...
-  converge schema-check --service ntfy|bindery|seerr [--spec <spec.json>]...";
+  converge schema-check --service ntfy|bindery|seerr|koel [--spec <spec.json>]...";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -105,6 +105,11 @@ fn reconcile_one(
         spec.service.key_value(key),
         REQUEST_TIMEOUT,
     );
+    let transport = if spec.service.accepts_json_only() {
+        transport.accept_json()
+    } else {
+        transport
+    };
     let report = match &spec.desired {
         Desired::QualityDefinitions(desired) => {
             let task = arr::QualityDefinitions {
@@ -269,6 +274,31 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::KoelRadioStations(stations) => {
+            // As for credentials: every logo file before the first request.
+            let mut targets = Vec::new();
+            for station in stations {
+                let logo = match &station.logo_file {
+                    Some(file) => Some(koel::logo(file).map_err(|reason| {
+                        fail(Error::SpecInvalid {
+                            path: spec.path.clone(),
+                            reason: format!("desired.stations {}: {reason}", station.name),
+                        })
+                    })?),
+                    None => None,
+                };
+                targets.push(koel::StationTarget {
+                    name: station.name.clone(),
+                    url: station.url.clone(),
+                    description: station.description.clone(),
+                    is_public: station.is_public,
+                    homepage_url: station.homepage_url.clone(),
+                    logo,
+                });
+            }
+            let task = koel::RadioStations { stations: targets };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
         Desired::BinderySettings(set) => {
             let task = bindery::Settings { set: set.clone() };
             run(mode, &task, &transport, &SystemClock, timing)
@@ -382,9 +412,10 @@ fn servarr_api(spec: &Spec) -> Result<&'static servarr::Api, Error> {
     })
 }
 
-/// ntfy (design §10) and bindery (§14) have no OpenAPI description, and
-/// Seerr's (§17) misnames the fields its answers carry: their specs are
-/// loaded and validated, and that is all a build can check.
+/// ntfy (design §10) and bindery (§14) have no OpenAPI description, Seerr's
+/// (§17) misnames the fields its answers carry, and Koel's (§18) describes a
+/// version four majors old without radio stations: their specs are loaded
+/// and validated, and that is all a build can check.
 fn undescribed_specs_check(service: &str, specs: &[PathBuf]) -> ExitCode {
     let mut findings = Vec::new();
     for path in specs {
@@ -426,7 +457,7 @@ fn schema_check(args: &[String]) -> ExitCode {
             other => return usage(Some(&format!("unexpected argument {other}"))),
         }
     }
-    if let Some(name @ ("ntfy" | "bindery" | "seerr")) = service.as_deref() {
+    if let Some(name @ ("ntfy" | "bindery" | "seerr" | "koel")) = service.as_deref() {
         return match openapi {
             Some(_) => usage(Some(&format!(
                 "{name} publishes no OpenAPI description; call schema-check --service {name} without --openapi"
@@ -542,9 +573,10 @@ fn schema_check(args: &[String]) -> ExitCode {
                 schema::check_paths(&document, trailarr::TRAILER_PROFILE_READ, &settings.set),
                 settings.set.len(),
             ),
-            // Not reachable: the service check above rejects ntfy, bindery
-            // and Seerr specs.
-            Desired::AccountSubscriptions(_)
+            // Not reachable: the service check above rejects ntfy, bindery,
+            // Seerr and Koel specs.
+            Desired::KoelRadioStations(_)
+            | Desired::AccountSubscriptions(_)
             | Desired::BinderyEntries(..)
             | Desired::BinderySettings(_)
             | Desired::SeerrMain(_)

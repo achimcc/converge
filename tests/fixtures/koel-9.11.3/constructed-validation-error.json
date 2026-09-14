@@ -1,0 +1,11 @@
+{
+  "message": "The url field must be a valid URL. (and 1 more error)",
+  "errors": {
+    "url": [
+      "The url field must be a valid URL."
+    ],
+    "logo": [
+      "Invalid image for logo"
+    ]
+  }
+}

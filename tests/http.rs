@@ -90,3 +90,36 @@ fn a_refused_connection_is_an_error_without_the_key() {
     assert!(err.starts_with("GET /a:"), "{err}");
     assert!(!err.contains("s3cret"));
 }
+
+#[test]
+fn accept_json_asks_every_verb_for_json() {
+    // Koel answers a request it does not take for an API call with a
+    // redirect to its web page -- unless the client says it wants JSON.
+    let server = Server::start(vec![
+        ("GET", "/g", 200, "[]".into()),
+        ("PUT", "/u", 200, "{}".into()),
+        ("POST", "/p", 201, "{}".into()),
+    ]);
+    let t = HttpTransport::new(
+        &server.base_url(),
+        "Authorization",
+        Secret::new("Bearer t0ken".into()),
+        Duration::from_secs(5),
+    )
+    .accept_json();
+    t.get("/g").unwrap();
+    t.put_json("/u", "{}").unwrap();
+    t.post_json("/p", "{}").unwrap();
+    let requests = server.requests();
+    assert_eq!(requests.len(), 3);
+    for seen in &requests {
+        let headers = seen.headers.to_ascii_lowercase();
+        assert!(headers.contains("accept: application/json"), "{headers}");
+        assert!(headers.contains("authorization: bearer t0ken"), "{headers}");
+    }
+
+    let plain = Server::start(vec![("GET", "/g", 200, "[]".into())]);
+    transport(&plain.base_url()).get("/g").unwrap();
+    let headers = plain.requests()[0].headers.to_ascii_lowercase();
+    assert!(!headers.contains("accept: application/json"), "{headers}");
+}

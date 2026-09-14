@@ -19,6 +19,7 @@ pub enum Service {
     Prowlarr,
     Bindery,
     Seerr,
+    Koel,
 }
 
 impl Service {
@@ -33,6 +34,7 @@ impl Service {
             Service::Prowlarr => "prowlarr",
             Service::Bindery => "bindery",
             Service::Seerr => "seerr",
+            Service::Koel => "koel",
         }
     }
 
@@ -47,17 +49,24 @@ impl Service {
             | Service::Seerr => "X-Api-Key",
             Service::Jellyfin => "X-Emby-Token",
             Service::Trailarr => "X-API-KEY",
-            Service::Ntfy => "Authorization",
+            Service::Ntfy | Service::Koel => "Authorization",
         }
     }
 
-    /// The header's value. The credential holds the bare key; only ntfy wants
-    /// it as a bearer token.
+    /// The header's value. The credential holds the bare key; ntfy and Koel
+    /// want it as a bearer token.
     pub fn key_value(self, key: Secret) -> Secret {
         match self {
-            Service::Ntfy => Secret::new(format!("Bearer {}", key.expose())),
+            Service::Ntfy | Service::Koel => Secret::new(format!("Bearer {}", key.expose())),
             _ => key,
         }
+    }
+
+    /// Whether every request must say `Accept: application/json`. Koel
+    /// answers a refused request without it with a redirect to its web page
+    /// (design §18).
+    pub fn accepts_json_only(self) -> bool {
+        self == Service::Koel
     }
 
     fn is_arr(self) -> bool {
@@ -99,6 +108,7 @@ enum TaskName {
     RadarrServers,
     SonarrServers,
     Webhook,
+    RadioStations,
 }
 
 impl TaskName {
@@ -127,6 +137,7 @@ impl TaskName {
             | TaskName::RadarrServers
             | TaskName::SonarrServers
             | TaskName::Webhook => service == Service::Seerr,
+            TaskName::RadioStations => service == Service::Koel,
         }
     }
 }
@@ -357,6 +368,29 @@ pub struct SeerrWebhook {
     pub headers: BTreeMap<String, String>,
 }
 
+/// One of Koel's radio stations, found by its name (design §18). Every
+/// field is sent on every write: Koel's update sets `is_public` to false,
+/// `description` to empty and `homepage_url` to null when they are absent.
+/// `logo_file` is an image file read on every run; it is sent only when the
+/// station has no logo, because Koel stores an image under a random name and
+/// nothing can be compared.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KoelStation {
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub description: String,
+    pub is_public: bool,
+    #[serde(default)]
+    pub homepage_url: Option<String>,
+    #[serde(default)]
+    pub logo_file: Option<PathBuf>,
+}
+
+/// Koel's longest station name (`max:191` in its store and update requests).
+const KOEL_NAME_MAX: usize = 191;
+
 /// Subscriptions an ntfy account must have. The topics are secrets -- a topic
 /// name is all it takes to read a topic -- so the spec only names the
 /// credential that lists them, one per line.
@@ -494,6 +528,62 @@ pub enum Desired {
     SeerrJellyfin(SeerrJellyfin),
     SeerrServers(SeerrKind, BTreeMap<String, SeerrServer>),
     SeerrWebhook(SeerrWebhook),
+    KoelRadioStations(Vec<KoelStation>),
+}
+
+fn web_url(url: &str) -> bool {
+    url.starts_with("http://") || url.starts_with("https://")
+}
+
+/// A non-empty station list: names neither empty, too long nor given twice,
+/// URLs that Koel's `url` rule can take and that differ (Koel keeps a URL
+/// unique per account), and a logo file by absolute path.
+fn koel_stations(stations: &[KoelStation]) -> Result<(), String> {
+    if stations.is_empty() {
+        return Err("desired.stations names no station".to_string());
+    }
+    for (index, station) in stations.iter().enumerate() {
+        let name = &station.name;
+        if name.is_empty() {
+            return Err(format!(
+                "desired.stations[{index}]: a station name is empty"
+            ));
+        }
+        if name.chars().count() > KOEL_NAME_MAX {
+            return Err(format!(
+                "desired.stations[{index}]: the name is longer than {KOEL_NAME_MAX} characters"
+            ));
+        }
+        let at = format!("desired.stations {name}");
+        if !web_url(&station.url) {
+            return Err(format!("{at}: url must start with http:// or https://"));
+        }
+        if let Some(homepage) = &station.homepage_url {
+            if !web_url(homepage) {
+                return Err(format!(
+                    "{at}: homepage_url must start with http:// or https:// (leave it out for none)"
+                ));
+            }
+        }
+        if let Some(file) = &station.logo_file {
+            if !file.is_absolute() {
+                return Err(format!("{at}: logo_file is an absolute path"));
+            }
+        }
+        if let Some(earlier) = stations[..index].iter().find(|s| &s.name == name) {
+            return Err(format!(
+                "desired.stations names station {} twice",
+                earlier.name
+            ));
+        }
+        if let Some(earlier) = stations[..index].iter().find(|s| s.url == station.url) {
+            return Err(format!(
+                "desired.stations: the url of {} and {name} is the same",
+                earlier.name
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// A non-empty map of plain (undotted) field names, none of them `forbidden`.
@@ -874,6 +964,17 @@ impl Spec {
                 }
                 Desired::SeerrWebhook(desired)
             }
+            TaskName::RadioStations => {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Raw {
+                    stations: Vec<KoelStation>,
+                }
+                let desired: Raw = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                koel_stations(&desired.stations).map_err(invalid)?;
+                Desired::KoelRadioStations(desired.stations)
+            }
             TaskName::QualityDefinitions => {
                 let map: BTreeMap<String, SizeLimits> = serde_json::from_value(raw.desired)
                     .map_err(|e| invalid(format!("desired: {e}")))?;
@@ -1245,6 +1346,7 @@ impl Spec {
             Desired::SeerrServers(SeerrKind::Radarr, _) => "radarr-servers",
             Desired::SeerrServers(SeerrKind::Sonarr, _) => "sonarr-servers",
             Desired::SeerrWebhook(_) => "webhook",
+            Desired::KoelRadioStations(_) => "radio-stations",
         }
     }
 }
@@ -1732,6 +1834,91 @@ mod tests {
         ] {
             assert_eq!(value(service).expose(), "t0ken", "{service:?}");
         }
+    }
+
+    #[test]
+    fn koel_wants_a_bearer_token_and_json() {
+        let key = Service::Koel.key_value(Secret::new("t0ken".into()));
+        assert_eq!(Service::Koel.key_header(), "Authorization");
+        assert_eq!(key.expose(), "Bearer t0ken");
+        assert!(Service::Koel.accepts_json_only());
+        for service in [Service::Radarr, Service::Ntfy, Service::Seerr] {
+            assert!(!service.accepts_json_only(), "{service:?}");
+        }
+    }
+
+    fn koel(desired: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"koel","base_url":"http://localhost:8080","api_key_credential":"koel-token","task":"radio-stations","desired":{desired}}}"#
+        ))
+    }
+
+    #[test]
+    fn koel_radio_stations_are_strict() {
+        let good = r#"{"stations":[
+            {"name":"Radio Dreyeckland","url":"https://stream.rdl.de/rdl","description":"Freiburg",
+             "is_public":true,"homepage_url":"https://rdl.de/","logo_file":"/nix/store/x-rdl.png"},
+            {"name":"FSK","url":"https://streaming.fueralle.org/fsk.mp3","is_public":true}]}"#;
+        let spec = koel(good).unwrap();
+        assert_eq!(spec.task_name(), "radio-stations");
+        let Desired::KoelRadioStations(stations) = &spec.desired else {
+            panic!("{:?}", spec.desired)
+        };
+        assert_eq!(stations.len(), 2);
+        assert_eq!(
+            stations[1].description, "",
+            "absent is empty, as Koel stores it"
+        );
+        assert_eq!(stations[1].homepage_url, None);
+        assert_eq!(stations[1].logo_file, None);
+
+        for (desired, needle) in [
+            (r#"{"stations":[]}"#, "names no station"),
+            (
+                r#"{"stations":[{"name":"A","url":"https://a/x"}]}"#,
+                "is_public",
+            ),
+            (
+                r#"{"stations":[{"name":"A","url":"https://a/x","is_public":true,"logo":"x"}]}"#,
+                "unknown field `logo`",
+            ),
+            (
+                r#"{"stations":[{"name":"","url":"https://a/x","is_public":true}]}"#,
+                "a station name is empty",
+            ),
+            (
+                r#"{"stations":[{"name":"A","url":"https://a/x","is_public":true},{"name":"A","url":"https://b/x","is_public":true}]}"#,
+                "names station A twice",
+            ),
+            (
+                r#"{"stations":[{"name":"A","url":"https://a/x","is_public":true},{"name":"B","url":"https://a/x","is_public":true}]}"#,
+                "the url of A and B is the same",
+            ),
+            (
+                r#"{"stations":[{"name":"A","url":"a/x","is_public":true}]}"#,
+                "A: url must start with http:// or https://",
+            ),
+            (
+                r#"{"stations":[{"name":"A","url":"https://a/x","is_public":true,"homepage_url":""}]}"#,
+                "A: homepage_url must start with http:// or https://",
+            ),
+            (
+                r#"{"stations":[{"name":"A","url":"https://a/x","is_public":true,"logo_file":"rdl.png"}]}"#,
+                "A: logo_file is an absolute path",
+            ),
+        ] {
+            let err = reason(koel(desired));
+            assert!(err.contains(needle), "{desired}: {err}");
+        }
+        let long = "x".repeat(192);
+        let err = reason(koel(&format!(
+            r#"{{"stations":[{{"name":"{long}","url":"https://a/x","is_public":true}}]}}"#
+        )));
+        assert!(err.contains("longer than 191 characters"), "{err}");
+        let err = reason(parse(&format!(
+            r#"{{"service":"seerr","base_url":"http://localhost:5055","api_key_credential":"k","task":"radio-stations","desired":{good}}}"#
+        )));
+        assert!(err.contains("does not belong to service"), "{err}");
     }
 
     fn servarr(service: &str, task: &str, desired: &str) -> Result<Spec, Error> {

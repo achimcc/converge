@@ -19,8 +19,8 @@ script should have been:
 
 ## Status
 
-Early. **v0.13.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
-**Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33) and **Seerr** (3.2), each
+Early. **v0.14.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+**Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2) and **Koel** (9.11), each
 replacing a shell unit or an OpenTofu resource on the host it was written
 for:
 
@@ -47,6 +47,7 @@ for:
 | Seerr | `jellyfin` | the link to Jellyfin (key from a credential, compared) and the libraries Seerr scans, by name -- exactly these |
 | Seerr | `radarr-servers`, `sonarr-servers` | entries by name: top-level fields, key from a credential; quality profile and root folder by name, resolved through Seerr's connection test; missing entries are added |
 | Seerr | `webhook` | the webhook agent: fields by path, the payload template as an object (stored the way the agent parses it), header values from credentials |
+| Koel | `radio-stations` | stations by name, every field written whole; a logo from an image file, sent only where a station has none; missing stations are added |
 
 ## A spec
 
@@ -147,6 +148,30 @@ written (`docs/design.md` §16):
 }
 ```
 
+Koel's stations are a list found by name. The token is a Sanctum token that
+travels as `Authorization: Bearer`, and every request asks for JSON — without
+`Accept: application/json` Koel redirects a refused request to its web page.
+Every write carries the whole entry, because Koel's update makes a station
+private when `is_public` is left out; `logo_file` is read on every run and
+sent only when the station has no logo, since Koel stores images under random
+names (`docs/design.md` §18):
+
+```json
+{
+  "service": "koel",
+  "base_url": "http://10.0.254.10",
+  "api_key_credential": "koel-token",
+  "task": "radio-stations",
+  "desired": {
+    "stations": [
+      { "name": "Radio Dreyeckland", "url": "https://stream.rdl.de/rdl",
+        "description": "Free radio from Freiburg.", "is_public": true,
+        "homepage_url": "https://rdl.de/", "logo_file": "/nix/store/…-rdl.png" }
+    ]
+  }
+}
+```
+
 ## Commands
 
 | command | does | exit |
@@ -154,7 +179,7 @@ written (`docs/design.md` §16):
 | `converge apply [--deadline <s>] <spec>...` | reconcile, write, read back | 0 done, 1 any spec failed |
 | `converge plan [--deadline <s>] <spec>...` | show what `apply` would change | 0 equal, 2 differs, 1 error |
 | `converge schema-check --service <radarr\|sonarr\|lidarr\|prowlarr\|jellyfin\|trailarr> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
-| `converge schema-check --service <ntfy\|bindery\|seerr> [--spec <spec>]...` | ntfy and bindery publish no OpenAPI description, Seerr's misnames its fields: only validate the specs (`--openapi` is refused) | 0 / 1 |
+| `converge schema-check --service <ntfy\|bindery\|seerr\|koel> [--spec <spec>]...` | ntfy and bindery publish no OpenAPI description, Seerr's misnames its fields, Koel's describes a long-gone version: only validate the specs (`--openapi` is refused) | 0 / 1 |
 
 Several specs are processed in order; one failing does not skip the next.
 
@@ -185,8 +210,9 @@ radarr quality-definitions: changed 1 field(s), read back and confirmed
    types derive their JSON schema; `schema-check` compares it with the
    service's `openapi.json`. Run it in your build against the exact version
    you deploy, and an upgrade that renames a field fails before the deploy.
-   ntfy and bindery publish no such description; for them `schema-check`
-   validates the specs, and only the first two checks apply to their fields.
+   ntfy and bindery publish no such description, and Seerr's and Koel's do
+   not fit the running service; for them `schema-check` validates the specs,
+   and only the first two checks apply to their fields.
 
 OpenAPI describes names, not behaviour: Radarr's file lists `200` for the
 update, the service answers `202`. That is what reading back is for.

@@ -1,0 +1,50 @@
+[
+  {
+    "type": "radio-stations",
+    "name": "Radio Dreyeckland",
+    "id": "01K52Z6M3Q8V4T7X1B9N0C2D5E",
+    "url": "https://stream.rdl.de/rdl",
+    "homepage_url": "https://rdl.de/",
+    "logo": "https://musik.example.org/storage/images/01K52Z6M4A1B2C3D4E5F6G7H8J.webp",
+    "description": "Free radio from Freiburg.",
+    "is_public": true,
+    "created_at": "2026-09-14T18:00:00.000000Z",
+    "favorite": false,
+    "permissions": {
+      "edit": true,
+      "delete": true
+    }
+  },
+  {
+    "type": "radio-stations",
+    "name": "FSK",
+    "id": "01K52Z6N0R5S6T7V8W9X0Y1Z2A",
+    "url": "https://streaming.fueralle.org/fsk.mp3",
+    "homepage_url": null,
+    "logo": null,
+    "description": "",
+    "is_public": false,
+    "created_at": "2026-09-14T18:00:01.000000Z",
+    "favorite": false,
+    "permissions": {
+      "edit": true,
+      "delete": true
+    }
+  },
+  {
+    "type": "radio-stations",
+    "name": "Somebody's own",
+    "id": "01K52Z6P7B8C9D0E1F2G3H4J5K",
+    "url": "https://radio.example.org/live.ogg",
+    "homepage_url": null,
+    "logo": null,
+    "description": null,
+    "is_public": true,
+    "created_at": "2026-09-14T18:00:02.000000Z",
+    "favorite": true,
+    "permissions": {
+      "edit": true,
+      "delete": true
+    }
+  }
+]

@@ -693,6 +693,143 @@ fn schema_check_for_seerr_validates_its_five_tasks_without_an_openapi_file() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("seerr publishes no OpenAPI description"));
 }
 
+fn koel_spec(dir: &Path, file: &str, base: &str, stations: &str) -> PathBuf {
+    let path = dir.join(file);
+    std::fs::write(
+        &path,
+        format!(
+            r#"{{"service":"koel","base_url":"{base}","api_key_credential":"koel-token","task":"radio-stations","desired":{{"stations":{stations}}}}}"#
+        ),
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn schema_check_for_koel_validates_specs_without_an_openapi_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let good = koel_spec(
+        dir.path(),
+        "good.json",
+        "http://127.0.0.1:8080",
+        r#"[{"name":"FSK","url":"https://streaming.fueralle.org/fsk.mp3","is_public":true,"logo_file":"/nix/store/not-read-at-build.png"}]"#,
+    );
+    let out = schema_check("koel", None, &[&good]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("koel: no OpenAPI description exists; 1 spec(s) valid"),
+        "{stdout}"
+    );
+    let twice = koel_spec(
+        dir.path(),
+        "twice.json",
+        "http://127.0.0.1:8080",
+        r#"[{"name":"FSK","url":"https://a/1","is_public":true},{"name":"FSK","url":"https://a/2","is_public":true}]"#,
+    );
+    let out = schema_check("koel", None, &[&twice]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("names station FSK twice"));
+    let out = schema_check("koel", Some(&trailarr_openapi()), &[&good]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("koel publishes no OpenAPI description"));
+}
+
+#[test]
+fn koel_gets_a_bearer_token_and_json_and_neither_token_nor_logo_is_shown() {
+    const RECORDED: &str = include_str!("fixtures/koel-9.11.3/radio-stations.json");
+    const INVALID: &str = include_str!("fixtures/koel-9.11.3/constructed-validation-error.json");
+    let token = "koel-token-7f3a9c-never-print-me";
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("koel-token"), format!("{token}\n")).unwrap();
+    // A PNG signature and a mark that would show in the base64 of the logo.
+    let logo = dir.path().join("logo.png");
+    std::fs::write(&logo, b"\x89PNG\r\n\x1a\nlogo-mark-never-print-me").unwrap();
+    let server = Server::start(vec![
+        ("GET", "/api/radio/stations", 200, RECORDED.into()),
+        ("POST", "/api/radio/stations", 422, INVALID.into()),
+    ]);
+    let stations = format!(
+        r#"[{{"name":"FSK","url":"https://streaming.fueralle.org/fsk.mp3","is_public":true,"logo_file":"{}"}}]"#,
+        logo.display()
+    );
+    let spec = koel_spec(dir.path(), "koel.json", &server.base_url(), &stations);
+    let run = |mode: &str, spec: &Path| {
+        let out = converge()
+            .arg(mode)
+            .arg(spec)
+            .env("CREDENTIALS_DIRECTORY", dir.path())
+            .output()
+            .unwrap();
+        let all = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(!all.contains(token), "{mode} shows the token: {all}");
+        assert!(!all.contains("base64"), "{mode} shows the logo: {all}");
+        (out.status.code(), all)
+    };
+
+    let (code, all) = run("plan", &spec);
+    assert_eq!(code, Some(2), "{all}");
+    assert!(
+        all.contains("koel radio-stations: service version (not reported)"),
+        "{all}"
+    );
+    assert!(
+        all.contains("koel radio-stations: would change station FSK: (missing) -> (added)"),
+        "{all}"
+    );
+
+    let (code, all) = run("apply", &spec);
+    assert_eq!(code, Some(1), "{all}");
+    assert!(
+        all.contains("POST /api/radio/stations answered HTTP 422: logo: Invalid image for logo; url: The url field must be a valid URL."),
+        "{all}"
+    );
+    let requests = server.requests();
+    assert!(!requests.is_empty());
+    for seen in &requests {
+        let headers = seen.headers.to_ascii_lowercase();
+        assert!(headers.contains("accept: application/json"), "{headers}");
+        assert!(
+            headers.contains(&format!("authorization: bearer {token}")),
+            "{headers}"
+        );
+    }
+    let posted = requests.iter().find(|r| r.method == "POST").unwrap();
+    assert!(
+        // base64 of the PNG signature and the mark after it.
+        posted.body.contains(
+            r#""logo":"data:image/png;base64,iVBORw0KGgpsb2dvLW1hcmstbmV2ZXItcHJpbnQtbWU=""#
+        ),
+        "{}",
+        posted.body
+    );
+
+    // A logo file that is not there fails before any request.
+    let before = server.requests().len();
+    let missing = koel_spec(
+        dir.path(),
+        "missing.json",
+        &server.base_url(),
+        r#"[{"name":"FSK","url":"https://streaming.fueralle.org/fsk.mp3","is_public":true,"logo_file":"/nonexistent/logo.png"}]"#,
+    );
+    let (code, all) = run("plan", &missing);
+    assert_eq!(code, Some(1), "{all}");
+    assert!(
+        all.contains("logo_file /nonexistent/logo.png cannot be read"),
+        "{all}"
+    );
+    assert_eq!(server.requests().len(), before);
+}
+
 #[test]
 fn schema_check_for_ntfy_validates_specs_without_an_openapi_file() {
     let dir = tempfile::tempdir().unwrap();

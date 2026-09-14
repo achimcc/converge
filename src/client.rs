@@ -20,6 +20,7 @@ pub struct HttpTransport {
     base_url: String,
     header: &'static str,
     key: Secret,
+    accept_json: bool,
 }
 
 impl HttpTransport {
@@ -42,6 +43,25 @@ impl HttpTransport {
             base_url: base_url.trim_end_matches('/').to_string(),
             header,
             key,
+            accept_json: false,
+        }
+    }
+
+    /// Every request says `Accept: application/json`. Koel (Laravel) answers
+    /// a request without it that it refuses with a redirect to its web page,
+    /// which the agent would follow into an HTML answer with HTTP 200.
+    pub fn accept_json(mut self) -> Self {
+        self.accept_json = true;
+        self
+    }
+
+    /// The key header, and `Accept` when asked for.
+    fn headers<B>(&self, request: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
+        let request = request.header(self.header, self.key.expose());
+        if self.accept_json {
+            request.header("Accept", "application/json")
+        } else {
+            request
         }
     }
 
@@ -68,18 +88,14 @@ impl HttpTransport {
 impl Transport for HttpTransport {
     fn get(&self, path: &str) -> Result<Reply, Error> {
         let result = self
-            .agent
-            .get(format!("{}{path}", self.base_url))
-            .header(self.header, self.key.expose())
+            .headers(self.agent.get(format!("{}{path}", self.base_url)))
             .call();
         Self::finish("GET", path, result)
     }
 
     fn put_json(&self, path: &str, body: &str) -> Result<Reply, Error> {
         let result = self
-            .agent
-            .put(format!("{}{path}", self.base_url))
-            .header(self.header, self.key.expose())
+            .headers(self.agent.put(format!("{}{path}", self.base_url)))
             .content_type("application/json")
             .send(body);
         Self::finish("PUT", path, result)
@@ -87,9 +103,7 @@ impl Transport for HttpTransport {
 
     fn post_json(&self, path: &str, body: &str) -> Result<Reply, Error> {
         let result = self
-            .agent
-            .post(format!("{}{path}", self.base_url))
-            .header(self.header, self.key.expose())
+            .headers(self.agent.post(format!("{}{path}", self.base_url)))
             .content_type("application/json")
             .send(body);
         Self::finish("POST", path, result)
@@ -122,6 +136,23 @@ pub fn expect_status_at(
 }
 
 fn validation_messages(body: &str) -> Vec<String> {
+    // Laravel (Koel): `{"message": <summary>, "errors": {field: [messages]}}`.
+    // The summary repeats the first message; only the fields are shown.
+    #[derive(Deserialize)]
+    struct Laravel {
+        errors: std::collections::BTreeMap<String, Vec<String>>,
+    }
+    if let Ok(laravel) = serde_json::from_str::<Laravel>(body) {
+        return laravel
+            .errors
+            .into_iter()
+            .flat_map(|(field, messages)| {
+                messages
+                    .into_iter()
+                    .map(move |message| format!("{field}: {message}"))
+            })
+            .collect();
+    }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Failure {
@@ -236,6 +267,33 @@ mod tests {
             body: String::new(),
         };
         assert!(expect_status(&EP, &reply, &[200, 202]).is_ok());
+    }
+
+    #[test]
+    fn expect_status_shows_laravel_validation_fields_and_nothing_else() {
+        let body = include_str!("../tests/fixtures/koel-9.11.3/constructed-validation-error.json");
+        let reply = Reply {
+            status: 422,
+            body: body.into(),
+        };
+        assert_eq!(
+            expect_status_at("POST", "/api/radio/stations", &reply, &[201])
+                .err()
+                .unwrap()
+                .to_string(),
+            "POST /api/radio/stations answered HTTP 422: logo: Invalid image for logo; url: The url field must be a valid URL."
+        );
+        let reply = Reply {
+            status: 401,
+            body: include_str!("../tests/fixtures/koel-9.11.3/unauthenticated.json").into(),
+        };
+        assert_eq!(
+            expect_status_at("GET", "/api/radio/stations", &reply, &[200])
+                .err()
+                .unwrap()
+                .to_string(),
+            "GET /api/radio/stations answered HTTP 401"
+        );
     }
 
     #[test]

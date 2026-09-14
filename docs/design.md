@@ -1018,11 +1018,113 @@ as a change. The template itself is an object in the spec.
 Before release, `plan` ran on the host with its five specs and the real
 credentials: `unchanged` for all five.
 
-## 18. Not in the pilot
+## 18. Koel: radio stations (v0.14.0, 2026-09-14)
+
+Koel (9.11) keeps two global settings in its database — the media path and
+the branding — and a list of radio stations everybody sees. The media path
+starts a full scan inside the request; it stays a bootstrap of the host. The
+branding was left out on purpose. Radio stations are the task:
+
+| task | read | write | desired |
+|---|---|---|---|
+| `radio-stations` | `GET /api/radio/stations` | `POST /api/radio/stations` (missing, 201), `PUT /api/radio/stations/{id}` (differing, 200) | `stations`: a list of `name`, `url`, `description`, `is_public`, `homepage_url`, `logo_file` |
+
+```json
+{
+  "service": "koel",
+  "base_url": "http://10.0.254.10",
+  "api_key_credential": "koel-token",
+  "task": "radio-stations",
+  "desired": { "stations": [
+    { "name": "Radio Dreyeckland", "url": "https://stream.rdl.de/rdl",
+      "description": "Free radio from Freiburg.", "is_public": true,
+      "homepage_url": "https://rdl.de/", "logo_file": "/nix/store/…-rdl.png" } ] }
+}
+```
+
+### The token and `Accept`
+
+Koel's API authenticates with a Sanctum token as `Authorization: Bearer`, the
+same header ntfy takes (§10); the credential holds the bare token. Tokens do
+not expire, so the host creates one per run for the account the stations
+belong to and deletes it afterwards — that is the host's business, converge
+only reads the credential.
+
+**Every request says `Accept: application/json`.** Without it Laravel
+answers a request without a valid token not with 401 but with a **302 to the
+web page** (measured), and the agent follows redirects into an HTML answer
+with HTTP 200 — an "empty" success. `HttpTransport::accept_json` adds the
+header for Koel only. On top of it an answer that is not JSON is an error that
+says so, in the probe (fatal: waiting does not turn a web page into a list)
+and in the read. `[]` parsed from JSON is a valid list; an empty body is not.
+
+Readiness is the list itself: `GET /api/ping` needs no token and answers an
+empty body, so it would prove nothing about the token. 401 and 403 are
+fatal. Koel reports its version only in `GET /api/data`, which creates a
+queue row for the account on its first call; the version is "not reported",
+as for ntfy.
+
+Laravel's validation errors (`{"message": …, "errors": {field: [messages]}}`)
+join Servarr's shape in `validation_messages`: the fields and their messages
+are shown, the summary and everything else in the body are not.
+
+### Found by name, written whole
+
+A station is found by `name`. Koel's own uniqueness is the URL per account,
+but stream URLs change; keyed by URL, a new URL would add a second station and
+leave the old one. The spec refuses a name or a URL given twice. If Koel
+answers **two** stations of one name — the list also carries other people's
+public stations — the task fails before anything is written: nothing in the
+answer tells converge which one it keeps.
+
+**`PUT` carries the whole entry.** `RadioStationUpdateRequest` reads
+`is_public` with `boolean()` (absent is `false`), `description` with
+`string()` (absent is `''`) and `homepage_url` as given (absent is `null`): a
+body with only the changed field would make the station private and wipe
+its description. So every write sends `name`, `url`, `description`,
+`is_public` and `homepage_url` from the spec, and the spec requires
+`is_public`. A `description` Koel answers as `null` equals `""` — its update
+turns one into the other.
+
+Every `POST` and `PUT` makes Koel fetch the stream and demand an `audio/*`
+content type (`HasAudioContentType`): a playlist link or a station that is
+down fails the write with 422 — the run that would change it, not the daily
+`unchanged` one.
+
+### The logo only where there is none
+
+Koel takes a logo as base64 image data (`ValidImageData`), not as a URL, and
+stores it re-encoded under a random name; the answer carries a URL to that
+file. Nothing can be compared. `logo_file` names an image file (the host
+fetches it at build time), which converge reads before the first request,
+types by its content (PNG, JPEG, GIF, WebP, SVG — SVG needs its own type to
+reach Koel's sanitizer) and sends as a `data:` URI **when the station is
+added, or when it has no logo**. A changed file does not replace a logo that
+is there; a changed line says `logo (none) -> (from <file>)` and never shows
+the data. On `PUT` without a logo change the field is left out, which Koel
+reads as "keep".
+
+### No deletion, no description
+
+A station removed from the spec stays, like every other entry (§19);
+removing the account's own stations that the spec no longer names is the
+host's job, where the owner is known — the API answer does not name one.
+`api-docs/api.yaml` in Koel's package still says 5.1.0 and knows neither
+radio stations nor this route, so `schema-check --service koel` validates
+the specs only, as for ntfy, bindery and Seerr. The field names come from
+`RadioStationResource` and the two form requests; the recorded list was
+empty (`tests/fixtures/koel-9.11.3/`), so a constructed list of three
+stations carries the shape of an entry.
+
+Before release, `plan` ran inside the host's Koel container with a token
+created for the run: one station `(missing) -> (added)`, exit 2; with a wrong
+token HTTP 401 at once, exit 1.
+
+## 19. Not in the pilot
 
 
 - Other services and tasks (Authentik, Seerr, …).
 - TLS, JSON output, a NixOS module.
 - Deleting things. `converge` only sets what the spec names, and appends
-  list entries (§8), connections (§9), subscriptions (§10), root folders (§11, §14), providers (§12, §13), tags (§13) and bindery's entries (§14) it is
-  responsible for.
+  list entries (§8), connections (§9), subscriptions (§10), root folders (§11, §14), providers (§12, §13), tags (§13), bindery's entries (§14), Seerr's servers
+  (§17) and Koel's radio stations (§18) it is responsible for.
