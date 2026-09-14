@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.10.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.11.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26) and **bindery** (1.33), each
 replacing a shell unit or an OpenTofu resource on the host it was written
 for:
@@ -86,7 +86,10 @@ returns. A path the answer does not carry is an error, never an addition.
 Plugin configurations are the exception the OpenAPI file forces: it
 describes them without a single property, so their fields are checked at
 runtime only — see `docs/design.md` §7. Values for keys come from systemd
-credentials and are never printed.
+credentials and are never printed. Named configurations
+(`/System/Configuration/{key}`) are declared without a schema too; there the
+key is a fixed list (`network`, `branding`), each checked against the
+component its document is (`docs/design.md` §15).
 
 ```json
 {
@@ -108,7 +111,7 @@ credentials and are never printed.
 | `converge apply [--deadline <s>] <spec>...` | reconcile, write, read back | 0 done, 1 any spec failed |
 | `converge plan [--deadline <s>] <spec>...` | show what `apply` would change | 0 equal, 2 differs, 1 error |
 | `converge schema-check --service <radarr\|sonarr\|lidarr\|prowlarr\|jellyfin\|trailarr> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
-| `converge schema-check --service ntfy [--spec <spec>]...` | ntfy publishes no OpenAPI description: only validate the specs (`--openapi` is refused) | 0 / 1 |
+| `converge schema-check --service <ntfy\|bindery> [--spec <spec>]...` | ntfy and bindery publish no OpenAPI description: only validate the specs (`--openapi` is refused) | 0 / 1 |
 
 Several specs are processed in order; one failing does not skip the next.
 
