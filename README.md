@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.15.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.15.1** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11) and
 **SuggestArr** (2.14), each
 replacing a shell unit or an OpenTofu resource on the host it was written

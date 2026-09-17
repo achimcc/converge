@@ -276,14 +276,32 @@ impl Task for Configuration {
     /// Readiness and the token in one request, as for Koel: the
     /// configuration itself. A refused token stays refused however long one
     /// waits; a service still starting answers 5xx or refuses the connection.
+    ///
+    /// With a library rule, readiness also means the libraries answer: they
+    /// come from Jellyfin *through* SuggestArr, and when both restart
+    /// together SuggestArr is up well before Jellyfin — it then answers 404
+    /// ("No library found") or 5xx. Waiting helps there, so any answer but
+    /// 200 is `NotYet`; an empty list in a 200 is still an error in `read`.
     fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
         let reply = t
             .get(FETCH.path)
             .map_err(|e| Probe::NotYet(e.to_string()))?;
         match reply.status {
-            200 => decode_config(&reply.body)
-                .map(|_| VERSION_NOT_REPORTED.to_string())
-                .map_err(Probe::Fatal),
+            200 => {
+                decode_config(&reply.body).map_err(Probe::Fatal)?;
+                if self.libraries.is_some() {
+                    let libraries = t
+                        .get(LIBRARIES.path)
+                        .map_err(|e| Probe::NotYet(e.to_string()))?;
+                    if libraries.status != 200 {
+                        return Err(Probe::NotYet(format!(
+                            "{} answered HTTP {} -- Jellyfin behind SuggestArr is not ready",
+                            LIBRARIES.path, libraries.status
+                        )));
+                    }
+                }
+                Ok(VERSION_NOT_REPORTED.to_string())
+            }
             401 | 403 => Err(Probe::Fatal(Error::Status {
                 method: FETCH.method,
                 path: FETCH.path.to_string(),
@@ -590,6 +608,51 @@ mod tests {
         let text = err.to_string();
         assert!(text.contains("converge"), "{text}");
         assert!(!text.contains("pw"), "{text}");
+    }
+
+    #[test]
+    fn probe_waits_while_jellyfin_behind_suggestarr_has_no_libraries_yet() {
+        // Recorded 2026-09-17 on the host: req-01 and jelly-01 restarted in
+        // the same deploy, SuggestArr answered its config at once, but
+        // `/api/jellyfin/libraries` said 404 ("No library found") for the 40
+        // seconds Jellyfin needed. That is a service still starting, not a
+        // configuration error.
+        let task = Configuration {
+            set: BTreeMap::new(),
+            secrets: BTreeMap::new(),
+            libraries: Some(LibraryRule {
+                exclude_collection_types: vec!["homevideos".to_string()],
+            }),
+        };
+        let starting = FakeTransport::default()
+            .on_get(FETCH.path, vec![ok(FETCHED)])
+            .on_get(
+                LIBRARIES.path,
+                vec![Step::Answer(
+                    404,
+                    r#"{"message":"No library found","type":"error"}"#.to_string(),
+                )],
+            );
+        assert!(matches!(task.probe(&starting), Err(Probe::NotYet(_))));
+
+        let ready = FakeTransport::default()
+            .on_get(FETCH.path, vec![ok(FETCHED)])
+            .on_get(LIBRARIES.path, vec![ok(LIBRARY_ANSWER)]);
+        assert_eq!(task.probe(&ready).ok().unwrap(), VERSION_NOT_REPORTED);
+
+        // Without a library rule the libraries are not asked at all.
+        let plain = FakeTransport::default().on_get(FETCH.path, vec![ok(FETCHED)]);
+        assert_eq!(
+            Configuration {
+                set: BTreeMap::new(),
+                secrets: BTreeMap::new(),
+                libraries: None
+            }
+            .probe(&plain)
+            .ok()
+            .unwrap(),
+            VERSION_NOT_REPORTED
+        );
     }
 
     #[test]

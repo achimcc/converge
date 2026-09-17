@@ -1233,6 +1233,17 @@ empty answer. The change line names the libraries, not their ids: what a
 reader wants to see is that `Privat` is out, not that a 32-character id
 changed.
 
+### Ready means the libraries answer too (v0.15.1)
+
+The first run on the host failed: the deploy had restarted SuggestArr's
+container and Jellyfin's together, SuggestArr answered its configuration at
+once, and `GET /api/jellyfin/libraries` said 404 ("No library found") for the
+forty seconds Jellyfin needed (measured: the run at 17:14:45, Jellyfin active
+at 17:15:27). A run that fails for a service still starting leaves a red unit
+for an hour. With a library rule the readiness probe now asks the libraries
+too, and any answer but 200 is "not yet"; an empty list in a 200 stays an
+error.
+
 ## 20. Not in the pilot
 
 
