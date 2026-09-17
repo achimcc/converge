@@ -621,7 +621,7 @@ impl Task for Servers {
     }
 
     /// `PUT` replaces the whole entry, so the entry as read goes back with
-    /// only the named fields changed.
+    /// only the named fields changed -- without its `id`, which is read-only.
     fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
         for target in &self.servers {
             let profile_id = current.profile_ids[&target.name];
@@ -653,6 +653,9 @@ impl Task for Servers {
                             })?;
                     let mut body = entry.clone();
                     body.extend(fields);
+                    // The id is the path. Seerr 3.2 validates the body against
+                    // its OpenAPI, where `id` is read-only, and answers 400.
+                    body.remove("id");
                     let path = format!("{}/{id}", self.list_path());
                     let reply = t.put_json(&path, &text_of("PUT", &path, &Value::Object(body))?)?;
                     expect_status_at("PUT", &path, &reply, &[200])?;
@@ -1144,7 +1147,10 @@ mod tests {
         let (path, body) = sent(&t, 1);
         assert_eq!(path, "/api/v1/settings/radarr/0");
         assert_eq!(body["activeProfileId"], 11);
-        assert_eq!(body["id"], 0);
+        assert!(
+            body.get("id").is_none(),
+            "Seerr 3.2 answers 400 `request.body.id is read-only`"
+        );
         assert_eq!(body["name"], "Radarr");
         assert_eq!(body["minimumAvailability"], "released");
         assert_eq!(

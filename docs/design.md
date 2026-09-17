@@ -1001,7 +1001,12 @@ the webhook's `customHeaders[].value`. They are compared against the
 credential and never printed (§13): a difference is `(hidden) -> (hidden)
 from its credential`. `PUT` replaces the whole entry, so the entry as read
 goes back with the named fields changed — a field the spec does not name
-(Sonarr's `activeLanguageProfileId`, say) survives.
+(Sonarr's `activeLanguageProfileId`, say) survives. Only the `id` stays
+behind: it is the path, and Seerr 3.2 validates the body against its OpenAPI
+file, where `id` is `readOnly` — a body carrying it is answered `400
+request.body.id is read-only` (measured 2026-09-15, the same body without it
+200). A run that writes nothing never sends the `PUT`, so this stayed hidden
+until a key was rotated (v0.15.2).
 
 ### The payload, encoded twice
 
