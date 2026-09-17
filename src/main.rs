@@ -338,11 +338,13 @@ fn reconcile_one(
             let task = bindery::Settings { set: set.clone() };
             run(mode, &task, &transport, &SystemClock, timing)
         }
-        Desired::Naming(set) | Desired::MediaManagement(set) => {
-            let kind = if matches!(spec.desired, Desired::Naming(_)) {
-                servarr::Kind::Naming
-            } else {
-                servarr::Kind::MediaManagement
+        Desired::Naming(set)
+        | Desired::MediaManagement(set)
+        | Desired::DownloadClientConfig(set) => {
+            let kind = match spec.desired {
+                Desired::Naming(_) => servarr::Kind::Naming,
+                Desired::MediaManagement(_) => servarr::Kind::MediaManagement,
+                _ => servarr::Kind::DownloadClientConfig,
             };
             let task = servarr::Document {
                 api: servarr_api(&spec).map_err(fail)?,
@@ -650,6 +652,10 @@ fn schema_check(args: &[String]) -> ExitCode {
             }
             Desired::MediaManagement(set) => (
                 schema::check_paths(&document, servarr::MEDIA_MANAGEMENT, set),
+                set.len(),
+            ),
+            Desired::DownloadClientConfig(set) => (
+                schema::check_paths(&document, servarr::DOWNLOAD_CLIENT_CONFIG, set),
                 set.len(),
             ),
             // A folder is sent with its path, its fields and its profiles as

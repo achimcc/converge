@@ -28,6 +28,8 @@ pub struct Api {
     /// Lidarr only: Radarr's and Sonarr's root folders are a path and
     /// nothing else, and their API has no update.
     pub root_folder_update: Option<Endpoint>,
+    pub download_client_config_read: Endpoint,
+    pub download_client_config_write: Endpoint,
     /// Lidarr only: a root folder names default profiles by id.
     pub quality_profiles: Option<Endpoint>,
     pub metadata_profiles: Option<Endpoint>,
@@ -36,6 +38,7 @@ pub struct Api {
 pub const NAMING: &str = "NamingConfigResource";
 pub const MEDIA_MANAGEMENT: &str = "MediaManagementConfigResource";
 pub const ROOT_FOLDER: &str = "RootFolderResource";
+pub const DOWNLOAD_CLIENT_CONFIG: &str = "DownloadClientConfigResource";
 
 macro_rules! api {
     ($v:literal, $lidarr:expr) => {
@@ -80,6 +83,18 @@ macro_rules! api {
                 method: "POST",
                 path: concat!("/api/", $v, "/rootfolder"),
                 request: Some(Shape::Document(ROOT_FOLDER)),
+                response: None,
+            },
+            download_client_config_read: Endpoint {
+                method: "GET",
+                path: concat!("/api/", $v, "/config/downloadclient"),
+                request: None,
+                response: Some(Shape::Document(DOWNLOAD_CLIENT_CONFIG)),
+            },
+            download_client_config_write: Endpoint {
+                method: "PUT",
+                path: concat!("/api/", $v, "/config/downloadclient/{id}"),
+                request: Some(Shape::Document(DOWNLOAD_CLIENT_CONFIG)),
                 response: None,
             },
             root_folder_update: if $lidarr {
@@ -140,6 +155,8 @@ impl Api {
             self.media_management_write,
             self.root_folders,
             self.root_folder_create,
+            self.download_client_config_read,
+            self.download_client_config_write,
         ];
         endpoints.extend(
             [
@@ -273,6 +290,9 @@ fn compare(
 pub enum Kind {
     Naming,
     MediaManagement,
+    /// `config/downloadclient`: whether the service imports what a client
+    /// finished at all. Off, nothing is imported and nothing says so.
+    DownloadClientConfig,
 }
 
 /// A configuration document the service keeps as one object with an id:
@@ -291,6 +311,11 @@ impl Document {
                 self.api.media_management_read,
                 self.api.media_management_write,
                 MEDIA_MANAGEMENT,
+            ),
+            Kind::DownloadClientConfig => (
+                self.api.download_client_config_read,
+                self.api.download_client_config_write,
+                DOWNLOAD_CLIENT_CONFIG,
             ),
         }
     }
@@ -587,6 +612,12 @@ mod tests {
     const RADARR_STATUS: &str =
         include_str!("../../tests/fixtures/radarr-6.3.0.10514/system-status.json");
     const SONARR_NAMING: &str = include_str!("../../tests/fixtures/sonarr-4.0.19.2979/naming.json");
+    const RADARR_DLC: &str =
+        include_str!("../../tests/fixtures/radarr-6.3.0.10514/config-downloadclient.json");
+    const SONARR_DLC: &str =
+        include_str!("../../tests/fixtures/sonarr-4.0.19.2979/config-downloadclient.json");
+    const LIDARR_DLC: &str =
+        include_str!("../../tests/fixtures/lidarr-3.1.0.4875/config-downloadclient.json");
     const LIDARR_STATUS: &str =
         include_str!("../../tests/fixtures/lidarr-3.1.0.4875/system-status.json");
     const LIDARR_MM: &str =
@@ -618,8 +649,12 @@ mod tests {
             "/api/v1/config/mediamanagement"
         );
         assert!(V3.root_folder_update.is_none() && V1.root_folder_update.is_some());
-        assert_eq!(V3.task_endpoints().len(), 6);
-        assert_eq!(V1.task_endpoints().len(), 9);
+        assert_eq!(V3.task_endpoints().len(), 8);
+        assert_eq!(V1.task_endpoints().len(), 11);
+        assert_eq!(
+            V1.download_client_config_write.path,
+            "/api/v1/config/downloadclient/{id}"
+        );
         assert!(std::ptr::eq(Api::of(Service::Lidarr).unwrap(), &V1));
         assert!(Api::of(Service::Jellyfin).is_none());
     }
@@ -656,6 +691,44 @@ mod tests {
         );
         let t = FakeTransport::default().on_get(V3.naming_read.path, vec![ok(SONARR_NAMING)]);
         assert_eq!(sonarr.diff(&sonarr.read(&t).unwrap()).unwrap(), vec![]);
+    }
+
+    /// The switch every import hangs on. All three services answer the same
+    /// component; only Radarr carries `checkForFinishedDownloadInterval`
+    /// (measured 2026-09-17), so a spec naming it belongs to Radarr alone.
+    #[test]
+    fn the_download_client_config_is_a_document_like_the_others() {
+        for (api, body, port_free_name) in [
+            (&V3, RADARR_DLC, "radarr"),
+            (&V3, SONARR_DLC, "sonarr"),
+            (&V1, LIDARR_DLC, "lidarr"),
+        ] {
+            let task = document(
+                api,
+                Kind::DownloadClientConfig,
+                json!({"enableCompletedDownloadHandling": true}),
+            );
+            let t = FakeTransport::default()
+                .on_get(api.download_client_config_read.path, vec![ok(body)]);
+            let current = task.read(&t).unwrap();
+            assert_eq!(task.diff(&current).unwrap(), vec![], "{port_free_name}");
+        }
+
+        // A field the answer does not carry is an error, never an addition:
+        // Sonarr has no `checkForFinishedDownloadInterval`.
+        let task = document(
+            &V3,
+            Kind::DownloadClientConfig,
+            json!({"checkForFinishedDownloadInterval": 1}),
+        );
+        let t = FakeTransport::default()
+            .on_get(V3.download_client_config_read.path, vec![ok(SONARR_DLC)]);
+        let current = task.read(&t).unwrap();
+        let reason = task.diff(&current).unwrap_err().to_string();
+        assert!(
+            reason.contains("checkForFinishedDownloadInterval"),
+            "{reason}"
+        );
     }
 
     #[test]

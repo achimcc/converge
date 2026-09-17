@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.15.2** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.16.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11) and
 **SuggestArr** (2.14), each
 replacing a shell unit or an OpenTofu resource on the host it was written
@@ -30,6 +30,7 @@ for:
 | Radarr, Sonarr | `quality-definitions` | size limits (MB per minute) per quality |
 | Radarr, Sonarr | `quality-profiles` | qualities every profile must allow |
 | Radarr, Sonarr, Lidarr | `naming`, `media-management` | top-level fields of the configuration document |
+| Radarr, Sonarr, Lidarr | `download-client-config` | the same for `config/downloadclient` -- among them the switch every import hangs on |
 | Radarr, Sonarr, Lidarr, Prowlarr | `download-clients`, `notifications` | providers by name: top-level fields, `fields` entries by name, secrets from credentials handed over on every `apply` |
 | Prowlarr | `applications` | the same for Prowlarr's links to Radarr, Sonarr and Lidarr |
 | Prowlarr | `indexers`, `indexer-proxies` | the same, added from a named template; tags by label (missing labels are added); secrets the service shows are compared, never printed |

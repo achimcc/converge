@@ -58,7 +58,7 @@ fn schema_check_passes_for_the_vendored_file() {
     // Exit 0 alone would also pass for a program that does nothing.
     assert!(
         String::from_utf8_lossy(&out.stdout)
-            .contains("radarr: 23 endpoints and their wire types match"),
+            .contains("radarr: 25 endpoints and their wire types match"),
         "{}",
         String::from_utf8_lossy(&out.stdout)
     );
@@ -1105,7 +1105,7 @@ fn schema_check_passes_lidarr_specs_and_names_a_provider_field_name() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("lidarr: 22 endpoints and their wire types match"),
+        stdout.contains("lidarr: 24 endpoints and their wire types match"),
         "{stdout}"
     );
     // path, name, defaultMonitorOption, defaultQualityProfileId; two fields.

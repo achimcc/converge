@@ -101,6 +101,7 @@ enum TaskName {
     AccountSubscriptions,
     Naming,
     MediaManagement,
+    DownloadClientConfig,
     RootFolders,
     DownloadClients,
     Notifications,
@@ -129,7 +130,9 @@ impl TaskName {
             | TaskName::NamedConfiguration => service == Service::Jellyfin,
             TaskName::Connections | TaskName::TrailerProfiles => service == Service::Trailarr,
             TaskName::AccountSubscriptions => service == Service::Ntfy,
-            TaskName::Naming | TaskName::MediaManagement => service.is_servarr(),
+            TaskName::Naming | TaskName::MediaManagement | TaskName::DownloadClientConfig => {
+                service.is_servarr()
+            }
             TaskName::RootFolders => service.is_servarr() || service == Service::Bindery,
             TaskName::DownloadClients => {
                 service.is_servarr() || service == Service::Prowlarr || service == Service::Bindery
@@ -552,6 +555,7 @@ pub enum Desired {
     AccountSubscriptions(AccountSubscriptions),
     Naming(BTreeMap<String, serde_json::Value>),
     MediaManagement(BTreeMap<String, serde_json::Value>),
+    DownloadClientConfig(BTreeMap<String, serde_json::Value>),
     RootFolders(RootFolderSettings),
     DownloadClients(ProviderSettings),
     Notifications(ProviderSettings),
@@ -1272,15 +1276,15 @@ impl Spec {
                     .map_err(invalid)?;
                 Desired::AccountSubscriptions(desired)
             }
-            TaskName::Naming | TaskName::MediaManagement => {
+            TaskName::Naming | TaskName::MediaManagement | TaskName::DownloadClientConfig => {
                 let map: BTreeMap<String, serde_json::Value> = serde_json::from_value(raw.desired)
                     .map_err(|e| invalid(format!("desired: {e}")))?;
                 // The id addresses the document; it is the service's.
                 plain_fields(&map, "desired", &["id"]).map_err(invalid)?;
-                if matches!(raw.task, TaskName::Naming) {
-                    Desired::Naming(map)
-                } else {
-                    Desired::MediaManagement(map)
+                match raw.task {
+                    TaskName::Naming => Desired::Naming(map),
+                    TaskName::MediaManagement => Desired::MediaManagement(map),
+                    _ => Desired::DownloadClientConfig(map),
                 }
             }
             TaskName::RootFolders => {
@@ -1434,6 +1438,7 @@ impl Spec {
             Desired::AccountSubscriptions(_) => "account-subscriptions",
             Desired::Naming(_) => "naming",
             Desired::MediaManagement(_) => "media-management",
+            Desired::DownloadClientConfig(_) => "download-client-config",
             Desired::RootFolders(_) => "root-folders",
             Desired::DownloadClients(_) => "download-clients",
             Desired::Notifications(_) => "notifications",

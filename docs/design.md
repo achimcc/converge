@@ -1249,6 +1249,22 @@ for an hour. With a library rule the readiness probe now asks the libraries
 too, and any answer but 200 is "not yet"; an empty list in a 200 stays an
 error.
 
+## 21. The download client configuration (v0.16.0, 2026-09-17)
+
+`config/downloadclient` is a document like `naming` and `media-management`, so
+it is the same task with another `Kind` -- two endpoints, one component,
+`DownloadClientConfigResource` for all three services. What makes it worth a
+section is the field it holds: `enableCompletedDownloadHandling`. Off, the
+service never imports what a client finished, and nothing says so -- no failed
+unit, no health message, only downloads that stay where they are. The host had
+the switch nowhere in its configuration (measured 2026-09-17: on in Radarr,
+Sonarr and Lidarr), so declaring it is a guard, not a change.
+
+Only Radarr carries `checkForFinishedDownloadInterval`; Sonarr and Lidarr
+answer without it. A spec naming it against Sonarr fails at the field check,
+which is the rule from §3 and not a special case: a path the answer does not
+carry is an error, never an addition.
+
 ## 20. Not in the pilot
 
 

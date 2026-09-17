@@ -47,3 +47,8 @@ searched for long tokens, the only hits were field names.
   `userName` values), and any other string of 24 or more token characters
   would have become `"<masked-token>"` (none did). Passwords and keys arrive
   as `********` already.
+
+- `config-downloadclient.json` — `GET /api/v3/config/downloadclient`, recorded
+  2026-09-17 around 18:00 CEST from the running service in `media-01`, the same way
+  as the files above (the key travelled in a 0600 curl configuration, not in
+  `argv`). The answer holds no secret; it is verbatim.
