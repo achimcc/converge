@@ -123,3 +123,30 @@ fn accept_json_asks_every_verb_for_json() {
     let headers = plain.requests()[0].headers.to_ascii_lowercase();
     assert!(!headers.contains("accept: application/json"), "{headers}");
 }
+
+#[test]
+fn the_anonymous_transport_sends_no_key_and_a_login_answers_a_token() {
+    let server = Server::start(vec![(
+        "POST",
+        "/api/auth/login",
+        200,
+        r#"{"access_token":"jwt-value","role":"admin","username":"converge"}"#.into(),
+    )]);
+    let anonymous = HttpTransport::anonymous(&server.base_url(), Duration::from_secs(5));
+    let token = converge::services::suggestarr::login(
+        &anonymous,
+        "converge",
+        &Secret::new("pa55word".into()),
+    )
+    .expect("the login answered a token");
+    assert_eq!(token.expose(), "jwt-value");
+
+    let seen = &server.requests()[0];
+    let headers = seen.headers.to_ascii_lowercase();
+    // No key header at all -- the request that fetches the token carries none.
+    assert!(!headers.contains("x-api-key"), "{headers}");
+    assert!(!headers.contains("authorization"), "{headers}");
+    // The password travels in the body, never in the path.
+    assert!(seen.body.contains("pa55word"), "{}", seen.body);
+    assert!(!seen.path.contains("pa55word"), "{}", seen.path);
+}

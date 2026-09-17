@@ -1278,3 +1278,52 @@ fn schema_check_passes_a_prowlarr_applications_spec_and_rejects_an_own_field() {
         "{stderr}"
     );
 }
+
+fn suggestarr_spec(dir: &Path, file: &str, desired: &str) -> PathBuf {
+    let path = dir.join(file);
+    std::fs::write(
+        &path,
+        format!(
+            r#"{{"service":"suggestarr","base_url":"http://127.0.0.1:5000","api_key_credential":"suggestarr-converge-passwort","task":"configuration","desired":{desired}}}"#
+        ),
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn schema_check_for_suggestarr_validates_specs_without_an_openapi_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let good = suggestarr_spec(
+        dir.path(),
+        "good.json",
+        r#"{"username":"converge","set":{"FILTER_RATING_SOURCE":"both"},"secrets":{"OMDB_API_KEY":"omdb-api-key"},"jellyfin_libraries":{"exclude_collection_types":["homevideos"]}}"#,
+    );
+    let out = schema_check("suggestarr", None, &[&good]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("suggestarr: no OpenAPI description exists; 1 spec(s) valid"),
+        "{stdout}"
+    );
+
+    // A key in `set` instead of `secrets` would put it in the Nix store.
+    let secret_in_set = suggestarr_spec(
+        dir.path(),
+        "secret-in-set.json",
+        r#"{"username":"converge","set":{"OMDB_API_KEY":"abc"}}"#,
+    );
+    let out = schema_check("suggestarr", None, &[&secret_in_set]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("desired.secrets"));
+
+    let out = schema_check("suggestarr", Some(&trailarr_openapi()), &[&good]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr)
+        .contains("suggestarr publishes no OpenAPI description"));
+}

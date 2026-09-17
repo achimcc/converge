@@ -1166,11 +1166,80 @@ a wrong token HTTP 401 at once, exit 1. For v0.14.1 `GET /api/me` was recorded
 from the same account (every string masked): `include_public_media` `true`,
 so v0.14.1 refuses there until the host turns it off.
 
-## 19. Not in the pilot
+## 19. SuggestArr: the whole configuration (v0.15.0, 2026-09-17)
+
+SuggestArr keeps its settings in one flat document. Three properties of the
+service, each measured before a line was written, decide the shape of the
+task.
+
+### The database is authoritative, the file is not
+
+`config.yaml` looks like the place to write, and a shell unit on the host had
+been writing it at every container start. It is not the place. At startup
+`migrate_integrations_from_config` copies the file's credentials into the
+`integrations` table **only where a row is missing or empty**, and from then
+on `merge_db_integrations_into_flat` lays the table over the file on every
+read. A value written to the file therefore arrives exactly once — the first
+time — and a rotated key never arrives at all. The same family as bindery's
+download client, which was created only when absent (§14).
+
+`POST /api/config/save` writes the file *and* synchronises the table, so it is
+the only write that holds.
+
+### A partial write is a loss
+
+`save_env_vars` builds the stored document from every key it knows, taking
+each one from the request body **or else from its default**. A body naming one
+field would silently reset all the others. The task therefore reads the
+document, replaces the named fields and sends it back whole — the shape of
+Jellyfin's named configurations (§15), for a different reason: there it was
+to leave other fields alone, here it is to keep them at all.
+
+Two consequences for a spec: a field name the document does not carry is an
+error and not something to add (`fetch` answers with every key, including the
+unset ones), and an **empty value is refused** — SuggestArr drops empty values
+when it writes, so the next read answers with the default and converge would
+write, read back something else and never come to rest.
+
+### The login, and why it is not an API key
+
+SuggestArr's API keys authenticate its public `/api/v1` only; the middleware
+refuses them anywhere else. Its configuration endpoints take a JWT, or the
+identity header of a reverse proxy from a trusted peer address. Widening that
+peer list would have made every process that can reach the port able to claim
+any identity — on this host, a service account was the smaller door: `POST
+/api/auth/login` is a public route, the bearer branch of the middleware runs
+before it ever looks at `AUTH_MODE`, and the account's password sits in a
+systemd credential. The login is therefore the one request that carries no
+key, and `HttpTransport::anonymous` exists for it.
+
+`GET /api/config/fetch` answers an admin with real keys, so converge can
+compare a secret without a `hand_over` (§13) — but no value may reach a change
+line. Every field in SuggestArr's own `_SECRET_KEYS` is reported as
+`(hidden)`, on both sides of the arrow, whatever its value.
+
+### Libraries are derived, not written down
+
+`JELLYFIN_LIBRARIES` is a list of `{id, name}`. Ids exist only once the
+libraries do, and a spec that carried them would rot the moment somebody
+renames a library or adds one. `jellyfin_libraries` therefore names the
+collection types to leave out, and the task reads the libraries from
+SuggestArr itself (`GET /api/jellyfin/libraries`, which passes Jellyfin's
+`VirtualFolders` through).
+
+An empty list is not "no libraries" for SuggestArr — its client then fetches
+all of them — so a rule that would exclude everything is an error, as is an
+empty answer. The change line names the libraries, not their ids: what a
+reader wants to see is that `Privat` is out, not that a 32-character id
+changed.
+
+## 20. Not in the pilot
 
 
 - Other services and tasks (Authentik, Seerr, …).
 - TLS, JSON output, a NixOS module.
 - Deleting things. `converge` only sets what the spec names, and appends
   list entries (§8), connections (§9), subscriptions (§10), root folders (§11, §14), providers (§12, §13), tags (§13), bindery's entries (§14), Seerr's servers
-  (§17) and Koel's radio stations (§18) it is responsible for.
+  (§17) and Koel's radio stations (§18) it is responsible for. SuggestArr's
+  configuration (§19) is a document, not a list: converge sets the named
+  fields and carries every other one back unchanged.

@@ -1,0 +1,138 @@
+{
+  "ALLOW_REGISTRATION": false,
+  "API_RETRIES": 3,
+  "API_TIMEOUT": 30,
+  "AUTH_BYPASS_USERNAME": "local_admin",
+  "AUTH_MODE": "enabled",
+  "AUTH_TRUSTED_CIDRS": "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,::1/128,fc00::/7",
+  "AUTH_TRUSTED_HEADER": "X-Forwarded-User",
+  "AUTH_TRUSTED_HEADER_AUTO_CREATE": true,
+  "AUTO_REJECT_APPROVAL_DAYS": 0,
+  "CACHE_TTL": 24,
+  "CRON_TIMES": "0 4 * * *",
+  "DB_CONNECTION_TIMEOUT": "30",
+  "DB_HOST": null,
+  "DB_MAX_CONNECTIONS": "10",
+  "DB_MAX_IDLE_TIME": "300",
+  "DB_MAX_LIFETIME": "3600",
+  "DB_MIN_CONNECTIONS": "2",
+  "DB_NAME": null,
+  "DB_PASSWORD": null,
+  "DB_PORT": null,
+  "DB_RETRY_ATTEMPTS": "3",
+  "DB_RETRY_DELAY": "1.0",
+  "DB_TYPE": "sqlite",
+  "DB_USER": null,
+  "ENABLE_ADVANCED_ALGORITHM": false,
+  "ENABLE_API_CACHING": true,
+  "ENABLE_BETA_FEATURES": false,
+  "ENABLE_DEBUG_MODE": false,
+  "ENABLE_PERFORMANCE_MONITORING": false,
+  "ENABLE_SOCIAL_FEATURES": false,
+  "ENABLE_STATIC_BACKGROUND": false,
+  "ENABLE_VISUAL_EFFECTS": true,
+  "EXCLUDE_DOWNLOADED": true,
+  "EXCLUDE_REQUESTED": true,
+  "FILTER_GENRES_EXCLUDE": [],
+  "FILTER_IMDB_MIN_VOTES": null,
+  "FILTER_IMDB_THRESHOLD": null,
+  "FILTER_INCLUDE_NO_RATING": true,
+  "FILTER_INCLUDE_TVOD": false,
+  "FILTER_LANGUAGE": null,
+  "FILTER_MIN_RUNTIME": null,
+  "FILTER_NUM_SEASONS": null,
+  "FILTER_RATING_SOURCE": "tmdb",
+  "FILTER_REGION_PROVIDER": null,
+  "FILTER_RELEASE_YEAR": null,
+  "FILTER_STREAMING_SERVICES": [],
+  "FILTER_TMDB_MIN_VOTES": null,
+  "FILTER_TMDB_THRESHOLD": null,
+  "HONOR_JELLYSEER_DISCOVERY": false,
+  "JELLYFIN_API_URL": "http://10.0.30.10:8096",
+  "JELLYFIN_LIBRARIES": [
+    {
+      "id": "992f1db105fb05985c13d95964b870ae",
+      "name": "Sammlungen"
+    },
+    {
+      "id": "59c2d9e8204691f26760fc1ea9414f1a",
+      "name": "Filme"
+    },
+    {
+      "id": "8ff93160579529e4487f15db8c8e8a19",
+      "name": "Musik"
+    },
+    {
+      "id": "ff515b37a67f7e92089eded3779a0f77",
+      "name": "Serien"
+    },
+    {
+      "id": "a94468e5417c2e7e41ccd33111e8bd30",
+      "name": "Mediathek Serien"
+    },
+    {
+      "id": "7614bebb2fb82d9406748dd53aa06dad",
+      "name": "Mediathek Filme"
+    }
+  ],
+  "JELLYFIN_TOKEN": "<masked>",
+  "LLM_MODEL": "qwen3:8b",
+  "LLM_REASONING_EFFORT": "",
+  "LLM_TEMPERATURE": "legacy",
+  "LOG_LEVEL": "INFO",
+  "MAX_CACHE_SIZE": 100,
+  "MAX_CONTENT_CHECKS": 10,
+  "MAX_SIMILAR_MOVIE": "5",
+  "MAX_SIMILAR_TV": "2",
+  "OMDB_API_KEY": "",
+  "OPENAI_API_KEY": "<masked>",
+  "OPENAI_BASE_URL": "http://10.0.240.10:11434/v1",
+  "PAUSE_JOBS_WITH_PENDING_APPROVALS": false,
+  "PLEX_API_URL": "",
+  "PLEX_CLIENT_ID": "<masked-token>",
+  "PLEX_LIBRARIES": [],
+  "PLEX_TOKEN": "",
+  "REQUEST_FIRST_SEASON_ONLY": false,
+  "REQUEST_VISIBILITY": "own_all",
+  "REQUIRE_REQUEST_APPROVAL": true,
+  "SEARCH_SIZE": "20",
+  "SEARXNG_BASE_URL": "",
+  "SEER_ANIME_PROFILE_CONFIG": {},
+  "SEER_API_URL": "http://10.0.50.10:5055",
+  "SEER_REQUEST_DELAY": 2,
+  "SEER_SESSION_TOKEN": null,
+  "SEER_TOKEN": "<masked>",
+  "SEER_USER_NAME": null,
+  "SEER_USER_PSW": null,
+  "SELECTED_SERVICE": "jellyfin",
+  "SELECTED_USERS": [],
+  "SETUP_COMPLETED": true,
+  "STATIC_BACKGROUND_COLOR": "#2E3440",
+  "SUBPATH": null,
+  "TMDB_API_KEY": "<masked>",
+  "TMDB_LANGUAGE": "de",
+  "TRAKT_ACCESS_TOKEN": "",
+  "TRAKT_CLIENT_ID": "",
+  "TRAKT_CLIENT_SECRET": "",
+  "TRAKT_EXPIRES_AT": null,
+  "TRAKT_REFRESH_TOKEN": "",
+  "integrations": {
+    "jellyfin": {
+      "api_key": "<masked>",
+      "api_url": "http://10.0.30.10:8096"
+    },
+    "openai": {
+      "api_key": "ollama",
+      "base_url": "http://10.0.240.10:11434/v1",
+      "model": "qwen3:8b"
+    },
+    "seer": {
+      "api_key": "<masked>",
+      "api_url": "http://10.0.50.10:5055",
+      "session_token": null
+    },
+    "tmdb": {
+      "api_key": "<masked>"
+    }
+  }
+}

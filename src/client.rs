@@ -47,6 +47,13 @@ impl HttpTransport {
         }
     }
 
+    /// A transport without a key, for the one request that fetches one:
+    /// SuggestArr's login. Its answer carries the token every later request
+    /// travels with.
+    pub fn anonymous(base_url: &str, request_timeout: Duration) -> Self {
+        Self::new(base_url, "", Secret::new(String::new()), request_timeout)
+    }
+
     /// Every request says `Accept: application/json`. Koel (Laravel) answers
     /// a request without it that it refuses with a redirect to its web page,
     /// which the agent would follow into an HTML answer with HTTP 200.
@@ -55,9 +62,14 @@ impl HttpTransport {
         self
     }
 
-    /// The key header, and `Accept` when asked for.
+    /// The key header, and `Accept` when asked for. An empty header name is
+    /// the anonymous transport: it sends no key at all.
     fn headers<B>(&self, request: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
-        let request = request.header(self.header, self.key.expose());
+        let request = if self.header.is_empty() {
+            request
+        } else {
+            request.header(self.header, self.key.expose())
+        };
         if self.accept_json {
             request.header("Accept", "application/json")
         } else {

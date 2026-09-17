@@ -10,7 +10,9 @@ use converge::{
     engine::{run, Mode, Outcome, Timing},
     error::Error,
     schema,
-    services::{arr, bindery, jellyfin, koel, ntfy, providers, seerr, servarr, trailarr},
+    services::{
+        arr, bindery, jellyfin, koel, ntfy, providers, seerr, servarr, suggestarr, trailarr,
+    },
     spec::{Desired, Service, Spec},
 };
 
@@ -18,7 +20,7 @@ const USAGE: &str = "usage:
   converge apply [--deadline <seconds>] <spec.json>...
   converge plan [--deadline <seconds>] <spec.json>...
   converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr> --openapi <file> [--spec <spec.json>]...
-  converge schema-check --service ntfy|bindery|seerr|koel [--spec <spec.json>]...";
+  converge schema-check --service ntfy|bindery|seerr|koel|suggestarr [--spec <spec.json>]...";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -99,6 +101,17 @@ fn reconcile_one(
     let label = format!("{} {}", spec.service.name(), spec.task_name());
     let fail = |e: Error| eprintln!("{label}: error: {e}");
     let key = read_credential(credentials, &spec.api_key_credential).map_err(fail)?;
+    // SuggestArr has no API key for its configuration endpoints: the
+    // credential holds the password of a service account, and the value the
+    // requests travel with is the JWT its login returns. The login is the
+    // one request that carries no key.
+    let key = match &spec.desired {
+        Desired::SuggestArrConfiguration(desired) => {
+            let anonymous = HttpTransport::anonymous(&spec.base_url, REQUEST_TIMEOUT);
+            suggestarr::login(&anonymous, &desired.username, &key).map_err(fail)?
+        }
+        _ => key,
+    };
     let transport = HttpTransport::new(
         &spec.base_url,
         spec.service.key_header(),
@@ -271,6 +284,28 @@ fn reconcile_one(
                     converge::spec::BinderyKind::RootFolders => &bindery::ROOT_FOLDERS,
                 },
                 entries: targets,
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        Desired::SuggestArrConfiguration(desired) => {
+            // As for plugin secrets: every credential before the first
+            // request, so a missing one is a configuration error and not
+            // something to discover halfway through.
+            let mut secrets = std::collections::BTreeMap::new();
+            for (field, credential) in &desired.secrets {
+                secrets.insert(
+                    field.clone(),
+                    read_credential(credentials, credential).map_err(fail)?,
+                );
+            }
+            let task = suggestarr::Configuration {
+                set: desired.set.clone(),
+                secrets,
+                libraries: desired.jellyfin_libraries.as_ref().map(|rule| {
+                    suggestarr::LibraryRule {
+                        exclude_collection_types: rule.exclude_collection_types.clone(),
+                    }
+                }),
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
@@ -457,7 +492,8 @@ fn schema_check(args: &[String]) -> ExitCode {
             other => return usage(Some(&format!("unexpected argument {other}"))),
         }
     }
-    if let Some(name @ ("ntfy" | "bindery" | "seerr" | "koel")) = service.as_deref() {
+    if let Some(name @ ("ntfy" | "bindery" | "seerr" | "koel" | "suggestarr")) = service.as_deref()
+    {
         return match openapi {
             Some(_) => usage(Some(&format!(
                 "{name} publishes no OpenAPI description; call schema-check --service {name} without --openapi"
@@ -574,8 +610,9 @@ fn schema_check(args: &[String]) -> ExitCode {
                 settings.set.len(),
             ),
             // Not reachable: the service check above rejects ntfy, bindery,
-            // Seerr and Koel specs.
+            // Seerr, Koel and SuggestArr specs.
             Desired::KoelRadioStations(_)
+            | Desired::SuggestArrConfiguration(_)
             | Desired::AccountSubscriptions(_)
             | Desired::BinderyEntries(..)
             | Desired::BinderySettings(_)

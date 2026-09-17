@@ -6,4 +6,5 @@ pub mod ntfy;
 pub mod providers;
 pub mod seerr;
 pub mod servarr;
+pub mod suggestarr;
 pub mod trailarr;

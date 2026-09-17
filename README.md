@@ -19,8 +19,9 @@ script should have been:
 
 ## Status
 
-Early. **v0.14.1** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
-**Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2) and **Koel** (9.11), each
+Early. **v0.15.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+**Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11) and
+**SuggestArr** (2.14), each
 replacing a shell unit or an OpenTofu resource on the host it was written
 for:
 
@@ -48,6 +49,7 @@ for:
 | Seerr | `radarr-servers`, `sonarr-servers` | entries by name: top-level fields, key from a credential; quality profile and root folder by name, resolved through Seerr's connection test; missing entries are added |
 | Seerr | `webhook` | the webhook agent: fields by path, the payload template as an object (stored the way the agent parses it), header values from credentials |
 | Koel | `radio-stations` | the account's own stations by name (refused while its `include_public_media` is on), every field written whole; a logo from an image file (at most 2 MiB), sent only where a station has none; missing stations are added |
+| SuggestArr | `configuration` | the whole flat configuration: plain fields by name, secret fields from credentials (never shown), and the Jellyfin libraries derived from what the service reports, minus the collection types named |
 
 ## A spec
 
@@ -175,6 +177,41 @@ names no owner, so converge refuses to run until the token's account has
 }
 ```
 
+SuggestArr keeps its configuration in one flat document, and the database
+behind it — not `config.yaml` — decides what the service reads: the file is
+copied into the `integrations` table once and never consulted for those keys
+again, so a rotated key written to the file would never arrive.
+`POST /api/config/save` writes both. That endpoint also fills every key it is
+not given with its **default**, so converge reads the document, changes the
+named fields and sends it back whole. There is no API key for it: the
+credential holds the password of a service account, `POST /api/auth/login`
+exchanges it for a JWT, and every later request carries that as a bearer
+token — the one request that carries no key is the login. `GET
+/api/config/fetch` answers with real keys, so every secret field is reported
+as `(hidden)`, whatever its value.
+
+`jellyfin_libraries` derives `JELLYFIN_LIBRARIES` from what SuggestArr itself
+reports (`GET /api/jellyfin/libraries`) rather than from a written-down list
+of ids: a library renamed in Jellyfin keeps working, and a new one joins by
+itself. An empty list in SuggestArr means *all of them*, so the types to
+leave out are named; a rule that would leave nothing is an error
+(`docs/design.md` §19):
+
+```json
+{
+  "service": "suggestarr",
+  "base_url": "http://10.0.50.10:5000",
+  "api_key_credential": "suggestarr-converge-passwort",
+  "task": "configuration",
+  "desired": {
+    "username": "converge",
+    "set": { "FILTER_RATING_SOURCE": "both", "FILTER_IMDB_THRESHOLD": 6.0 },
+    "secrets": { "OMDB_API_KEY": "omdb-api-key" },
+    "jellyfin_libraries": { "exclude_collection_types": ["homevideos"] }
+  }
+}
+```
+
 ## Commands
 
 | command | does | exit |
@@ -182,7 +219,7 @@ names no owner, so converge refuses to run until the token's account has
 | `converge apply [--deadline <s>] <spec>...` | reconcile, write, read back | 0 done, 1 any spec failed |
 | `converge plan [--deadline <s>] <spec>...` | show what `apply` would change | 0 equal, 2 differs, 1 error |
 | `converge schema-check --service <radarr\|sonarr\|lidarr\|prowlarr\|jellyfin\|trailarr> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
-| `converge schema-check --service <ntfy\|bindery\|seerr\|koel> [--spec <spec>]...` | ntfy and bindery publish no OpenAPI description, Seerr's misnames its fields, Koel's describes a long-gone version: only validate the specs (`--openapi` is refused) | 0 / 1 |
+| `converge schema-check --service <ntfy\|bindery\|seerr\|koel\|suggestarr> [--spec <spec>]...` | ntfy and bindery publish no OpenAPI description, Seerr's misnames its fields, Koel's describes a long-gone version, SuggestArr's covers only its public `/api/v1`: only validate the specs (`--openapi` is refused) | 0 / 1 |
 
 Several specs are processed in order; one failing does not skip the next.
 

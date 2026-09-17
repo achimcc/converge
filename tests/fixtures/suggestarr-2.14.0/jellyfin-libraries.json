@@ -1,0 +1,410 @@
+{
+  "items": [
+    {
+      "CollectionType": "boxsets",
+      "ItemId": "992f1db105fb05985c13d95964b870ae",
+      "LibraryOptions": {
+        "AllowEmbeddedSubtitles": "AllowAll",
+        "AutomaticRefreshIntervalDays": 0,
+        "AutomaticallyAddToCollection": false,
+        "CustomTagDelimiters": [
+          "/",
+          "|",
+          ";",
+          "\\"
+        ],
+        "DelimiterWhitelist": [],
+        "DisabledLocalMetadataReaders": [],
+        "DisabledLyricFetchers": [],
+        "DisabledMediaSegmentProviders": [],
+        "DisabledSubtitleFetchers": [],
+        "EnableAutomaticSeriesGrouping": true,
+        "EnableChapterImageExtraction": false,
+        "EnableEmbeddedEpisodeInfos": false,
+        "EnableEmbeddedExtrasTitles": false,
+        "EnableEmbeddedTitles": false,
+        "EnableInternetProviders": false,
+        "EnableLUFSScan": false,
+        "EnablePhotos": true,
+        "EnableRealtimeMonitor": false,
+        "EnableTrickplayImageExtraction": false,
+        "Enabled": true,
+        "ExtractChapterImagesDuringLibraryScan": false,
+        "ExtractTrickplayImagesDuringLibraryScan": false,
+        "LyricFetcherOrder": [],
+        "MediaSegmentProviderOrder": [],
+        "PathInfos": [
+          {
+            "Path": "/var/lib/jellyfin/data/collections"
+          }
+        ],
+        "PreferNonstandardArtistsTag": false,
+        "RequirePerfectSubtitleMatch": true,
+        "SaveLocalMetadata": true,
+        "SaveLyricsWithMedia": false,
+        "SaveSubtitlesWithMedia": true,
+        "SaveTrickplayWithMedia": false,
+        "SeasonZeroDisplayName": "Specials",
+        "SkipSubtitlesIfAudioTrackMatches": true,
+        "SkipSubtitlesIfEmbeddedSubtitlesPresent": false,
+        "SubtitleFetcherOrder": [],
+        "TypeOptions": [],
+        "UseCustomTagDelimiters": false
+      },
+      "Locations": [
+        "/var/lib/jellyfin/data/collections"
+      ],
+      "Name": "Sammlungen",
+      "PrimaryImageItemId": "992f1db105fb05985c13d95964b870ae",
+      "RefreshStatus": "Idle"
+    },
+    {
+      "CollectionType": "movies",
+      "ItemId": "59c2d9e8204691f26760fc1ea9414f1a",
+      "LibraryOptions": {
+        "AllowEmbeddedSubtitles": "AllowAll",
+        "AutomaticRefreshIntervalDays": 0,
+        "AutomaticallyAddToCollection": false,
+        "CustomTagDelimiters": [
+          "/",
+          "|",
+          ";",
+          "\\"
+        ],
+        "DelimiterWhitelist": [],
+        "DisabledLocalMetadataReaders": [],
+        "DisabledLyricFetchers": [],
+        "DisabledMediaSegmentProviders": [],
+        "DisabledSubtitleFetchers": [],
+        "EnableAutomaticSeriesGrouping": true,
+        "EnableChapterImageExtraction": false,
+        "EnableEmbeddedEpisodeInfos": false,
+        "EnableEmbeddedExtrasTitles": false,
+        "EnableEmbeddedTitles": false,
+        "EnableInternetProviders": false,
+        "EnableLUFSScan": false,
+        "EnablePhotos": true,
+        "EnableRealtimeMonitor": false,
+        "EnableTrickplayImageExtraction": true,
+        "Enabled": true,
+        "ExtractChapterImagesDuringLibraryScan": false,
+        "ExtractTrickplayImagesDuringLibraryScan": false,
+        "LyricFetcherOrder": [],
+        "MediaSegmentProviderOrder": [],
+        "PathInfos": [
+          {
+            "Path": "/tank/data/media/movies"
+          }
+        ],
+        "PreferNonstandardArtistsTag": false,
+        "RequirePerfectSubtitleMatch": true,
+        "SaveLocalMetadata": false,
+        "SaveLyricsWithMedia": false,
+        "SaveSubtitlesWithMedia": true,
+        "SaveTrickplayWithMedia": false,
+        "SeasonZeroDisplayName": "Specials",
+        "SkipSubtitlesIfAudioTrackMatches": true,
+        "SkipSubtitlesIfEmbeddedSubtitlesPresent": false,
+        "SubtitleFetcherOrder": [],
+        "TypeOptions": [],
+        "UseCustomTagDelimiters": false
+      },
+      "Locations": [
+        "/tank/data/media/movies"
+      ],
+      "Name": "Filme",
+      "PrimaryImageItemId": "59c2d9e8204691f26760fc1ea9414f1a",
+      "RefreshStatus": "Idle"
+    },
+    {
+      "CollectionType": "homevideos",
+      "ItemId": "ca2bb5f431f0fff9d1ef90807b905c6f",
+      "LibraryOptions": {
+        "AllowEmbeddedSubtitles": "AllowAll",
+        "AutomaticRefreshIntervalDays": 0,
+        "AutomaticallyAddToCollection": false,
+        "CustomTagDelimiters": [
+          "/",
+          "|",
+          ";",
+          "\\"
+        ],
+        "DelimiterWhitelist": [],
+        "DisabledLocalMetadataReaders": [],
+        "DisabledLyricFetchers": [],
+        "DisabledMediaSegmentProviders": [],
+        "DisabledSubtitleFetchers": [],
+        "EnableAutomaticSeriesGrouping": true,
+        "EnableChapterImageExtraction": false,
+        "EnableEmbeddedEpisodeInfos": false,
+        "EnableEmbeddedExtrasTitles": false,
+        "EnableEmbeddedTitles": false,
+        "EnableInternetProviders": false,
+        "EnableLUFSScan": false,
+        "EnablePhotos": true,
+        "EnableRealtimeMonitor": false,
+        "EnableTrickplayImageExtraction": false,
+        "Enabled": true,
+        "ExtractChapterImagesDuringLibraryScan": false,
+        "ExtractTrickplayImagesDuringLibraryScan": false,
+        "LyricFetcherOrder": [],
+        "MediaSegmentProviderOrder": [],
+        "PathInfos": [
+          {
+            "Path": "/tank/data/media/privat"
+          }
+        ],
+        "PreferNonstandardArtistsTag": false,
+        "RequirePerfectSubtitleMatch": true,
+        "SaveLocalMetadata": false,
+        "SaveLyricsWithMedia": false,
+        "SaveSubtitlesWithMedia": true,
+        "SaveTrickplayWithMedia": false,
+        "SeasonZeroDisplayName": "Specials",
+        "SkipSubtitlesIfAudioTrackMatches": true,
+        "SkipSubtitlesIfEmbeddedSubtitlesPresent": false,
+        "SubtitleFetcherOrder": [],
+        "TypeOptions": [],
+        "UseCustomTagDelimiters": false
+      },
+      "Locations": [
+        "/tank/data/media/privat"
+      ],
+      "Name": "Privat",
+      "PrimaryImageItemId": "ca2bb5f431f0fff9d1ef90807b905c6f",
+      "RefreshStatus": "Idle"
+    },
+    {
+      "CollectionType": "music",
+      "ItemId": "8ff93160579529e4487f15db8c8e8a19",
+      "LibraryOptions": {
+        "AllowEmbeddedSubtitles": "AllowAll",
+        "AutomaticRefreshIntervalDays": 0,
+        "AutomaticallyAddToCollection": false,
+        "CustomTagDelimiters": [
+          "/",
+          "|",
+          ";",
+          "\\"
+        ],
+        "DelimiterWhitelist": [],
+        "DisabledLocalMetadataReaders": [],
+        "DisabledLyricFetchers": [],
+        "DisabledMediaSegmentProviders": [],
+        "DisabledSubtitleFetchers": [],
+        "EnableAutomaticSeriesGrouping": true,
+        "EnableChapterImageExtraction": false,
+        "EnableEmbeddedEpisodeInfos": false,
+        "EnableEmbeddedExtrasTitles": false,
+        "EnableEmbeddedTitles": false,
+        "EnableInternetProviders": false,
+        "EnableLUFSScan": false,
+        "EnablePhotos": true,
+        "EnableRealtimeMonitor": false,
+        "EnableTrickplayImageExtraction": false,
+        "Enabled": true,
+        "ExtractChapterImagesDuringLibraryScan": false,
+        "ExtractTrickplayImagesDuringLibraryScan": false,
+        "LyricFetcherOrder": [],
+        "MediaSegmentProviderOrder": [],
+        "PathInfos": [
+          {
+            "Path": "/tank/data/media/music"
+          }
+        ],
+        "PreferNonstandardArtistsTag": false,
+        "RequirePerfectSubtitleMatch": true,
+        "SaveLocalMetadata": false,
+        "SaveLyricsWithMedia": false,
+        "SaveSubtitlesWithMedia": true,
+        "SaveTrickplayWithMedia": false,
+        "SeasonZeroDisplayName": "Specials",
+        "SkipSubtitlesIfAudioTrackMatches": true,
+        "SkipSubtitlesIfEmbeddedSubtitlesPresent": false,
+        "SubtitleFetcherOrder": [],
+        "TypeOptions": [],
+        "UseCustomTagDelimiters": false
+      },
+      "Locations": [
+        "/tank/data/media/music"
+      ],
+      "Name": "Musik",
+      "PrimaryImageItemId": "8ff93160579529e4487f15db8c8e8a19",
+      "RefreshStatus": "Idle"
+    },
+    {
+      "CollectionType": "tvshows",
+      "ItemId": "ff515b37a67f7e92089eded3779a0f77",
+      "LibraryOptions": {
+        "AllowEmbeddedSubtitles": "AllowAll",
+        "AutomaticRefreshIntervalDays": 0,
+        "AutomaticallyAddToCollection": false,
+        "CustomTagDelimiters": [
+          "/",
+          "|",
+          ";",
+          "\\"
+        ],
+        "DelimiterWhitelist": [],
+        "DisabledLocalMetadataReaders": [],
+        "DisabledLyricFetchers": [],
+        "DisabledMediaSegmentProviders": [],
+        "DisabledSubtitleFetchers": [],
+        "EnableAutomaticSeriesGrouping": true,
+        "EnableChapterImageExtraction": false,
+        "EnableEmbeddedEpisodeInfos": false,
+        "EnableEmbeddedExtrasTitles": false,
+        "EnableEmbeddedTitles": false,
+        "EnableInternetProviders": false,
+        "EnableLUFSScan": false,
+        "EnablePhotos": true,
+        "EnableRealtimeMonitor": false,
+        "EnableTrickplayImageExtraction": true,
+        "Enabled": true,
+        "ExtractChapterImagesDuringLibraryScan": false,
+        "ExtractTrickplayImagesDuringLibraryScan": false,
+        "LyricFetcherOrder": [],
+        "MediaSegmentProviderOrder": [],
+        "PathInfos": [
+          {
+            "Path": "/tank/data/media/series"
+          }
+        ],
+        "PreferNonstandardArtistsTag": false,
+        "RequirePerfectSubtitleMatch": true,
+        "SaveLocalMetadata": false,
+        "SaveLyricsWithMedia": false,
+        "SaveSubtitlesWithMedia": true,
+        "SaveTrickplayWithMedia": false,
+        "SeasonZeroDisplayName": "Specials",
+        "SkipSubtitlesIfAudioTrackMatches": true,
+        "SkipSubtitlesIfEmbeddedSubtitlesPresent": false,
+        "SubtitleFetcherOrder": [],
+        "TypeOptions": [],
+        "UseCustomTagDelimiters": false
+      },
+      "Locations": [
+        "/tank/data/media/series"
+      ],
+      "Name": "Serien",
+      "PrimaryImageItemId": "ff515b37a67f7e92089eded3779a0f77",
+      "RefreshStatus": "Idle"
+    },
+    {
+      "CollectionType": "tvshows",
+      "ItemId": "a94468e5417c2e7e41ccd33111e8bd30",
+      "LibraryOptions": {
+        "AllowEmbeddedSubtitles": "AllowAll",
+        "AutomaticRefreshIntervalDays": 0,
+        "AutomaticallyAddToCollection": false,
+        "CustomTagDelimiters": [
+          "/",
+          "|",
+          ";",
+          "\\"
+        ],
+        "DelimiterWhitelist": [],
+        "DisabledLocalMetadataReaders": [],
+        "DisabledLyricFetchers": [],
+        "DisabledMediaSegmentProviders": [],
+        "DisabledSubtitleFetchers": [],
+        "EnableAutomaticSeriesGrouping": true,
+        "EnableChapterImageExtraction": false,
+        "EnableEmbeddedEpisodeInfos": false,
+        "EnableEmbeddedExtrasTitles": false,
+        "EnableEmbeddedTitles": false,
+        "EnableInternetProviders": false,
+        "EnableLUFSScan": false,
+        "EnablePhotos": true,
+        "EnableRealtimeMonitor": false,
+        "EnableTrickplayImageExtraction": false,
+        "Enabled": true,
+        "ExtractChapterImagesDuringLibraryScan": false,
+        "ExtractTrickplayImagesDuringLibraryScan": false,
+        "LyricFetcherOrder": [],
+        "MediaSegmentProviderOrder": [],
+        "PathInfos": [
+          {
+            "Path": "/tank/data/mediathek/serien"
+          }
+        ],
+        "PreferNonstandardArtistsTag": false,
+        "RequirePerfectSubtitleMatch": true,
+        "SaveLocalMetadata": false,
+        "SaveLyricsWithMedia": false,
+        "SaveSubtitlesWithMedia": true,
+        "SaveTrickplayWithMedia": false,
+        "SeasonZeroDisplayName": "Specials",
+        "SkipSubtitlesIfAudioTrackMatches": true,
+        "SkipSubtitlesIfEmbeddedSubtitlesPresent": false,
+        "SubtitleFetcherOrder": [],
+        "TypeOptions": [],
+        "UseCustomTagDelimiters": false
+      },
+      "Locations": [
+        "/tank/data/mediathek/serien"
+      ],
+      "Name": "Mediathek Serien",
+      "RefreshStatus": "Idle"
+    },
+    {
+      "CollectionType": "movies",
+      "ItemId": "7614bebb2fb82d9406748dd53aa06dad",
+      "LibraryOptions": {
+        "AllowEmbeddedSubtitles": "AllowAll",
+        "AutomaticRefreshIntervalDays": 0,
+        "AutomaticallyAddToCollection": false,
+        "CustomTagDelimiters": [
+          "/",
+          "|",
+          ";",
+          "\\"
+        ],
+        "DelimiterWhitelist": [],
+        "DisabledLocalMetadataReaders": [],
+        "DisabledLyricFetchers": [],
+        "DisabledMediaSegmentProviders": [],
+        "DisabledSubtitleFetchers": [],
+        "EnableAutomaticSeriesGrouping": true,
+        "EnableChapterImageExtraction": false,
+        "EnableEmbeddedEpisodeInfos": false,
+        "EnableEmbeddedExtrasTitles": false,
+        "EnableEmbeddedTitles": false,
+        "EnableInternetProviders": false,
+        "EnableLUFSScan": false,
+        "EnablePhotos": true,
+        "EnableRealtimeMonitor": false,
+        "EnableTrickplayImageExtraction": false,
+        "Enabled": true,
+        "ExtractChapterImagesDuringLibraryScan": false,
+        "ExtractTrickplayImagesDuringLibraryScan": false,
+        "LyricFetcherOrder": [],
+        "MediaSegmentProviderOrder": [],
+        "PathInfos": [
+          {
+            "Path": "/tank/data/mediathek/filme"
+          }
+        ],
+        "PreferNonstandardArtistsTag": false,
+        "RequirePerfectSubtitleMatch": true,
+        "SaveLocalMetadata": false,
+        "SaveLyricsWithMedia": false,
+        "SaveSubtitlesWithMedia": true,
+        "SaveTrickplayWithMedia": false,
+        "SeasonZeroDisplayName": "Specials",
+        "SkipSubtitlesIfAudioTrackMatches": true,
+        "SkipSubtitlesIfEmbeddedSubtitlesPresent": false,
+        "SubtitleFetcherOrder": [],
+        "TypeOptions": [],
+        "UseCustomTagDelimiters": false
+      },
+      "Locations": [
+        "/tank/data/mediathek/filme"
+      ],
+      "Name": "Mediathek Filme",
+      "PrimaryImageItemId": "7614bebb2fb82d9406748dd53aa06dad",
+      "RefreshStatus": "Idle"
+    }
+  ],
+  "message": "Libraries fetched successfully"
+}

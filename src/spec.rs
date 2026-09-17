@@ -20,6 +20,8 @@ pub enum Service {
     Bindery,
     Seerr,
     Koel,
+    #[serde(rename = "suggestarr")]
+    SuggestArr,
 }
 
 impl Service {
@@ -35,6 +37,7 @@ impl Service {
             Service::Bindery => "bindery",
             Service::Seerr => "seerr",
             Service::Koel => "koel",
+            Service::SuggestArr => "suggestarr",
         }
     }
 
@@ -49,15 +52,18 @@ impl Service {
             | Service::Seerr => "X-Api-Key",
             Service::Jellyfin => "X-Emby-Token",
             Service::Trailarr => "X-API-KEY",
-            Service::Ntfy | Service::Koel => "Authorization",
+            Service::Ntfy | Service::Koel | Service::SuggestArr => "Authorization",
         }
     }
 
     /// The header's value. The credential holds the bare key; ntfy and Koel
-    /// want it as a bearer token.
+    /// want it as a bearer token, and for SuggestArr the value is the JWT a
+    /// login returned (the credential there holds a password, never a key).
     pub fn key_value(self, key: Secret) -> Secret {
         match self {
-            Service::Ntfy | Service::Koel => Secret::new(format!("Bearer {}", key.expose())),
+            Service::Ntfy | Service::Koel | Service::SuggestArr => {
+                Secret::new(format!("Bearer {}", key.expose()))
+            }
             _ => key,
         }
     }
@@ -109,6 +115,7 @@ enum TaskName {
     SonarrServers,
     Webhook,
     RadioStations,
+    Configuration,
 }
 
 impl TaskName {
@@ -138,6 +145,7 @@ impl TaskName {
             | TaskName::SonarrServers
             | TaskName::Webhook => service == Service::Seerr,
             TaskName::RadioStations => service == Service::Koel,
+            TaskName::Configuration => service == Service::SuggestArr,
         }
     }
 }
@@ -388,6 +396,34 @@ pub struct KoelStation {
     pub logo_file: Option<PathBuf>,
 }
 
+/// SuggestArr's whole configuration, as a spec describes it: plain fields,
+/// fields whose value comes from a systemd credential, and the rule that
+/// derives the Jellyfin libraries from what the service itself reports.
+///
+/// `username` is the service account the task logs in as; its password is
+/// `api_key_credential`. The account is not a secret and belongs in the
+/// spec, so a wrong one is visible in a plan.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuggestArrConfiguration {
+    pub username: String,
+    #[serde(default)]
+    pub set: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub secrets: BTreeMap<String, String>,
+    #[serde(default)]
+    pub jellyfin_libraries: Option<SuggestArrLibraries>,
+}
+
+/// Which Jellyfin collection types the libraries must not include. SuggestArr
+/// reads an empty library list as "all of them", so leaving the home videos
+/// out is something to say, not something to omit.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuggestArrLibraries {
+    pub exclude_collection_types: Vec<String>,
+}
+
 /// Koel's longest station name (`max:191` in its store and update requests).
 const KOEL_NAME_MAX: usize = 191;
 
@@ -529,6 +565,7 @@ pub enum Desired {
     SeerrServers(SeerrKind, BTreeMap<String, SeerrServer>),
     SeerrWebhook(SeerrWebhook),
     KoelRadioStations(Vec<KoelStation>),
+    SuggestArrConfiguration(SuggestArrConfiguration),
 }
 
 fn web_url(url: &str) -> bool {
@@ -964,6 +1001,72 @@ impl Spec {
                 }
                 Desired::SeerrWebhook(desired)
             }
+            TaskName::Configuration => {
+                let desired: SuggestArrConfiguration = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if desired.username.is_empty() {
+                    return Err(invalid("desired.username is empty".to_string()));
+                }
+                if desired.set.is_empty() && desired.secrets.is_empty() {
+                    return Err(invalid(
+                        "desired names neither a field nor a secret".to_string(),
+                    ));
+                }
+                let derived = desired.jellyfin_libraries.is_some();
+                for (name, value) in &desired.set {
+                    let at = "desired.set";
+                    if name.is_empty() || name.contains('.') {
+                        return Err(invalid(format!("{at}: {name:?} is not a plain field name")));
+                    }
+                    if name == "integrations" {
+                        return Err(invalid(format!(
+                            "{at}: integrations is the fetch endpoint's own key, not a setting"
+                        )));
+                    }
+                    if crate::services::suggestarr::is_secret_field(name) {
+                        return Err(invalid(format!(
+                            "{at}: {name} holds a secret and belongs in desired.secrets"
+                        )));
+                    }
+                    if derived && name == "JELLYFIN_LIBRARIES" {
+                        return Err(invalid(format!(
+                            "{at}: JELLYFIN_LIBRARIES is derived by jellyfin_libraries; two writers on one field is how a value ends up depending on who ran last"
+                        )));
+                    }
+                    // SuggestArr drops every empty value when it writes the
+                    // file (`save_env_vars`), so the next read answers with
+                    // the default instead: converge would write, read back
+                    // something else and never come to rest.
+                    if value.is_null() || value.as_str() == Some("") {
+                        return Err(invalid(format!(
+                            "{at}.{name} is empty; SuggestArr stores no empty value, so it can never be read back"
+                        )));
+                    }
+                }
+                for (name, credential) in &desired.secrets {
+                    if name.is_empty() || name.contains('.') {
+                        return Err(invalid(format!(
+                            "desired.secrets: {name:?} is not a plain field name"
+                        )));
+                    }
+                    credential_name(credential, &format!("desired.secrets.{name}"))
+                        .map_err(invalid)?;
+                }
+                if let Some(rule) = &desired.jellyfin_libraries {
+                    if rule.exclude_collection_types.is_empty() {
+                        return Err(invalid(
+                            "desired.jellyfin_libraries.exclude_collection_types names no type; leave the key out to set the libraries by hand".to_string(),
+                        ));
+                    }
+                    if rule.exclude_collection_types.iter().any(String::is_empty) {
+                        return Err(invalid(
+                            "desired.jellyfin_libraries.exclude_collection_types: a type is empty"
+                                .to_string(),
+                        ));
+                    }
+                }
+                Desired::SuggestArrConfiguration(desired)
+            }
             TaskName::RadioStations => {
                 #[derive(Deserialize)]
                 #[serde(deny_unknown_fields)]
@@ -1347,6 +1450,7 @@ impl Spec {
             Desired::SeerrServers(SeerrKind::Sonarr, _) => "sonarr-servers",
             Desired::SeerrWebhook(_) => "webhook",
             Desired::KoelRadioStations(_) => "radio-stations",
+            Desired::SuggestArrConfiguration(_) => "configuration",
         }
     }
 }
@@ -1845,6 +1949,108 @@ mod tests {
         for service in [Service::Radarr, Service::Ntfy, Service::Seerr] {
             assert!(!service.accepts_json_only(), "{service:?}");
         }
+    }
+
+    fn suggestarr(desired: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"suggestarr","base_url":"http://localhost:5000","api_key_credential":"suggestarr-converge-passwort","task":"configuration","desired":{desired}}}"#
+        ))
+    }
+
+    #[test]
+    fn a_suggestarr_configuration_carries_fields_secrets_and_a_library_rule() {
+        let spec = suggestarr(
+            r#"{"username":"converge",
+                "set":{"FILTER_RATING_SOURCE":"both"},
+                "secrets":{"OMDB_API_KEY":"omdb-api-key"},
+                "jellyfin_libraries":{"exclude_collection_types":["homevideos"]}}"#,
+        )
+        .unwrap();
+        let Desired::SuggestArrConfiguration(desired) = &spec.desired else {
+            panic!("wrong variant");
+        };
+        assert_eq!(desired.username, "converge");
+        assert_eq!(spec.task_name(), "configuration");
+        assert_eq!(
+            desired.secrets.get("OMDB_API_KEY").map(String::as_str),
+            Some("omdb-api-key")
+        );
+    }
+
+    #[test]
+    fn a_suggestarr_secret_does_not_belong_in_set() {
+        let e = suggestarr(r#"{"username":"converge","set":{"OMDB_API_KEY":"abc"}}"#).unwrap_err();
+        assert!(e.to_string().contains("desired.secrets"), "{e}");
+    }
+
+    #[test]
+    fn an_empty_suggestarr_value_is_refused_because_it_cannot_be_read_back() {
+        for value in ["\"\"", "null"] {
+            let e = suggestarr(&format!(
+                r#"{{"username":"converge","set":{{"TMDB_LANGUAGE":{value}}}}}"#
+            ))
+            .unwrap_err();
+            assert!(e.to_string().contains("read back"), "{e}");
+        }
+    }
+
+    #[test]
+    fn suggestarr_libraries_have_one_writer_only() {
+        let e = suggestarr(
+            r#"{"username":"converge",
+                "set":{"JELLYFIN_LIBRARIES":[{"id":"1","name":"Filme"}]},
+                "jellyfin_libraries":{"exclude_collection_types":["homevideos"]}}"#,
+        )
+        .unwrap_err();
+        assert!(e.to_string().contains("two writers"), "{e}");
+
+        // Without the rule, naming them by hand is allowed.
+        suggestarr(
+            r#"{"username":"converge","set":{"JELLYFIN_LIBRARIES":[{"id":"1","name":"Filme"}]}}"#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_suggestarr_configuration_needs_a_username_a_field_and_real_credentials() {
+        let empty_user = suggestarr(r#"{"username":"","set":{"TMDB_LANGUAGE":"de"}}"#).unwrap_err();
+        assert!(empty_user.to_string().contains("username"), "{empty_user}");
+
+        let nothing = suggestarr(r#"{"username":"converge"}"#).unwrap_err();
+        assert!(
+            nothing.to_string().contains("neither a field nor a secret"),
+            "{nothing}"
+        );
+
+        let bad_credential =
+            suggestarr(r#"{"username":"converge","secrets":{"OMDB_API_KEY":"../x"}}"#).unwrap_err();
+        assert!(
+            bad_credential.to_string().contains("credential name"),
+            "{bad_credential}"
+        );
+
+        let empty_rule = suggestarr(
+            r#"{"username":"converge","set":{"TMDB_LANGUAGE":"de"},
+                "jellyfin_libraries":{"exclude_collection_types":[]}}"#,
+        )
+        .unwrap_err();
+        assert!(
+            empty_rule.to_string().contains("names no type"),
+            "{empty_rule}"
+        );
+    }
+
+    #[test]
+    fn the_configuration_task_belongs_to_suggestarr_alone() {
+        let e = parse(
+            r#"{"service":"koel","base_url":"http://localhost:8080","api_key_credential":"koel-token","task":"configuration","desired":{"username":"converge","set":{"TMDB_LANGUAGE":"de"}}}"#,
+        )
+        .unwrap_err();
+        assert!(
+            e.to_string()
+                .contains("the task does not belong to service"),
+            "{e}"
+        );
     }
 
     fn koel(desired: &str) -> Result<Spec, Error> {
