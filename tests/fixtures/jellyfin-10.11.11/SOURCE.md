@@ -72,6 +72,15 @@ Note what the branding answer does NOT carry: `CustomCss` is null on this
 instance, and Jellyfin omits null values — the answer has exactly
 `LoginDisclaimer` and `SplashscreenEnabled`.
 
+## Live TV (recorded 2026-09-18 around 18:45 CEST)
+
+- `system-configuration-livetv.json` — `GET /System/Configuration/livetv`
+
+Verbatim, recorded the same way, before the host configured any tuner: both
+lists are empty, and Jellyfin omits every null field (`GuideDays`, the
+recording paths). No field carries a credential; the one string is
+`RecordingPostProcessorArguments`, Jellyfin's default.
+
 ## LDAP-Auth and SSO-Auth (recorded 2026-09-14 around 14:20 CEST)
 
 - `plugins/958aad6637844d2ab89aa7b6fab6e25c.json` — LDAP-Auth 23.0.0.0

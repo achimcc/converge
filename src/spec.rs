@@ -263,6 +263,7 @@ pub struct NamedConfigurationSettings {
 pub enum NamedKey {
     Network,
     Branding,
+    LiveTv,
 }
 
 impl NamedKey {
@@ -271,6 +272,7 @@ impl NamedKey {
         match self {
             NamedKey::Network => "network",
             NamedKey::Branding => "branding",
+            NamedKey::LiveTv => "livetv",
         }
     }
 
@@ -282,6 +284,7 @@ impl NamedKey {
         match self {
             NamedKey::Network => "NetworkConfiguration",
             NamedKey::Branding => "BrandingOptionsDto",
+            NamedKey::LiveTv => "LiveTvOptions",
         }
     }
 }
@@ -1856,6 +1859,23 @@ mod tests {
         .unwrap();
         match &spec.desired {
             Desired::NamedConfiguration(s) => assert_eq!(s.key.component(), "BrandingOptionsDto"),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_the_live_tv_configuration() {
+        let spec = jellyfin(
+            "named-configuration",
+            r#"{"key":"livetv","set":{"TunerHosts":[]}}"#,
+        )
+        .unwrap();
+        match &spec.desired {
+            Desired::NamedConfiguration(s) => {
+                assert_eq!(s.key, NamedKey::LiveTv);
+                assert_eq!(s.key.component(), "LiveTvOptions");
+                assert_eq!(s.key.path_segment(), "livetv");
+            }
             other => panic!("unexpected {other:?}"),
         }
     }

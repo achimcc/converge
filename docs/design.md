@@ -866,6 +866,7 @@ only keys whose document the description names, and each maps to a component:
 |---|---|
 | `network` | `NetworkConfiguration` |
 | `branding` | `BrandingOptionsDto` |
+| `livetv` | `LiveTvOptions` (v0.24.0) |
 
 For branding it is the DTO and not the stored `BrandingOptions`: the POST
 lands on Jellyfin's dedicated `/System/Configuration/Branding` (route matching
@@ -879,6 +880,29 @@ Jellyfin omits null values. The recorded branding answer has no `CustomCss` at
 all, so a spec naming it fails at runtime with "the answer has no such field"
 — the same rule as everywhere (a missing path is never added), and on this
 host the field is not set.
+
+### Live TV: the lists are the unit (v0.24.0, 2026-09-18)
+
+The host offers public broadcasters' streams as Live TV: one M3U tuner and one
+XMLTV guide source. Both live in `livetv` as lists — `TunerHosts` of
+`TunerHostInfo`, `ListingProviders` of `ListingsProviderInfo` — and a spec
+names each list **as a whole**. `schema-check` walks such a list element by
+element, so a misspelt field inside a tuner fails the build like one at the
+top level.
+
+Why not entries by key, as for a plugin's shared lists (`lists`, v0.5.0)? On
+this host nothing else writes these lists: Jellyfin's own `/LiveTv/TunerHosts`
+and `/LiveTv/ListingProviders` exist for its dashboard, which no one uses
+here. A list that is converge's alone is simply a value; a tuner someone adds
+by hand is taken away on the next run, which is the point.
+
+Two consequences for a spec. Jellyfin omits null values inside the list as
+well, so an element must leave out exactly the fields Jellyfin leaves out, or
+the comparison never comes to rest — the host checks that the second run says
+`unchanged`. And the write goes through the generic named-configuration route,
+not the dashboard's: Jellyfin neither generates an `Id` nor queues a guide
+refresh. The spec carries its own ids, and refreshing the guide is an action,
+which stays with the caller.
 
 ## 16. Library ids by name (v0.12.0, 2026-09-14)
 

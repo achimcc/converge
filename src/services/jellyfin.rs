@@ -993,6 +993,9 @@ mod tests {
     const BRANDING: &str =
         include_str!("../../tests/fixtures/jellyfin-10.11.11/system-configuration-branding.json");
 
+    const LIVETV: &str =
+        include_str!("../../tests/fixtures/jellyfin-10.11.11/system-configuration-livetv.json");
+
     fn fields(pairs: &[(&str, Value)]) -> BTreeMap<String, Value> {
         pairs
             .iter()
@@ -1089,6 +1092,37 @@ mod tests {
         let sent: Value = serde_json::from_str(&written[0].1).unwrap();
         let expected = with(NETWORK, |v| v["KnownProxies"] = json!(["10.0.20.11"]));
         assert_eq!(sent, serde_json::from_str::<Value>(&expected).unwrap());
+    }
+
+    #[test]
+    fn named_configuration_live_tv_replaces_the_tuner_list_as_a_whole() {
+        let tuners = json!([{
+            "Id": "oer", "Type": "m3u", "Url": "/nix/store/x-kanaele.m3u",
+            "AllowStreamSharing": true, "TunerCount": 0
+        }]);
+        let task = NamedConfiguration {
+            key: NamedKey::LiveTv,
+            set: fields(&[("TunerHosts", tuners.clone())]),
+        };
+        let t = FakeTransport::default()
+            .on_get("/System/Configuration/livetv", vec![ok(LIVETV)])
+            .on_put(vec![Step::Answer(204, String::new())]);
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].subject, "LiveTvOptions");
+        assert_eq!(changes[0].field, "TunerHosts");
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written[0].0, "/System/Configuration/livetv");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        let expected = with(LIVETV, |v| v["TunerHosts"] = tuners.clone());
+        assert_eq!(sent, serde_json::from_str::<Value>(&expected).unwrap());
+
+        // Read back with the list in place, nothing is left to do.
+        let t =
+            FakeTransport::default().on_get("/System/Configuration/livetv", vec![ok(&expected)]);
+        assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
     }
 
     #[test]

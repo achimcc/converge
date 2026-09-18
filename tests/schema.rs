@@ -217,6 +217,26 @@ fn named_configuration_components_are_checked_like_documents() {
 }
 
 #[test]
+fn live_tv_tuners_and_guide_sources_are_checked_element_by_element() {
+    let found = paths(
+        "LiveTvOptions",
+        serde_json::json!({
+            "TunerHosts": [{"Id": "t", "Type": "m3u", "Url": "/x.m3u", "AllowStreamSharing": true}],
+            "ListingProviders": [{"Id": "l", "Type": "xmltv", "Path": "https://x/e.xml.gz", "EnableAllTuners": true}]
+        }),
+    );
+    assert_eq!(found, Vec::<String>::new());
+    let found = paths(
+        "LiveTvOptions",
+        serde_json::json!({"TunerHosts": [{"Id": "t", "Adress": "/x.m3u"}]}),
+    );
+    assert_eq!(
+        found,
+        ["LiveTvOptions.TunerHosts[0].Adress: TunerHostInfo has no property Adress"]
+    );
+}
+
+#[test]
 fn a_misspelt_segment_is_found_with_the_component_it_is_missing_from() {
     let found = paths(
         "ServerConfiguration",
