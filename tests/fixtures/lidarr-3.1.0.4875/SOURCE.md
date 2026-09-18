@@ -42,3 +42,11 @@ At recording time the host's desired state (`lib/arr-einstellungen.nix`,
   2026-09-17 around 18:00 CEST from the running service in `lidarr-01`, the same way
   as the files above (the key travelled in a 0600 curl configuration, not in
   `argv`). The answer holds no secret; it is verbatim.
+
+- `config-indexer.json` — `GET .../config/indexer` and `delayprofile.json` —
+  `GET .../delayprofile`, both recorded 2026-09-18 from the running service.
+  Filtered **on the host** through a `jq` that passes only the fields named in
+  the OpenAPI component, so nothing unexpected could travel: every value is a
+  number, a boolean, an empty string or an empty list -- these documents hold
+  no secret. `preferredProtocol` was already `usenet` at recording time, the
+  factory default; both delays were `0`.

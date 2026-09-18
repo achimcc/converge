@@ -365,12 +365,21 @@ fn reconcile_one(
             let task = bindery::OidcProviders { entries: targets };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::DelayProfiles(set) => {
+            let task = servarr::DelayProfiles {
+                api: servarr_api(&spec).map_err(fail)?,
+                set: set.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
         Desired::Naming(set)
         | Desired::MediaManagement(set)
-        | Desired::DownloadClientConfig(set) => {
+        | Desired::DownloadClientConfig(set)
+        | Desired::IndexerConfig(set) => {
             let kind = match spec.desired {
                 Desired::Naming(_) => servarr::Kind::Naming,
                 Desired::MediaManagement(_) => servarr::Kind::MediaManagement,
+                Desired::IndexerConfig(_) => servarr::Kind::IndexerConfig,
                 _ => servarr::Kind::DownloadClientConfig,
             };
             let task = servarr::Document {
@@ -653,6 +662,17 @@ fn schema_check(args: &[String]) -> ExitCode {
             | Desired::SeerrWebhook(_) => (Vec::new(), 0),
             Desired::Naming(set) => (
                 schema::check_paths(&document, servarr::NAMING, set),
+                set.len(),
+            ),
+            Desired::IndexerConfig(set) => (
+                schema::check_paths(&document, servarr::INDEXER_CONFIG, set),
+                set.len(),
+            ),
+            // The fields are checked against the component; WHICH profile is
+            // meant the task decides itself (the one without tags), so there
+            // is nothing about that for a schema to say.
+            Desired::DelayProfiles(set) => (
+                schema::check_paths(&document, servarr::DELAY_PROFILE, set),
                 set.len(),
             ),
             // The `fields` entries depend on the implementation and have no

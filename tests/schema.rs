@@ -24,6 +24,71 @@ fn the_deployed_versions_match() {
     assert_eq!(findings(&doc("sonarr-4.0.19.2979")), Vec::<String>::new());
 }
 
+/// The two documents added in v0.19.0: their field paths are checked against
+/// the OpenAPI of the deployed version, and a renamed field is found.
+#[test]
+fn the_indexer_config_and_delay_profile_fields_are_checked_against_the_openapi() {
+    use converge::{schema::check_paths, services::servarr};
+    let gewuenscht = |felder: &[(&str, Value)]| -> std::collections::BTreeMap<String, Value> {
+        felder
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), v.clone()))
+            .collect()
+    };
+    for version in [
+        "radarr-6.3.0.10514",
+        "sonarr-4.0.19.2979",
+        "lidarr-3.1.0.4875",
+    ] {
+        let d = doc(version);
+        assert_eq!(
+            check_paths(
+                &d,
+                servarr::INDEXER_CONFIG,
+                &gewuenscht(&[
+                    ("minimumAge", 0.into()),
+                    ("retention", 0.into()),
+                    ("maximumSize", 0.into()),
+                    ("rssSyncInterval", 15.into()),
+                ])
+            ),
+            Vec::<String>::new(),
+            "{version}"
+        );
+        assert_eq!(
+            check_paths(
+                &d,
+                servarr::DELAY_PROFILE,
+                &gewuenscht(&[
+                    ("preferredProtocol", "usenet".into()),
+                    ("usenetDelay", 0.into()),
+                    ("torrentDelay", 30.into()),
+                    ("enableUsenet", true.into()),
+                    ("enableTorrent", true.into()),
+                    ("bypassIfHighestQuality", true.into()),
+                ])
+            ),
+            Vec::<String>::new(),
+            "{version}"
+        );
+    }
+
+    // A renamed field is found, in both components.
+    let mut d = doc("radarr-6.3.0.10514");
+    let props = properties(&mut d, "DelayProfileResource");
+    let v = props.remove("torrentDelay").unwrap();
+    props.insert("torrentDelayMinutes".to_string(), v);
+    assert_eq!(
+        check_paths(
+            &d,
+            servarr::DELAY_PROFILE,
+            &gewuenscht(&[("torrentDelay", 30.into())])
+        )
+        .len(),
+        1
+    );
+}
+
 #[test]
 fn a_renamed_property_is_found() {
     let mut d = doc("radarr-6.3.0.10514");

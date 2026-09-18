@@ -1346,6 +1346,51 @@ Before release, `plan` ran on the host against the running bindery with the
 spec it deploys: `unchanged`, with the note `left alone, not a torznab
 indexer: indexer Treasure Maps`.
 
+## 24. The indexer configuration and the default delay profile (v0.19.0, 2026-09-18)
+
+Two documents Radarr, Sonarr and Lidarr all keep, and which nothing in the
+host declared -- so the factory default decided.
+
+| task | read | write |
+|---|---|---|
+| `indexer-config` | `GET .../config/indexer` | `PUT .../config/indexer/{id}` |
+| `delay-profiles` | `GET .../delayprofile` | `PUT .../delayprofile/{id}` |
+
+`indexer-config` is a `Document` like `naming` and `download-client-config`:
+one object with an id, read it, change the named fields, `PUT` it back whole.
+Only Radarr carries `preferIndexerFlags`, `availabilityDelay`,
+`allowHardcodedSubs` and `whitelistedHardcodedSubs` (measured 2026-09-18 on all
+three), so a spec naming one of them belongs to Radarr alone -- and a field the
+answer does not carry is an error, never an addition (§3).
+
+### The delay profile is a list of which exactly one entry is meant
+
+A delay profile decides whether a torrent or a usenet release is taken and how
+long the other one is waited for. The **default** profile is the one **without
+tags**: everything falls back to it, and a tagged profile belongs to whoever
+set that tag.
+
+So the task finds its entry by that property rather than by an id -- ids are
+database rows, and a rebuilt instance hands out different ones. No profile
+without tags is an error, and more than one is too; a tagged profile is left
+alone and named in the run. `tags` and `order` cannot be set by a spec: they
+say *which* profile is meant, and the task answers that itself.
+
+```json
+{ "service": "radarr", "task": "delay-profiles", "…": "…",
+  "desired": { "preferredProtocol": "usenet", "usenetDelay": 0, "torrentDelay": 30 } }
+```
+
+### Declaring a value that already matches is the point, not a waste
+
+At recording time all three services had `preferredProtocol: "usenet"` and both
+delays at `0` -- the factory default, which nobody had chosen. **"Not set" is no
+statement about behaviour**: the host learned that on 2026-09-10, when a check
+demanded the *absence* of Ghostfolio's `ENABLE_FEATURE_AUTH_TOKEN` and so
+pinned an open door, because the default was *on*. A declared value that matches
+is a guard; an undeclared one is a coincidence that the next upstream release
+may end.
+
 ## 20. Not in the pilot
 
 

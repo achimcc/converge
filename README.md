@@ -31,6 +31,8 @@ for:
 | Radarr, Sonarr | `quality-profiles` | qualities every profile must allow |
 | Radarr, Sonarr, Lidarr | `naming`, `media-management` | top-level fields of the configuration document |
 | Radarr, Sonarr, Lidarr | `download-client-config` | the same for `config/downloadclient` -- among them the switch every import hangs on |
+| Radarr, Sonarr, Lidarr | `indexer-config` | the same for `config/indexer`: retention, minimum age, maximum size, RSS interval. Only Radarr carries the four extra fields |
+| Radarr, Sonarr, Lidarr | `delay-profiles` | the **default** delay profile -- the one without tags -- by its fields: `preferredProtocol` and the two delays. A tagged profile belongs to whoever set the tag and is left alone; `tags` and `order` cannot be set, they say which profile is meant |
 | Radarr, Sonarr, Lidarr, Prowlarr | `download-clients`, `notifications` | providers by name: top-level fields, `fields` entries by name, secrets from credentials handed over on every `apply` |
 | Prowlarr | `applications` | the same for Prowlarr's links to Radarr, Sonarr and Lidarr |
 | Prowlarr | `indexers`, `indexer-proxies` | the same, added from a named template; tags by label (missing labels are added); secrets the service shows are compared, never printed |

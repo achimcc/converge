@@ -29,6 +29,11 @@ pub struct Api {
     /// nothing else, and their API has no update.
     pub root_folder_update: Option<Endpoint>,
     pub download_client_config_read: Endpoint,
+    pub indexer_config_read: Endpoint,
+    pub indexer_config_write: Endpoint,
+    /// The whole list; the default profile is the one without tags.
+    pub delay_profiles: Endpoint,
+    pub delay_profile_write: Endpoint,
     pub download_client_config_write: Endpoint,
     /// Lidarr only: a root folder names default profiles by id.
     pub quality_profiles: Option<Endpoint>,
@@ -39,6 +44,8 @@ pub const NAMING: &str = "NamingConfigResource";
 pub const MEDIA_MANAGEMENT: &str = "MediaManagementConfigResource";
 pub const ROOT_FOLDER: &str = "RootFolderResource";
 pub const DOWNLOAD_CLIENT_CONFIG: &str = "DownloadClientConfigResource";
+pub const INDEXER_CONFIG: &str = "IndexerConfigResource";
+pub const DELAY_PROFILE: &str = "DelayProfileResource";
 
 macro_rules! api {
     ($v:literal, $lidarr:expr) => {
@@ -95,6 +102,30 @@ macro_rules! api {
                 method: "PUT",
                 path: concat!("/api/", $v, "/config/downloadclient/{id}"),
                 request: Some(Shape::Document(DOWNLOAD_CLIENT_CONFIG)),
+                response: None,
+            },
+            indexer_config_read: Endpoint {
+                method: "GET",
+                path: concat!("/api/", $v, "/config/indexer"),
+                request: None,
+                response: Some(Shape::Document(INDEXER_CONFIG)),
+            },
+            indexer_config_write: Endpoint {
+                method: "PUT",
+                path: concat!("/api/", $v, "/config/indexer/{id}"),
+                request: Some(Shape::Document(INDEXER_CONFIG)),
+                response: None,
+            },
+            delay_profiles: Endpoint {
+                method: "GET",
+                path: concat!("/api/", $v, "/delayprofile"),
+                request: None,
+                response: Some(Shape::Documents(DELAY_PROFILE)),
+            },
+            delay_profile_write: Endpoint {
+                method: "PUT",
+                path: concat!("/api/", $v, "/delayprofile/{id}"),
+                request: Some(Shape::Document(DELAY_PROFILE)),
                 response: None,
             },
             root_folder_update: if $lidarr {
@@ -293,6 +324,8 @@ pub enum Kind {
     /// `config/downloadclient`: whether the service imports what a client
     /// finished at all. Off, nothing is imported and nothing says so.
     DownloadClientConfig,
+    /// `config/indexer`: retention, minimum age, maximum size, RSS interval.
+    IndexerConfig,
 }
 
 /// A configuration document the service keeps as one object with an id:
@@ -317,7 +350,134 @@ impl Document {
                 self.api.download_client_config_write,
                 DOWNLOAD_CLIENT_CONFIG,
             ),
+            Kind::IndexerConfig => (
+                self.api.indexer_config_read,
+                self.api.indexer_config_write,
+                INDEXER_CONFIG,
+            ),
         }
+    }
+}
+
+/// The **default** delay profile: the one without tags, which every item
+/// falls back to. Found by that property and not by an id -- ids are database
+/// rows, and a rebuilt instance hands out different ones.
+///
+/// Why this is its own task rather than another `Document`: the answer is a
+/// *list*, and only one of its entries is the one meant here. A profile with
+/// tags belongs to whoever set the tag; converge leaves it alone and says so.
+///
+/// Why declaring it matters even where the value already matches: the factory
+/// default is what decides otherwise, and "not set" is no statement about
+/// behaviour -- the lesson Ghostfolio's `ENABLE_FEATURE_AUTH_TOKEN` taught the
+/// host on 2026-09-10, where a check demanded the *absence* of a setting and
+/// so pinned an open door.
+pub struct DelayProfiles {
+    pub api: &'static Api,
+    pub set: BTreeMap<String, Value>,
+}
+
+impl DelayProfiles {
+    const SUBJECT: &'static str = "delay profile";
+
+    /// The one entry without tags, or an error naming which of the two cases
+    /// it is -- none, or more than one.
+    fn default_of(entries: &[Map<String, Value>]) -> Result<&Map<String, Value>, Error> {
+        let untagged: Vec<&Map<String, Value>> = entries
+            .iter()
+            .filter(|e| {
+                e.get("tags")
+                    .and_then(Value::as_array)
+                    .is_some_and(|t| t.is_empty())
+            })
+            .collect();
+        match untagged.len() {
+            1 => Ok(untagged[0]),
+            0 => Err(Error::NotFound(vec![
+                "no delay profile without tags -- the default one is missing".to_string(),
+            ])),
+            n => Err(Error::Mismatch(vec![format!(
+                "{n} delay profiles have no tags; exactly one is the default"
+            )])),
+        }
+    }
+}
+
+impl Task for DelayProfiles {
+    type Current = Vec<Map<String, Value>>;
+
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        probe(t, self.api)
+    }
+
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        let path = self.api.delay_profiles.path;
+        let reply = t.get(path)?;
+        expect_status(&self.api.delay_profiles, &reply, &[200])?;
+        let entries: Vec<Map<String, Value>> = serde_json::from_value(decode(path, &reply.body)?)
+            .map_err(|e| Error::Decode {
+            path: path.to_string(),
+            reason: e.to_string(),
+        })?;
+        if entries.is_empty() {
+            return Err(Error::EmptyList {
+                path: path.to_string(),
+            });
+        }
+        Ok(entries)
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        let entry = Self::default_of(current)?;
+        let mut missing = Vec::new();
+        let changes = compare(Self::SUBJECT, entry, &self.set, &mut missing);
+        if missing.is_empty() {
+            Ok(changes)
+        } else {
+            Err(Error::MissingField(missing))
+        }
+    }
+
+    /// Every profile this task leaves alone, so that is a line in the run
+    /// rather than something to infer.
+    fn notes(&self, current: &Self::Current) -> Vec<String> {
+        current
+            .iter()
+            .filter(|e| {
+                e.get("tags")
+                    .and_then(Value::as_array)
+                    .is_some_and(|t| !t.is_empty())
+            })
+            .filter_map(|e| e.get("id").and_then(Value::as_i64))
+            .map(|id| format!("left alone, it has tags: delay profile {id}"))
+            .collect()
+    }
+
+    /// The row goes back whole to its own id: the service replaces it.
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        let entry = Self::default_of(current)?;
+        let id = id_of(entry, self.api.delay_profiles.path)?;
+        let path = self
+            .api
+            .delay_profile_write
+            .path
+            .replace("{id}", &id.to_string());
+        let mut updated = entry.clone();
+        for (field, value) in &self.set {
+            updated.insert(field.clone(), value.clone());
+        }
+        let body = serialize(
+            self.api.delay_profile_write.method,
+            &path,
+            &Value::Object(updated),
+        )?;
+        let reply = t.put_json(&path, &body)?;
+        expect_status_at(
+            self.api.delay_profile_write.method,
+            &path,
+            &reply,
+            &[200, 202],
+        )
     }
 }
 
@@ -618,6 +778,14 @@ mod tests {
         include_str!("../../tests/fixtures/sonarr-4.0.19.2979/config-downloadclient.json");
     const LIDARR_DLC: &str =
         include_str!("../../tests/fixtures/lidarr-3.1.0.4875/config-downloadclient.json");
+    const RADARR_IDXCFG: &str =
+        include_str!("../../tests/fixtures/radarr-6.3.0.10514/config-indexer.json");
+    const SONARR_IDXCFG: &str =
+        include_str!("../../tests/fixtures/sonarr-4.0.19.2979/config-indexer.json");
+    const LIDARR_IDXCFG: &str =
+        include_str!("../../tests/fixtures/lidarr-3.1.0.4875/config-indexer.json");
+    const RADARR_DELAY: &str =
+        include_str!("../../tests/fixtures/radarr-6.3.0.10514/delayprofile.json");
     const LIDARR_STATUS: &str =
         include_str!("../../tests/fixtures/lidarr-3.1.0.4875/system-status.json");
     const LIDARR_MM: &str =
@@ -993,5 +1161,112 @@ mod tests {
                 "MetadataProfileResource"
             ]
         );
+    }
+
+    /// `config/indexer` is a document like the others. Only Radarr carries the
+    /// four extra fields (measured 2026-09-18), so a spec naming one of them
+    /// belongs to Radarr alone.
+    #[test]
+    fn the_indexer_config_is_a_document_like_the_others() {
+        for (api, body, name) in [
+            (&V3, RADARR_IDXCFG, "radarr"),
+            (&V3, SONARR_IDXCFG, "sonarr"),
+            (&V1, LIDARR_IDXCFG, "lidarr"),
+        ] {
+            let task = document(
+                api,
+                Kind::IndexerConfig,
+                json!({"minimumAge": 0, "retention": 0, "maximumSize": 0}),
+            );
+            let t = FakeTransport::default().on_get(api.indexer_config_read.path, vec![ok(body)]);
+            let current = task.read(&t).unwrap();
+            assert_eq!(task.diff(&current).unwrap(), vec![], "{name}");
+        }
+
+        // Sonarr has no `availabilityDelay`; naming it is an error, not an
+        // addition.
+        let task = document(&V3, Kind::IndexerConfig, json!({"availabilityDelay": 0}));
+        let t =
+            FakeTransport::default().on_get(V3.indexer_config_read.path, vec![ok(SONARR_IDXCFG)]);
+        let current = task.read(&t).unwrap();
+        assert!(task.diff(&current).is_err());
+    }
+
+    fn delay(set: Value) -> DelayProfiles {
+        DelayProfiles {
+            api: &V3,
+            set: set.as_object().unwrap().clone().into_iter().collect(),
+        }
+    }
+
+    /// The host's profile already prefers usenet -- the factory default -- so
+    /// declaring it is `unchanged`. Saying it out loud is the point: "not set"
+    /// is no statement about behaviour (Ghostfolio, 2026-09-10).
+    #[test]
+    fn the_default_delay_profile_is_found_by_its_empty_tags() {
+        let task = delay(json!({"preferredProtocol": "usenet", "usenetDelay": 0}));
+        let t = FakeTransport::default().on_get(V3.delay_profiles.path, vec![ok(RADARR_DELAY)]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+    }
+
+    /// A changed delay is one change, and the write carries the whole row back
+    /// to its own id.
+    #[test]
+    fn a_torrent_delay_is_written_to_the_profiles_own_id() {
+        let task = delay(json!({"torrentDelay": 30}));
+        let delayed = {
+            let mut v: Value = serde_json::from_str(RADARR_DELAY).unwrap();
+            v[0]["torrentDelay"] = 30.into();
+            v.to_string()
+        };
+        let t = FakeTransport::default()
+            .on_get(V3.status.path, vec![ok(RADARR_STATUS)])
+            .on_get(V3.delay_profiles.path, vec![ok(RADARR_DELAY), ok(&delayed)])
+            .on_put(vec![Step::Answer(202, String::new())]);
+        let report = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        match report.outcome {
+            Outcome::Changed(changes) => assert_eq!(
+                changes[0].to_string(),
+                "delay profile: torrentDelay 0 -> 30"
+            ),
+            other => panic!("expected Changed, got {other:?}"),
+        }
+        let written = t.written.borrow();
+        assert_eq!(written[0].0, "/api/v3/delayprofile/1");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(sent["torrentDelay"], 30);
+        // The row goes back whole: the service replaces it.
+        assert_eq!(sent["preferredProtocol"], "usenet");
+        assert_eq!(sent["id"], 1);
+    }
+
+    /// A tagged profile is not the default one, and a list without a default
+    /// is an error rather than a silent nothing.
+    #[test]
+    fn a_tagged_profile_is_not_the_default_and_its_absence_is_an_error() {
+        let tagged = {
+            let mut v: Value = serde_json::from_str(RADARR_DELAY).unwrap();
+            v[0]["tags"] = json!([3]);
+            v.to_string()
+        };
+        let task = delay(json!({"torrentDelay": 30}));
+        let t = FakeTransport::default().on_get(V3.delay_profiles.path, vec![ok(&tagged)]);
+        let current = task.read(&t).unwrap();
+        let reason = task.diff(&current).unwrap_err().to_string();
+        assert!(reason.contains("no delay profile without tags"), "{reason}");
+    }
+
+    /// A field the answer does not carry is an error, never an addition.
+    #[test]
+    fn an_unknown_delay_field_is_an_error() {
+        let task = delay(json!({"gibtsnicht": 1}));
+        let t = FakeTransport::default().on_get(V3.delay_profiles.path, vec![ok(RADARR_DELAY)]);
+        let current = task.read(&t).unwrap();
+        assert!(task
+            .diff(&current)
+            .unwrap_err()
+            .to_string()
+            .contains("gibtsnicht"));
     }
 }

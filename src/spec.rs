@@ -102,6 +102,8 @@ enum TaskName {
     Naming,
     MediaManagement,
     DownloadClientConfig,
+    IndexerConfig,
+    DelayProfiles,
     RootFolders,
     DownloadClients,
     Notifications,
@@ -131,9 +133,11 @@ impl TaskName {
             | TaskName::NamedConfiguration => service == Service::Jellyfin,
             TaskName::Connections | TaskName::TrailerProfiles => service == Service::Trailarr,
             TaskName::AccountSubscriptions => service == Service::Ntfy,
-            TaskName::Naming | TaskName::MediaManagement | TaskName::DownloadClientConfig => {
-                service.is_servarr()
-            }
+            TaskName::Naming
+            | TaskName::MediaManagement
+            | TaskName::DownloadClientConfig
+            | TaskName::IndexerConfig
+            | TaskName::DelayProfiles => service.is_servarr(),
             TaskName::RootFolders => service.is_servarr() || service == Service::Bindery,
             TaskName::DownloadClients => {
                 service.is_servarr() || service == Service::Prowlarr || service == Service::Bindery
@@ -561,6 +565,8 @@ pub enum Desired {
     Naming(BTreeMap<String, serde_json::Value>),
     MediaManagement(BTreeMap<String, serde_json::Value>),
     DownloadClientConfig(BTreeMap<String, serde_json::Value>),
+    IndexerConfig(BTreeMap<String, serde_json::Value>),
+    DelayProfiles(BTreeMap<String, serde_json::Value>),
     RootFolders(RootFolderSettings),
     DownloadClients(ProviderSettings),
     Notifications(ProviderSettings),
@@ -1359,14 +1365,26 @@ impl Spec {
                     .map_err(invalid)?;
                 Desired::AccountSubscriptions(desired)
             }
-            TaskName::Naming | TaskName::MediaManagement | TaskName::DownloadClientConfig => {
+            TaskName::Naming
+            | TaskName::MediaManagement
+            | TaskName::DownloadClientConfig
+            | TaskName::IndexerConfig
+            | TaskName::DelayProfiles => {
                 let map: BTreeMap<String, serde_json::Value> = serde_json::from_value(raw.desired)
                     .map_err(|e| invalid(format!("desired: {e}")))?;
-                // The id addresses the document; it is the service's.
-                plain_fields(&map, "desired", &["id"]).map_err(invalid)?;
+                // The id addresses the document; it is the service's. `tags`
+                // and `order` say WHICH delay profile is meant, and the task
+                // answers that itself -- the one without tags.
+                let own: &[&str] = match raw.task {
+                    TaskName::DelayProfiles => &["id", "tags", "order"],
+                    _ => &["id"],
+                };
+                plain_fields(&map, "desired", own).map_err(invalid)?;
                 match raw.task {
                     TaskName::Naming => Desired::Naming(map),
                     TaskName::MediaManagement => Desired::MediaManagement(map),
+                    TaskName::IndexerConfig => Desired::IndexerConfig(map),
+                    TaskName::DelayProfiles => Desired::DelayProfiles(map),
                     _ => Desired::DownloadClientConfig(map),
                 }
             }
@@ -1522,6 +1540,8 @@ impl Spec {
             Desired::Naming(_) => "naming",
             Desired::MediaManagement(_) => "media-management",
             Desired::DownloadClientConfig(_) => "download-client-config",
+            Desired::IndexerConfig(_) => "indexer-config",
+            Desired::DelayProfiles(_) => "delay-profiles",
             Desired::RootFolders(_) => "root-folders",
             Desired::DownloadClients(_) => "download-clients",
             Desired::Notifications(_) => "notifications",
