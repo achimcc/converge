@@ -13,6 +13,8 @@ pub trait Transport {
     fn get(&self, path: &str) -> Result<Reply, Error>;
     fn put_json(&self, path: &str, body: &str) -> Result<Reply, Error>;
     fn post_json(&self, path: &str, body: &str) -> Result<Reply, Error>;
+    /// Audiobookshelf's settings take a partial body (design §27).
+    fn patch_json(&self, path: &str, body: &str) -> Result<Reply, Error>;
 }
 
 pub struct HttpTransport {
@@ -119,6 +121,14 @@ impl Transport for HttpTransport {
             .content_type("application/json")
             .send(body);
         Self::finish("POST", path, result)
+    }
+
+    fn patch_json(&self, path: &str, body: &str) -> Result<Reply, Error> {
+        let result = self
+            .headers(self.agent.patch(format!("{}{path}", self.base_url)))
+            .content_type("application/json")
+            .send(body);
+        Self::finish("PATCH", path, result)
     }
 }
 

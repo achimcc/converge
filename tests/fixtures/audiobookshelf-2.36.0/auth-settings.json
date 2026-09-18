@@ -1,0 +1,29 @@
+{
+  "authActiveAuthMethods": [
+    "openid"
+  ],
+  "authLoginCustomMessage": null,
+  "authOpenIDAdvancedPermsClaim": "",
+  "authOpenIDAuthorizationURL": "https://auth.rusty-vault.de/application/o/authorize/",
+  "authOpenIDAutoLaunch": true,
+  "authOpenIDAutoRegister": true,
+  "authOpenIDButtonText": "Mit Authentik anmelden",
+  "authOpenIDClientID": "<masked>",
+  "authOpenIDClientSecret": "<masked>",
+  "authOpenIDGroupClaim": "abs_roles",
+  "authOpenIDIssuerURL": "https://auth.rusty-vault.de/application/o/audiobookshelf/",
+  "authOpenIDJwksURL": "https://auth.rusty-vault.de/application/o/audiobookshelf/jwks/",
+  "authOpenIDLogoutURL": "https://auth.rusty-vault.de/application/o/audiobookshelf/end-session/",
+  "authOpenIDMatchExistingBy": null,
+  "authOpenIDMobileRedirectURIs": [
+    "audiobookshelf://oauth",
+    "shelfplayer://callback",
+    "lissen://oauth",
+    "storii://oauth"
+  ],
+  "authOpenIDSamplePermissions": "{\n  \"canDownload\": false,\n  \"canUpload\": false,\n  \"canDelete\": false,\n  \"canUpdate\": false,\n  \"canAccessExplicitContent\": false,\n  \"canAccessAllLibraries\": false,\n  \"canAccessAllTags\": false,\n  \"canCreateEReader\": false,\n  \"tagsAreDenylist\": false,\n  \"allowedLibraries\": [\n    \"5406ba8a-16e1-451d-96d7-4931b0a0d966\",\n    \"918fd848-7c1d-4a02-818a-847435a879ca\"\n  ],\n  \"allowedTags\": [\n    \"ExampleTag\",\n    \"AnotherTag\",\n    \"ThirdTag\"\n  ]\n}",
+  "authOpenIDSubfolderForRedirectURLs": "",
+  "authOpenIDTokenSigningAlgorithm": "RS256",
+  "authOpenIDTokenURL": "https://auth.rusty-vault.de/application/o/token/",
+  "authOpenIDUserInfoURL": "https://auth.rusty-vault.de/application/o/userinfo/"
+}

@@ -1489,6 +1489,46 @@ the side navigation, in its search field, and in OPDS. It goes stale only when
 a library is renamed. The task does not touch it: the streams belong to each
 user, and there is no administrator's endpoint that writes another user's.
 
+## 27. Audiobookshelf: its authentication settings (v0.22.0, 2026-09-18)
+
+The host wrote the OIDC settings into `settings.server-settings` with
+`sqlite3`, in a unit *required* by the service and run before every start,
+without even a busy timeout -- a locked database kept Audiobookshelf down. The
+reason: no access. The bootstrap password is thrown away, local login is off,
+and nobody holds an API key.
+
+**No key is needed.** Audiobookshelf accepts any JWT signed with its
+`tokenSecret` that carries a `userId`, is not a refresh token and has not
+expired (`TokenManager.jwtAuthCheck`, `isBearerAccessTokenPayload`) -- API keys
+(`type: 'api'`) are the other branch, the one that needs a database row. The
+host therefore signs an access token for the root account that lives fifteen
+minutes, reading the secret from the database it already has; nothing is
+written. converge sends it as `Authorization: Bearer`.
+
+| task | read | write |
+|---|---|---|
+| `auth-settings` | `GET /api/auth-settings` | `PATCH /api/auth-settings`, only the keys that differ |
+
+`PATCH` is applied key by key, and the running process switches auth
+strategies on and off at once (`MiscController.updateAuthSettings`) -- no
+restart. The probe is `/status`: no token, a version once a root account
+exists. An administrator's token is checked at the first read (403 otherwise).
+
+**The client secret is in the answer, in clear text.** It comes from a
+credential (`secret_fields`), is compared without being shown, and travels
+only when it differs. A spec cannot name it in `set`, nor
+`authOpenIDSamplePermissions`, which Audiobookshelf derives.
+
+**`""` is `null`.** Audiobookshelf stores an empty string as `null` on a write
+and compares a stored `""` as `null` -- for every key but
+`authOpenIDSubfolderForRedirectURLs`. The recorded answer holds
+`authOpenIDAdvancedPermsClaim: ""`; a spec saying `null` would differ forever
+while Audiobookshelf reported nothing to update. converge compares by the same
+rule, and `authActiveAuthMethods` sorted, as Audiobookshelf does.
+
+Audiobookshelf publishes no OpenAPI description; the specs are validated, the
+field names checked at runtime and against the recorded answer.
+
 ## 20. Not in the pilot
 
 

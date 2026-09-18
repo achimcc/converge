@@ -1,4 +1,5 @@
 pub mod arr;
+pub mod audiobookshelf;
 pub mod bindery;
 pub mod jellyfin;
 pub mod kavita;

@@ -11,7 +11,8 @@ use converge::{
     error::Error,
     schema,
     services::{
-        arr, bindery, jellyfin, kavita, koel, ntfy, providers, seerr, servarr, suggestarr, trailarr,
+        arr, audiobookshelf, bindery, jellyfin, kavita, koel, ntfy, providers, seerr, servarr,
+        suggestarr, trailarr,
     },
     spec::{Desired, Service, Spec},
 };
@@ -20,7 +21,7 @@ const USAGE: &str = "usage:
   converge apply [--deadline <seconds>] <spec.json>...
   converge plan [--deadline <seconds>] <spec.json>...
   converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr|kavita> --openapi <file> [--spec <spec.json>]...
-  converge schema-check --service ntfy|bindery|seerr|koel|suggestarr [--spec <spec.json>]...";
+  converge schema-check --service ntfy|bindery|seerr|koel|suggestarr|audiobookshelf [--spec <spec.json>]...";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -147,6 +148,21 @@ fn reconcile_one(
         Desired::KavitaLibraries(libraries) => {
             let task = kavita::Libraries {
                 libraries: libraries.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        Desired::AudiobookshelfAuthSettings(desired) => {
+            // Every secret before the first request, as for plugin keys.
+            let mut secrets = std::collections::BTreeMap::new();
+            for (field, credential) in &desired.secret_fields {
+                secrets.insert(
+                    field.clone(),
+                    read_credential(credentials, credential).map_err(fail)?,
+                );
+            }
+            let task = audiobookshelf::AuthSettings {
+                set: desired.set.clone(),
+                secrets,
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
@@ -495,7 +511,8 @@ fn servarr_api(spec: &Spec) -> Result<&'static servarr::Api, Error> {
     })
 }
 
-/// ntfy (design §10) and bindery (§14) have no OpenAPI description, Seerr's
+/// ntfy (design §10), bindery (§14) and Audiobookshelf (§27) have no OpenAPI
+/// description, Seerr's
 /// (§17) misnames the fields its answers carry, and Koel's (§18) describes a
 /// version four majors old without radio stations: their specs are loaded
 /// and validated, and that is all a build can check.
@@ -540,7 +557,8 @@ fn schema_check(args: &[String]) -> ExitCode {
             other => return usage(Some(&format!("unexpected argument {other}"))),
         }
     }
-    if let Some(name @ ("ntfy" | "bindery" | "seerr" | "koel" | "suggestarr")) = service.as_deref()
+    if let Some(name @ ("ntfy" | "bindery" | "seerr" | "koel" | "suggestarr" | "audiobookshelf")) =
+        service.as_deref()
     {
         return match openapi {
             Some(_) => usage(Some(&format!(
@@ -683,6 +701,7 @@ fn schema_check(args: &[String]) -> ExitCode {
             // Not reachable: the service check above rejects ntfy, bindery,
             // Seerr, Koel and SuggestArr specs.
             Desired::KoelRadioStations(_)
+            | Desired::AudiobookshelfAuthSettings(_)
             | Desired::SuggestArrConfiguration(_)
             | Desired::AccountSubscriptions(_)
             | Desired::BinderyEntries(..)

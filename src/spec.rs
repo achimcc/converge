@@ -23,6 +23,7 @@ pub enum Service {
     #[serde(rename = "suggestarr")]
     SuggestArr,
     Kavita,
+    Audiobookshelf,
 }
 
 impl Service {
@@ -40,6 +41,7 @@ impl Service {
             Service::Koel => "koel",
             Service::SuggestArr => "suggestarr",
             Service::Kavita => "kavita",
+            Service::Audiobookshelf => "audiobookshelf",
         }
     }
 
@@ -55,7 +57,9 @@ impl Service {
             | Service::Kavita => "X-Api-Key",
             Service::Jellyfin => "X-Emby-Token",
             Service::Trailarr => "X-API-KEY",
-            Service::Ntfy | Service::Koel | Service::SuggestArr => "Authorization",
+            Service::Ntfy | Service::Koel | Service::SuggestArr | Service::Audiobookshelf => {
+                "Authorization"
+            }
         }
     }
 
@@ -64,7 +68,7 @@ impl Service {
     /// login returned (the credential there holds a password, never a key).
     pub fn key_value(self, key: Secret) -> Secret {
         match self {
-            Service::Ntfy | Service::Koel | Service::SuggestArr => {
+            Service::Ntfy | Service::Koel | Service::SuggestArr | Service::Audiobookshelf => {
                 Secret::new(format!("Bearer {}", key.expose()))
             }
             _ => key,
@@ -125,6 +129,7 @@ enum TaskName {
     Configuration,
     ServerSettings,
     Libraries,
+    AuthSettings,
 }
 
 impl TaskName {
@@ -164,6 +169,7 @@ impl TaskName {
             TaskName::RadioStations => service == Service::Koel,
             TaskName::Configuration => service == Service::SuggestArr,
             TaskName::ServerSettings | TaskName::Libraries => service == Service::Kavita,
+            TaskName::AuthSettings => service == Service::Audiobookshelf,
         }
     }
 }
@@ -591,7 +597,22 @@ pub enum Desired {
     SuggestArrConfiguration(SuggestArrConfiguration),
     KavitaServerSettings(BTreeMap<String, serde_json::Value>),
     KavitaLibraries(BTreeMap<String, BTreeMap<String, serde_json::Value>>),
+    AudiobookshelfAuthSettings(AudiobookshelfAuth),
 }
+
+/// Audiobookshelf's authentication settings (design §27): fields by name, and
+/// the OIDC client secret from a credential, compared without being shown.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudiobookshelfAuth {
+    #[serde(default)]
+    pub set: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub secret_fields: BTreeMap<String, String>,
+}
+
+/// The fields of Audiobookshelf's auth settings that hold a secret.
+const ABS_SECRET_FIELDS: [&str; 1] = ["authOpenIDClientSecret"];
 
 fn web_url(url: &str) -> bool {
     url.starts_with("http://") || url.starts_with("https://")
@@ -1252,6 +1273,31 @@ impl Spec {
                 kavita_paths(&map).map_err(invalid)?;
                 Desired::KavitaServerSettings(map)
             }
+            TaskName::AuthSettings => {
+                let desired: AudiobookshelfAuth = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if desired.set.is_empty() && desired.secret_fields.is_empty() {
+                    return Err(invalid("desired names no field".to_string()));
+                }
+                if !desired.set.is_empty() {
+                    // The sample is Audiobookshelf's own text; a secret has
+                    // no place in a spec.
+                    let mut forbidden = vec!["authOpenIDSamplePermissions"];
+                    forbidden.extend(ABS_SECRET_FIELDS);
+                    plain_fields(&desired.set, "desired.set", &forbidden).map_err(invalid)?;
+                }
+                for (field, credential) in &desired.secret_fields {
+                    if !ABS_SECRET_FIELDS.contains(&field.as_str()) {
+                        return Err(invalid(format!(
+                            "desired.secret_fields: {field} is not one of Audiobookshelf's secret fields ({})",
+                            ABS_SECRET_FIELDS.join(", ")
+                        )));
+                    }
+                    credential_name(credential, &format!("desired.secret_fields.{field}"))
+                        .map_err(invalid)?;
+                }
+                Desired::AudiobookshelfAuthSettings(desired)
+            }
             // Kavita's libraries by a folder they hold (design §26).
             TaskName::Libraries => {
                 #[derive(Deserialize)]
@@ -1644,6 +1690,7 @@ impl Spec {
             Desired::SuggestArrConfiguration(_) => "configuration",
             Desired::KavitaServerSettings(_) => "server-settings",
             Desired::KavitaLibraries(_) => "libraries",
+            Desired::AudiobookshelfAuthSettings(_) => "auth-settings",
         }
     }
 }
@@ -2165,6 +2212,36 @@ mod tests {
         assert!(reason(lib(r#"{"libraries":{"books":{"type":2}}}"#)).contains("absolute folder"));
         assert!(reason(lib(r#"{"libraries":{}}"#)).contains("names no library"));
         assert!(reason(lib(r#"{"libraries":{"/b":{}}}"#)).contains("names no field"));
+    }
+
+    #[test]
+    fn audiobookshelf_takes_fields_and_its_client_secret_only_from_a_credential() {
+        let abs = |d: &str| {
+            parse(&format!(
+                r#"{{"service":"audiobookshelf","base_url":"http://10.0.90.10:8000","api_key_credential":"t","task":"auth-settings","desired":{d}}}"#
+            ))
+        };
+        let spec = abs(r#"{"set":{"authOpenIDAutoLaunch":true},"secret_fields":{"authOpenIDClientSecret":"abs-oidc"}}"#).unwrap();
+        assert_eq!(spec.task_name(), "auth-settings");
+        assert_eq!(spec.service.key_header(), "Authorization");
+        assert_eq!(
+            spec.service.key_value(Secret::new("t0ken".into())).expose(),
+            "Bearer t0ken"
+        );
+        assert!(reason(abs(r#"{"set":{"authOpenIDClientSecret":"x"}}"#))
+            .contains("is not set this way"));
+        assert!(
+            reason(abs(r#"{"set":{"authOpenIDSamplePermissions":"x"}}"#))
+                .contains("is not set this way")
+        );
+        assert!(
+            reason(abs(r#"{"secret_fields":{"authOpenIDClientID":"c"}}"#)).contains("not one of")
+        );
+        assert!(
+            reason(abs(r#"{"secret_fields":{"authOpenIDClientSecret":"a/b"}}"#))
+                .contains("credential name")
+        );
+        assert!(reason(abs("{}")).contains("names no field"));
     }
 
     #[test]

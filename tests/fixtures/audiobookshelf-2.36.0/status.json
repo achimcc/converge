@@ -1,0 +1,14 @@
+{
+  "app": "audiobookshelf",
+  "authFormData": {
+    "authLoginCustomMessage": "",
+    "authOpenIDAutoLaunch": true,
+    "authOpenIDButtonText": "Mit Authentik anmelden"
+  },
+  "authMethods": [
+    "openid"
+  ],
+  "isInit": true,
+  "language": "en-us",
+  "serverVersion": "2.36.0"
+}

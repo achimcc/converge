@@ -122,4 +122,13 @@ impl Transport for FakeTransport {
         let step = take(Some(&mut *self.puts.borrow_mut()));
         play(step, "POST", path)
     }
+
+    /// The same write queue again.
+    fn patch_json(&self, path: &str, body: &str) -> Result<Reply, Error> {
+        self.written
+            .borrow_mut()
+            .push((path.to_string(), body.to_string()));
+        let step = take(Some(&mut *self.puts.borrow_mut()));
+        play(step, "PATCH", path)
+    }
 }
