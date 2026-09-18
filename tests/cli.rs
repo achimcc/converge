@@ -529,6 +529,55 @@ fn schema_check_passes_the_hosts_trailarr_specs_and_rejects_monitor() {
     }
 }
 
+/// bindery's `indexers` is a list of names, and a spec that would switch
+/// everything off -- an empty list, or a name given twice -- is refused
+/// before the service is ever called (design §23).
+#[test]
+fn the_bindery_indexer_switch_takes_a_list_of_names_and_refuses_an_empty_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let spec = |file: &str, desired: &str| {
+        let path = dir.path().join(file);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"service":"bindery","base_url":"http://127.0.0.1:8787","api_key_credential":"bindery-api-key","task":"indexers","desired":{desired}}}"#
+            ),
+        )
+        .unwrap();
+        path
+    };
+    let good = spec(
+        "good.json",
+        r#"{"enabled":["MyAnonamouse","AudioBookBay"]}"#,
+    );
+    let out = schema_check("bindery", None, &[&good]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    for (file, desired, needle) in [
+        ("empty.json", r#"{"enabled":[]}"#, "names no indexer"),
+        ("twice.json", r#"{"enabled":["A","A"]}"#, "names A twice"),
+        (
+            "map.json",
+            r#"{"indexers":{"A":{"set":{"enabled":true}}}}"#,
+            "desired",
+        ),
+    ] {
+        let out = schema_check("bindery", None, &[&spec(file, desired)]);
+        assert_eq!(out.status.code(), Some(1), "{file}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(needle),
+            "{file}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
 #[test]
 fn schema_check_for_bindery_validates_its_four_tasks_without_an_openapi_file() {
     let dir = tempfile::tempdir().unwrap();

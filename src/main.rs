@@ -338,6 +338,12 @@ fn reconcile_one(
             let task = bindery::Settings { set: set.clone() };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::BinderyIndexers(names) => {
+            let task = bindery::Indexers {
+                enabled: names.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
         Desired::BinderyOidcProviders(entries) => {
             // As for the other bindery entries: every secret before the first
             // request, so a missing credential fails before anything is read.
@@ -640,6 +646,7 @@ fn schema_check(args: &[String]) -> ExitCode {
             | Desired::BinderyEntries(..)
             | Desired::BinderySettings(_)
             | Desired::BinderyOidcProviders(_)
+            | Desired::BinderyIndexers(_)
             | Desired::SeerrMain(_)
             | Desired::SeerrJellyfin(_)
             | Desired::SeerrServers(..)

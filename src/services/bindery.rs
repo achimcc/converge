@@ -573,6 +573,175 @@ impl Task for OidcProviders {
     }
 }
 
+// --- indexers --------------------------------------------------------------------
+
+/// The indexers Prowlarr syncs into bindery. Reading is the whole list; an
+/// update is `PUT /api/v1/indexer/{id}` and decodes **over the stored row**
+/// (`IndexerHandler.Update`), so a body carrying `enabled` alone leaves every
+/// other field as it is.
+pub const INDEXER_LIST: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/v1/indexer",
+    request: None,
+    response: None,
+};
+
+/// The kind of indexer this task speaks about. bindery's rows have no
+/// `implementation` field -- the kind is `type` (measured 2026-09-18 on the
+/// running service; the host's shell unit read `.implementation // .type` and
+/// its first branch never matched).
+const TORZNAB: &str = "torznab";
+
+/// The only task in this program that writes to an entry the spec does **not**
+/// name, and it is deliberately narrow rather than a general rule (design
+/// §23): the named indexers are on, every **other** `torznab` one is off, and
+/// anything else bindery holds -- a `newznab` row, say -- is left alone.
+///
+/// Saying "on" explicitly matters: before a name was added to the list, this
+/// very task had switched that indexer off, and a spec that only switched
+/// things off would leave it that way and report success.
+///
+/// A name bindery does not hold is an error. Without that, a typo would
+/// silently switch off every torznab source -- the failure this task exists to
+/// prevent, in the shape that looks like success.
+pub struct Indexers {
+    pub enabled: Vec<String>,
+}
+
+impl Indexers {
+    fn subject(name: &str) -> String {
+        format!("indexer {name}")
+    }
+
+    fn name_of(entry: &Map<String, Value>) -> Option<&str> {
+        entry.get("name").and_then(Value::as_str)
+    }
+
+    fn is_torznab(entry: &Map<String, Value>) -> bool {
+        entry.get("type").and_then(Value::as_str) == Some(TORZNAB)
+    }
+
+    /// Whether the spec names this row.
+    fn named(&self, entry: &Map<String, Value>) -> bool {
+        Self::name_of(entry).is_some_and(|n| self.enabled.iter().any(|d| d == n))
+    }
+
+    /// What `enabled` must become for this row, or `None` where the task says
+    /// nothing about it.
+    fn wanted(&self, entry: &Map<String, Value>) -> Option<bool> {
+        if self.named(entry) {
+            Some(true)
+        } else if Self::is_torznab(entry) {
+            Some(false)
+        } else {
+            None
+        }
+    }
+}
+
+impl Task for Indexers {
+    type Current = Vec<Map<String, Value>>;
+
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        probe(t)
+    }
+
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        let path = INDEXER_LIST.path;
+        let reply = t.get(path)?;
+        expect_status_at("GET", path, &reply, &[200])?;
+        let entries: Vec<Map<String, Value>> = serde_json::from_value(decode(path, &reply.body)?)
+            .map_err(|e| Error::Decode {
+            path: path.to_string(),
+            reason: e.to_string(),
+        })?;
+        if let Some(index) = entries.iter().position(|e| Self::name_of(e).is_none()) {
+            return Err(Error::MissingName {
+                path: path.to_string(),
+                index,
+            });
+        }
+        Ok(entries)
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        if current.is_empty() {
+            return Err(Error::EmptyList {
+                path: INDEXER_LIST.path.to_string(),
+            });
+        }
+        let unknown: Vec<String> = self
+            .enabled
+            .iter()
+            .filter(|name| {
+                !current
+                    .iter()
+                    .any(|e| Self::name_of(e) == Some(name.as_str()))
+            })
+            .map(|name| Self::subject(name))
+            .collect();
+        if !unknown.is_empty() {
+            return Err(Error::NotFound(unknown));
+        }
+        let mut changes = Vec::new();
+        for entry in current {
+            let (Some(name), Some(wanted)) = (Self::name_of(entry), self.wanted(entry)) else {
+                continue;
+            };
+            let is = entry.get("enabled").and_then(Value::as_bool);
+            if is != Some(wanted) {
+                changes.push(Change {
+                    subject: Self::subject(name),
+                    field: "enabled".to_string(),
+                    current: is.map_or_else(|| "(missing)".to_string(), |b| b.to_string()),
+                    desired: wanted.to_string(),
+                });
+            }
+        }
+        Ok(changes)
+    }
+
+    /// The rows this task says nothing about, so that "left alone" is a line
+    /// in the run and not an omission someone has to infer.
+    fn notes(&self, current: &Self::Current) -> Vec<String> {
+        current
+            .iter()
+            .filter(|e| self.wanted(e).is_none())
+            .filter_map(Self::name_of)
+            .map(|name| format!("left alone, not a torznab indexer: {}", Self::subject(name)))
+            .collect()
+    }
+
+    /// Only the rows that differ, and each with `enabled` alone in the body.
+    ///
+    /// **Every `PUT` here has a price beyond the field it sets:** bindery's
+    /// update puts `seedRatioSource` on `user`, and its Prowlarr syncer then
+    /// never touches that row's seed-ratio override again
+    /// (`applyProwlarrSeedRatio`, bindery #1065). Writing only on a difference
+    /// is therefore not a nicety. The host's shell unit wrote every row on
+    /// every guest start; on 2026-09-18 five of its six indexers stood on
+    /// `user` because of it.
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        for entry in current {
+            let (Some(id), Some(wanted)) =
+                (entry.get("id").and_then(Value::as_i64), self.wanted(entry))
+            else {
+                continue;
+            };
+            if entry.get("enabled").and_then(Value::as_bool) == Some(wanted) {
+                continue;
+            }
+            let path = format!("{}/{id}", INDEXER_LIST.path);
+            let mut body = Map::new();
+            body.insert("enabled".to_string(), Value::Bool(wanted));
+            let text = text_of("PUT", &path, &body)?;
+            let reply = t.put_json(&path, &text)?;
+            expect_status_at("PUT", &path, &reply, &[200])?;
+        }
+        Ok(())
+    }
+}
+
 // --- settings --------------------------------------------------------------------
 
 /// Settings by key: `GET /api/v1/setting/{key}` answers `{key, value}`, and
@@ -664,6 +833,7 @@ mod tests {
     const CLIENTS: &str = include_str!("../../tests/fixtures/bindery-1.33.2/downloadclient.json");
     const PROWLARR: &str = include_str!("../../tests/fixtures/bindery-1.33.2/prowlarr.json");
     const OIDC: &str = include_str!("../../tests/fixtures/bindery-1.33.2/auth-oidc-providers.json");
+    const INDEXERS: &str = include_str!("../../tests/fixtures/bindery-1.33.2/indexers.json");
     const FOLDERS: &str = include_str!("../../tests/fixtures/bindery-1.33.2/rootfolder.json");
     const IMPORT_MODE: &str =
         include_str!("../../tests/fixtures/bindery-1.33.2/setting-import.mode.json");
@@ -1086,5 +1256,107 @@ mod tests {
         let current = task.read(&t).unwrap();
         let reason = task.diff(&current).unwrap_err().to_string();
         assert!(reason.contains("gibtsnicht"), "{reason}");
+    }
+
+    fn indexers(namen: &[&str]) -> Indexers {
+        Indexers {
+            enabled: namen.iter().map(|n| (*n).to_string()).collect(),
+        }
+    }
+
+    /// The recorded answer is already what the host declares: the two named
+    /// indexers are on, the other torznab rows are off. So: `unchanged`, and
+    /// nothing is written -- which matters here, because every `PUT` takes the
+    /// seed-ratio override away from the Prowlarr syncer.
+    #[test]
+    fn the_indexers_of_the_host_are_unchanged_and_nothing_is_written() {
+        let task = indexers(&["MyAnonamouse", "AudioBookBay"]);
+        let t = FakeTransport::default()
+            .on_get(HEALTH.path, vec![ok(HEALTH_OK)])
+            .on_get(INDEXER_LIST.path, vec![ok(INDEXERS), ok(INDEXERS)]);
+        let report = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        assert_eq!(report.outcome, Outcome::Unchanged);
+        assert!(t.written.borrow().is_empty(), "nothing to write");
+    }
+
+    /// A newznab indexer the spec does not name stays as it is: the task says
+    /// something about torznab, not about every indexer bindery holds.
+    #[test]
+    fn a_newznab_indexer_is_not_switched_off() {
+        let task = indexers(&["MyAnonamouse", "AudioBookBay"]);
+        let t = FakeTransport::default().on_get(INDEXER_LIST.path, vec![ok(INDEXERS)]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+        let notes = task.notes(&current);
+        assert!(
+            notes.iter().any(|n| n.contains("Treasure Maps")),
+            "the newznab row is named as left alone: {notes:?}"
+        );
+    }
+
+    /// An unnamed torznab indexer is switched off, and only that row is
+    /// written -- with a body that carries `enabled` and nothing else.
+    #[test]
+    fn an_unnamed_torznab_indexer_is_switched_off() {
+        let on = {
+            let mut v: Value = serde_json::from_str(INDEXERS).unwrap();
+            v[0]["enabled"] = true.into();
+            v.to_string()
+        };
+        let task = indexers(&["MyAnonamouse", "AudioBookBay"]);
+        let t = FakeTransport::default()
+            .on_get(HEALTH.path, vec![ok(HEALTH_OK)])
+            .on_get(INDEXER_LIST.path, vec![ok(&on), ok(INDEXERS)])
+            .on_put(vec![Step::Answer(200, String::new())]);
+        let report = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        match report.outcome {
+            Outcome::Changed(changes) => assert_eq!(
+                changes[0].to_string(),
+                "indexer Karagarga: enabled true -> false"
+            ),
+            other => panic!("expected Changed, got {other:?}"),
+        }
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1, "only the row that differs");
+        assert_eq!(written[0].0, "/api/v1/indexer/1");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(sent, json!({"enabled": false}));
+    }
+
+    /// A named indexer that is off is switched on. Saying it explicitly is the
+    /// point: this very task switched it off before it was named.
+    #[test]
+    fn a_named_indexer_that_is_off_is_switched_on() {
+        let task = indexers(&["Karagarga"]);
+        let t = FakeTransport::default().on_get(INDEXER_LIST.path, vec![ok(INDEXERS)]);
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        assert!(
+            changes
+                .iter()
+                .any(|c| c.to_string() == "indexer Karagarga: enabled false -> true"),
+            "{changes:?}"
+        );
+    }
+
+    /// A name bindery does not hold is an error, not an empty selection: a
+    /// typo would otherwise switch off every torznab source and report
+    /// success.
+    #[test]
+    fn a_name_bindery_does_not_hold_is_an_error() {
+        let task = indexers(&["MyAnonamouse", "Tippfehler"]);
+        let t = FakeTransport::default().on_get(INDEXER_LIST.path, vec![ok(INDEXERS)]);
+        let current = task.read(&t).unwrap();
+        let reason = task.diff(&current).unwrap_err().to_string();
+        assert!(reason.contains("Tippfehler"), "{reason}");
+    }
+
+    /// An empty answer is an error, not "nothing to do" (CLAUDE.md).
+    #[test]
+    fn an_empty_indexer_list_is_an_error() {
+        let task = indexers(&["MyAnonamouse"]);
+        let t = FakeTransport::default().on_get(INDEXER_LIST.path, vec![ok("[]")]);
+        let current = task.read(&t).unwrap();
+        assert!(task.diff(&current).is_err());
     }
 }

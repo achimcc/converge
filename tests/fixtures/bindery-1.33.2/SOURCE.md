@@ -26,3 +26,16 @@ At recording time the host's desired state matched: `plan` reported
   `auth.example.org`; everything else is verbatim. The answer carries **no**
   `client_secret`: it is write-only (`ProviderPublicConfig`), which is why a
   spec hands it over on every apply, as for the other write-only fields (§14).
+
+- `indexers.json` — `GET /api/v1/indexer`, recorded 2026-09-18 from the running
+  bindery. The indexers are the ones Prowlarr syncs into it. Names, types,
+  categories, flags and ids are verbatim; every `url` is replaced by the
+  Prowlarr instance's address plus the row's id, because a tracker's URL can
+  carry a passkey. `apiKey` is `""` in the answer already (write-only), and the
+  timestamps are rounded. The masking ran **on the host**, so no tracker URL
+  ever left the machine.
+
+  Two things this answer settles, both of which the host had guessed wrong:
+  there is **no `implementation` field** — the kind is `type` (`torznab` /
+  `newznab`) — and five of the six rows carry `seedRatioSource: "user"`, put
+  there by the host's shell unit, which `PUT`s every row on every guest start.

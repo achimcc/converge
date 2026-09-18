@@ -45,6 +45,7 @@ for:
 | bindery | `download-clients`, `prowlarr-instances` | entries by name: top-level fields; secrets from credentials handed over on every `apply` in a `PUT` with only the secret (bindery answers them empty) |
 | bindery | `root-folders`, `settings` | root folders by path (added when missing); settings by key |
 | bindery | `oidc-providers` | the providers of bindery's own login, by `id`: fields compared, `client_secret` handed over on every `apply` (write-only); `PUT` replaces the whole list, so a provider the spec does not name travels back untouched |
+| bindery | `indexers` | the switch over the indexers Prowlarr synced in: the named ones on, every **other** `torznab` one off, anything else left alone. The only task that writes to an entry the spec does not name; a name bindery does not hold is an error. Only rows that differ are written -- each `PUT` takes that row's seed-ratio override away from bindery's Prowlarr syncer |
 | ntfy | `account-subscriptions` | subscriptions of an account; the topics are secrets, read from a credential and never printed |
 | Seerr | `main` | top-level fields of the main settings (merged) |
 | Seerr | `jellyfin` | the link to Jellyfin (key from a credential, compared) and the libraries Seerr scans, by name -- exactly these |

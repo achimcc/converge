@@ -142,9 +142,11 @@ impl TaskName {
             TaskName::ProwlarrInstances | TaskName::Settings | TaskName::OidcProviders => {
                 service == Service::Bindery
             }
-            TaskName::Applications | TaskName::Indexers | TaskName::IndexerProxies => {
-                service == Service::Prowlarr
-            }
+            // `indexers` means two different things: Prowlarr's own indexer
+            // providers (§13), and the switch over the ones bindery has synced
+            // from Prowlarr (§23). The arm below tells them apart by service.
+            TaskName::Indexers => service == Service::Prowlarr || service == Service::Bindery,
+            TaskName::Applications | TaskName::IndexerProxies => service == Service::Prowlarr,
             TaskName::Main
             | TaskName::Jellyfin
             | TaskName::RadarrServers
@@ -568,6 +570,7 @@ pub enum Desired {
     BinderyEntries(BinderyKind, BTreeMap<String, BinderyEntry>),
     BinderySettings(BTreeMap<String, serde_json::Value>),
     BinderyOidcProviders(BTreeMap<String, BinderyEntry>),
+    BinderyIndexers(Vec<String>),
     SeerrMain(BTreeMap<String, serde_json::Value>),
     SeerrJellyfin(SeerrJellyfin),
     SeerrServers(SeerrKind, BTreeMap<String, SeerrServer>),
@@ -857,6 +860,34 @@ impl Spec {
                     }
                 }
                 Desired::BinderyEntries(kind, entries)
+            }
+            // bindery's switch over the indexers Prowlarr synced into it
+            // (§23). A list of names, not a map of entries: the task sets one
+            // field, and what it says about the rows it does **not** name is
+            // fixed in the code, not in the spec.
+            TaskName::Indexers if raw.service == Service::Bindery => {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Raw {
+                    enabled: Vec<String>,
+                }
+                let desired: Raw = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if desired.enabled.is_empty() {
+                    return Err(invalid(
+                        "desired.enabled names no indexer -- a task that only switches things off is not this one".to_string(),
+                    ));
+                }
+                let mut seen = std::collections::BTreeSet::new();
+                for name in &desired.enabled {
+                    if name.is_empty() {
+                        return Err(invalid("desired.enabled: a name is empty".to_string()));
+                    }
+                    if !seen.insert(name.as_str()) {
+                        return Err(invalid(format!("desired.enabled names {name} twice")));
+                    }
+                }
+                Desired::BinderyIndexers(desired.enabled)
             }
             // bindery's own login. The entries are keyed by the provider's
             // `id`, and the only write-only field here is `client_secret` —
@@ -1502,6 +1533,7 @@ impl Spec {
             Desired::BinderyEntries(BinderyKind::RootFolders, _) => "root-folders",
             Desired::BinderySettings(_) => "settings",
             Desired::BinderyOidcProviders(_) => "oidc-providers",
+            Desired::BinderyIndexers(_) => "indexers",
             Desired::SeerrMain(_) => "main",
             Desired::SeerrJellyfin(_) => "jellyfin",
             Desired::SeerrServers(SeerrKind::Radarr, _) => "radarr-servers",

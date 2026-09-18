@@ -1292,6 +1292,56 @@ issuer's discovery document and puts the outcome in `status.state`, and an entry
 can stand there while nobody can log in. That is a reading of a *result*, not a
 desired state -- the shell waits for `ok` or `failed` and fails loudly.
 
+## 23. bindery: the switch over its synced indexers (v0.18.0, 2026-09-18)
+
+bindery holds the indexers Prowlarr syncs into it. The host wants exactly two
+of them searched -- MyAnonamouse and AudioBookBay, the book and audiobook
+trackers -- and the other `torznab` rows off, because a source whose hits it
+cannot reach costs every search the wait for its answer (measured on
+2026-09-02: TorrentLeech took 59.9 s for nothing, and the search fell from 60 s
+to 4.2 s without it).
+
+**This is the one task that writes to an entry the spec does not name**, and
+that is why it is narrow rather than general. The obvious alternative was a
+rule in the spec -- "these entries, and every other one matching X gets Y" --
+which would have loosened §1 for *every* task, and a selector one word too wide
+would then reach entries nobody declared. Instead the whole statement lives in
+the code, and the spec is a list of names:
+
+```json
+{ "service": "bindery", "task": "indexers", "…": "…",
+  "desired": { "enabled": ["MyAnonamouse", "AudioBookBay"] } }
+```
+
+- **named** -> `enabled: true`. Said explicitly, not merely "not switched off":
+  before a name was on the list, this very task had switched that indexer off,
+  and a task that only switched things off would leave it that way and report
+  success.
+- **`type: "torznab"` and not named** -> `enabled: false`.
+- **anything else** -> untouched, and named in the run as such. bindery's
+  `newznab` row (a Usenet indexer) is not what this task is about, and silence
+  would leave that to be inferred.
+- **a name bindery does not hold** -> an error. Without that rule a typo would
+  switch off every torznab source and report success -- the failure this task
+  exists to prevent, wearing the face of a green run.
+
+Two things the recorded answer settled, both of which the host had wrong:
+there is **no `implementation` field** (the kind is `type`), so the shell's
+`.implementation // .type` never took its first branch; and an update decodes
+**over the stored row** (`IndexerHandler.Update`), so the body carries
+`enabled` alone rather than the row read back and modified.
+
+### Why writing only on a difference is not a nicety here
+
+`IndexerHandler.Update` ends every write with `idx.SeedRatioSource =
+models.SeedRatioSourceUser`, and `applyProwlarrSeedRatio` (bindery #1065)
+returns immediately for a row marked `user`. **So every `PUT` takes that row's
+seed-ratio override away from the Prowlarr syncer, for good** -- and not even
+another `PUT` puts it back, because the handler sets the field again. On
+2026-09-18 five of the host's six indexers stood on `"user"`, all stamped with
+the same guest start: its shell unit `PUT`s every row on every start. The task
+writes only the rows that differ, which on a settled host is none.
+
 ## 20. Not in the pilot
 
 
