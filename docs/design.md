@@ -1482,9 +1482,12 @@ the database; here it is the scan endpoint with `force=true`, sent only when
 `type` differs.
 
 Kavita's side navigation keeps a copy of a library's name per user
-(`AppUserSideNavStream.Name`). The web interface reads the library itself
-(`UserRepository.GetSideNavStreams`), only OPDS shows the copy; the task does
-not touch it.
+(`AppUserSideNavStream.Name`) and never updates it. In 0.9.1.4 the side
+navigation itself shows the library's own name (`side-nav.component.html`,
+`navStream.library.name`); the copy still shows on the page that customizes
+the side navigation, in its search field, and in OPDS. It goes stale only when
+a library is renamed. The task does not touch it: the streams belong to each
+user, and there is no administrator's endpoint that writes another user's.
 
 ## 20. Not in the pilot
 
