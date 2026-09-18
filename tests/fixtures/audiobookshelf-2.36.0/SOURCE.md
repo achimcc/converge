@@ -12,3 +12,9 @@ of the host this program was written for (design §27):
 host — Audiobookshelf answers both in clear text to an administrator. Keys are
 in sorted order (`jq -S`). Everything else is as recorded, among it
 `authOpenIDAdvancedPermsClaim` as `""` (see §27 on empty strings).
+
+- `users.json` — `GET /api/users`, the same day and token. **Reduced, not
+  only masked:** the answer carries every account's `token`, its e-mail
+  address and more. Kept are `type` and `permissions` as recorded (one root,
+  one admin, three users); `id` and `username` are made up (`user-id-N`,
+  `kontoN`). Every other field was dropped before the answer left the host.

@@ -151,6 +151,13 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::AudiobookshelfAdminPermissions(desired) => {
+            let task = audiobookshelf::AdminPermissions {
+                types: desired.types.clone(),
+                permissions: desired.permissions.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
         Desired::AudiobookshelfAuthSettings(desired) => {
             // Every secret before the first request, as for plugin keys.
             let mut secrets = std::collections::BTreeMap::new();
@@ -702,6 +709,7 @@ fn schema_check(args: &[String]) -> ExitCode {
             // Seerr, Koel and SuggestArr specs.
             Desired::KoelRadioStations(_)
             | Desired::AudiobookshelfAuthSettings(_)
+            | Desired::AudiobookshelfAdminPermissions(_)
             | Desired::SuggestArrConfiguration(_)
             | Desired::AccountSubscriptions(_)
             | Desired::BinderyEntries(..)

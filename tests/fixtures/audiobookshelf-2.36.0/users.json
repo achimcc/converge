@@ -1,0 +1,84 @@
+{
+  "users": [
+    {
+      "id": "user-id-1",
+      "permissions": {
+        "accessAllLibraries": true,
+        "accessAllTags": true,
+        "accessExplicitContent": true,
+        "createEreader": true,
+        "delete": true,
+        "download": true,
+        "selectedTagsNotAccessible": false,
+        "update": true,
+        "upload": true
+      },
+      "type": "root",
+      "username": "konto1"
+    },
+    {
+      "id": "user-id-2",
+      "permissions": {
+        "accessAllLibraries": true,
+        "accessAllTags": true,
+        "accessExplicitContent": false,
+        "createEreader": true,
+        "delete": true,
+        "download": true,
+        "selectedTagsNotAccessible": false,
+        "update": true,
+        "upload": true
+      },
+      "type": "admin",
+      "username": "konto2"
+    },
+    {
+      "id": "user-id-3",
+      "permissions": {
+        "accessAllLibraries": true,
+        "accessAllTags": true,
+        "accessExplicitContent": false,
+        "createEreader": false,
+        "delete": false,
+        "download": true,
+        "selectedTagsNotAccessible": false,
+        "update": false,
+        "upload": false
+      },
+      "type": "user",
+      "username": "konto3"
+    },
+    {
+      "id": "user-id-4",
+      "permissions": {
+        "accessAllLibraries": true,
+        "accessAllTags": true,
+        "accessExplicitContent": false,
+        "createEreader": false,
+        "delete": false,
+        "download": true,
+        "selectedTagsNotAccessible": false,
+        "update": false,
+        "upload": false
+      },
+      "type": "user",
+      "username": "konto4"
+    },
+    {
+      "id": "user-id-5",
+      "permissions": {
+        "accessAllLibraries": true,
+        "accessAllTags": true,
+        "accessExplicitContent": false,
+        "createEreader": false,
+        "delete": false,
+        "download": true,
+        "selectedTagsNotAccessible": false,
+        "update": false,
+        "upload": false
+      },
+      "type": "user",
+      "username": "konto5"
+    }
+  ]
+}

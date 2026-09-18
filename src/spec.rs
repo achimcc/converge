@@ -130,6 +130,7 @@ enum TaskName {
     ServerSettings,
     Libraries,
     AuthSettings,
+    AdminPermissions,
 }
 
 impl TaskName {
@@ -169,7 +170,9 @@ impl TaskName {
             TaskName::RadioStations => service == Service::Koel,
             TaskName::Configuration => service == Service::SuggestArr,
             TaskName::ServerSettings | TaskName::Libraries => service == Service::Kavita,
-            TaskName::AuthSettings => service == Service::Audiobookshelf,
+            TaskName::AuthSettings | TaskName::AdminPermissions => {
+                service == Service::Audiobookshelf
+            }
         }
     }
 }
@@ -598,7 +601,19 @@ pub enum Desired {
     KavitaServerSettings(BTreeMap<String, serde_json::Value>),
     KavitaLibraries(BTreeMap<String, BTreeMap<String, serde_json::Value>>),
     AudiobookshelfAuthSettings(AudiobookshelfAuth),
+    AudiobookshelfAdminPermissions(AbsPermissions),
 }
+
+/// Permissions every account of the named types must hold (design §28).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AbsPermissions {
+    pub types: Vec<String>,
+    pub permissions: BTreeMap<String, bool>,
+}
+
+/// Audiobookshelf's account types (`User.accountTypes`).
+const ABS_ACCOUNT_TYPES: [&str; 4] = ["root", "admin", "user", "guest"];
 
 /// Audiobookshelf's authentication settings (design §27): fields by name, and
 /// the OIDC client secret from a credential, compared without being shown.
@@ -1273,6 +1288,38 @@ impl Spec {
                 kavita_paths(&map).map_err(invalid)?;
                 Desired::KavitaServerSettings(map)
             }
+            TaskName::AdminPermissions => {
+                let desired: AbsPermissions = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if desired.types.is_empty() {
+                    return Err(invalid("desired.types names no account type".to_string()));
+                }
+                if let Some(bad) = desired
+                    .types
+                    .iter()
+                    .find(|t| !ABS_ACCOUNT_TYPES.contains(&t.as_str()))
+                {
+                    return Err(invalid(format!(
+                        "desired.types: {bad:?} is not an account type ({})",
+                        ABS_ACCOUNT_TYPES.join(", ")
+                    )));
+                }
+                if desired.permissions.is_empty() {
+                    return Err(invalid(
+                        "desired.permissions names no permission".to_string(),
+                    ));
+                }
+                if let Some(bad) = desired
+                    .permissions
+                    .keys()
+                    .find(|k| k.is_empty() || k.contains('.'))
+                {
+                    return Err(invalid(format!(
+                        "desired.permissions: {bad:?} is not a permission name"
+                    )));
+                }
+                Desired::AudiobookshelfAdminPermissions(desired)
+            }
             TaskName::AuthSettings => {
                 let desired: AudiobookshelfAuth = serde_json::from_value(raw.desired)
                     .map_err(|e| invalid(format!("desired: {e}")))?;
@@ -1691,6 +1738,7 @@ impl Spec {
             Desired::KavitaServerSettings(_) => "server-settings",
             Desired::KavitaLibraries(_) => "libraries",
             Desired::AudiobookshelfAuthSettings(_) => "auth-settings",
+            Desired::AudiobookshelfAdminPermissions(_) => "admin-permissions",
         }
     }
 }
@@ -2242,6 +2290,28 @@ mod tests {
                 .contains("credential name")
         );
         assert!(reason(abs("{}")).contains("names no field"));
+    }
+
+    #[test]
+    fn audiobookshelf_permissions_name_account_types_and_booleans() {
+        let abs = |d: &str| {
+            parse(&format!(
+                r#"{{"service":"audiobookshelf","base_url":"http://10.0.90.10:8000","api_key_credential":"t","task":"admin-permissions","desired":{d}}}"#
+            ))
+        };
+        let spec = abs(r#"{"types":["admin","root"],"permissions":{"delete":true}}"#).unwrap();
+        assert_eq!(spec.task_name(), "admin-permissions");
+        assert!(
+            reason(abs(r#"{"types":["owner"],"permissions":{"delete":true}}"#))
+                .contains("not an account type")
+        );
+        assert!(reason(abs(r#"{"types":[],"permissions":{"delete":true}}"#))
+            .contains("no account type"));
+        assert!(reason(abs(r#"{"types":["admin"],"permissions":{}}"#)).contains("no permission"));
+        assert!(
+            reason(abs(r#"{"types":["admin"],"permissions":{"delete":"yes"}}"#))
+                .contains("desired")
+        );
     }
 
     #[test]

@@ -38,7 +38,28 @@ pub const AUTH_SETTINGS_WRITE: Endpoint = Endpoint {
     request: None,
     response: None,
 };
-pub const ENDPOINTS: [Endpoint; 3] = [STATUS, AUTH_SETTINGS, AUTH_SETTINGS_WRITE];
+pub const USERS: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/users",
+    request: None,
+    response: None,
+};
+/// `/api/users/{id}`, with `{"permissions": {...}}`: Audiobookshelf merges
+/// the named keys into the account's permissions and takes booleans only
+/// (`UserController.update`).
+pub const USER_UPDATE: Endpoint = Endpoint {
+    method: "PATCH",
+    path: "/api/users/{id}",
+    request: None,
+    response: None,
+};
+pub const ENDPOINTS: [Endpoint; 5] = [
+    STATUS,
+    AUTH_SETTINGS,
+    AUTH_SETTINGS_WRITE,
+    USERS,
+    USER_UPDATE,
+];
 
 /// The one key Audiobookshelf keeps an empty string for. Every other key it
 /// stores `""` as `null` on a write (`MiscController.updateAuthSettings`), and
@@ -224,6 +245,149 @@ impl Task for AuthSettings {
     }
 }
 
+// --- admin-permissions (design §28) ----------------------------------------
+
+/// Permissions every account of the named types must hold. Audiobookshelf
+/// gives an account type no permission of its own (`User.canDelete` reads
+/// `permissions.delete` alone), and an account created by an OIDC login
+/// starts with a reader's -- so an administrator could not delete anything
+/// until someone set the fields. The advanced-permissions claim cannot do it:
+/// Audiobookshelf skips admin and root accounts there
+/// (`OidcAuthStrategy.js`, `if (user.type === 'admin' || ...) return`).
+///
+/// The answer of `GET /api/users` carries each account's `token`. Nothing but
+/// the username, the type and the permission names and values named here is
+/// ever shown, and no error carries anything from a body.
+pub struct AdminPermissions {
+    pub types: Vec<String>,
+    pub permissions: BTreeMap<String, bool>,
+}
+
+/// A permission that differs: its name, the value now (if any), the value
+/// wanted.
+type Difference = (String, Option<bool>, bool);
+
+#[derive(Deserialize)]
+struct Users {
+    users: Vec<UserEntry>,
+}
+
+/// Only these fields are kept; the token and everything else is dropped at
+/// decoding.
+#[derive(Deserialize, Clone)]
+pub struct UserEntry {
+    id: String,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    permissions: Map<String, Value>,
+}
+
+impl UserEntry {
+    fn label(&self) -> String {
+        format!("account {}", self.username.as_deref().unwrap_or(&self.id))
+    }
+}
+
+impl AdminPermissions {
+    /// Per account of a named type, the permissions that differ.
+    fn differing<'a>(&self, users: &'a [UserEntry]) -> Vec<(&'a UserEntry, Vec<Difference>)> {
+        users
+            .iter()
+            .filter(|u| self.types.contains(&u.kind))
+            .filter_map(|u| {
+                let diffs: Vec<Difference> = self
+                    .permissions
+                    .iter()
+                    .filter_map(|(key, desired)| {
+                        let now = u.permissions.get(key).and_then(Value::as_bool);
+                        (now != Some(*desired)).then(|| (key.clone(), now, *desired))
+                    })
+                    .collect();
+                (!diffs.is_empty()).then_some((u, diffs))
+            })
+            .collect()
+    }
+}
+
+impl Task for AdminPermissions {
+    type Current = Vec<UserEntry>;
+
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        probe(t)
+    }
+
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        let reply = t.get(USERS.path)?;
+        if reply.status != 200 {
+            return Err(refuse(&USERS, &reply));
+        }
+        let users: Users = serde_json::from_str(&reply.body).map_err(|e| Error::Decode {
+            path: USERS.path.to_string(),
+            reason: format!(
+                "not a list of users ({:?} error at line {} column {})",
+                e.classify(),
+                e.line(),
+                e.column()
+            ),
+        })?;
+        Ok(users.users)
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        Ok(self
+            .differing(current)
+            .into_iter()
+            .flat_map(|(user, diffs)| {
+                diffs.into_iter().map(move |(key, now, desired)| Change {
+                    subject: user.label(),
+                    field: format!("permissions.{key}"),
+                    current: now.map_or("(missing)".to_string(), |b| b.to_string()),
+                    desired: desired.to_string(),
+                })
+            })
+            .collect())
+    }
+
+    fn notes(&self, current: &Self::Current) -> Vec<String> {
+        if current.iter().any(|u| self.types.contains(&u.kind)) {
+            Vec::new()
+        } else {
+            vec![format!(
+                "no account of type {} yet -- nothing to set",
+                self.types.join("/")
+            )]
+        }
+    }
+
+    /// One PATCH per account, with the differing keys only.
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        for (user, diffs) in self.differing(current) {
+            let permissions: Map<String, Value> = diffs
+                .into_iter()
+                .map(|(key, _, desired)| (key, Value::Bool(desired)))
+                .collect();
+            let body = serde_json::json!({ "permissions": permissions }).to_string();
+            let path = USER_UPDATE.path.replace("{id}", &user.id);
+            let reply = t.patch_json(&path, &body)?;
+            if reply.status != 200 {
+                return Err(Error::Status {
+                    method: USER_UPDATE.method,
+                    path,
+                    status: reply.status,
+                    validation: match reply.status {
+                        403 => vec!["the token's account may not change this account".to_string()],
+                        _ => Vec::new(),
+                    },
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -329,6 +493,106 @@ mod tests {
             sent,
             json!({"authOpenIDAutoLaunch": true, "authOpenIDClientSecret": rotated})
         );
+    }
+
+    const USERS_JSON: &str = include_str!("../../tests/fixtures/audiobookshelf-2.36.0/users.json");
+
+    fn admin_rights() -> AdminPermissions {
+        AdminPermissions {
+            types: vec!["admin".into(), "root".into()],
+            permissions: [
+                "download",
+                "update",
+                "delete",
+                "upload",
+                "createEreader",
+                "accessAllLibraries",
+                "accessAllTags",
+            ]
+            .into_iter()
+            .map(|k| (k.to_string(), true))
+            .collect(),
+        }
+    }
+
+    fn users(body: &str) -> FakeTransport {
+        FakeTransport::default()
+            .on_get(USERS.path, vec![ok(body)])
+            .on_put(vec![ok("{}")])
+    }
+
+    #[test]
+    fn the_recorded_admins_already_hold_their_rights_and_users_are_untouched() {
+        let task = admin_rights();
+        let current = task.read(&users(USERS_JSON)).unwrap();
+        assert_eq!(current.len(), 5);
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+        assert_eq!(task.notes(&current), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_new_admin_with_a_readers_rights_gets_only_the_missing_keys() {
+        // The third account (a reader) becomes an admin by its group claim.
+        let mut recorded: Value = serde_json::from_str(USERS_JSON).unwrap();
+        recorded["users"][2]["type"] = json!("admin");
+        recorded["users"][2]["token"] = json!("leaky-token-4711");
+        recorded["users"][2]["permissions"]
+            .as_object_mut()
+            .unwrap()
+            .remove("createEreader");
+        let task = admin_rights();
+        let t = users(&recorded.to_string());
+        let current = task.read(&t).unwrap();
+        let changes: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(|c| c.to_string())
+            .collect();
+        assert_eq!(
+            changes,
+            [
+                "account konto3: permissions.createEreader (missing) -> true",
+                "account konto3: permissions.delete false -> true",
+                "account konto3: permissions.update false -> true",
+                "account konto3: permissions.upload false -> true",
+            ]
+        );
+        assert!(!changes.concat().contains("leaky"));
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].0, "/api/users/user-id-3");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(
+            sent,
+            json!({"permissions": {"createEreader": true, "delete": true, "update": true, "upload": true}})
+        );
+    }
+
+    #[test]
+    fn no_account_of_the_types_is_a_note_and_a_refusal_names_nothing() {
+        let task = admin_rights();
+        let only_readers = r#"{"users":[{"id":"u1","username":"a","type":"user","permissions":{},"token":"leaky"}]}"#;
+        let current = task.read(&users(only_readers)).unwrap();
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+        assert_eq!(
+            task.notes(&current),
+            ["no account of type admin/root yet -- nothing to set"]
+        );
+        let t = FakeTransport::default()
+            .on_get(USERS.path, vec![Step::Answer(403, "leaky-token".into())]);
+        let err = task.read(&t).err().unwrap().to_string();
+        assert!(
+            err.contains("no administrator") && !err.contains("leaky"),
+            "{err}"
+        );
+        let err = task
+            .read(&users("{\"users\": \"leaky-token\"}"))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(!err.contains("leaky"), "{err}");
     }
 
     #[test]

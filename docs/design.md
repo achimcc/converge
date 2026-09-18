@@ -1529,6 +1529,37 @@ rule, and `authActiveAuthMethods` sorted, as Audiobookshelf does.
 Audiobookshelf publishes no OpenAPI description; the specs are validated, the
 field names checked at runtime and against the recorded answer.
 
+## 28. Audiobookshelf: the permissions of its administrators (v0.23.0, 2026-09-18)
+
+An account type carries no permission in Audiobookshelf 2.36: `User.canDelete`
+is `permissions.delete && isActive`, nothing more. An account an OIDC login
+creates starts with a reader's permissions, and its group claim sets only the
+type. An administrator could not delete a misimported item until someone set
+the fields. The host set them with `sqlite3` before every start -- so a new
+administrator got them at the next restart.
+
+**The advanced-permissions claim is no way out.** It is the obvious candidate
+and it skips exactly these accounts: `OidcAuthStrategy.updateUserPermissions`
+returns early for `admin` and `root`. It would instead rewrite every other
+account's permissions at each login, and refuse a login whose userinfo lacks
+the claim.
+
+| task | read | write |
+|---|---|---|
+| `admin-permissions` | `GET /api/users` | `PATCH /api/users/{id}` with `{"permissions": {…}}`, per account, the differing keys only |
+
+`UserController.update` merges the named keys into the account's permissions
+and takes booleans only; a root account may be changed by root alone, which
+the host's token is (§27). A spec names account types and permissions;
+converge sets exactly those on every account of those types and leaves every
+other account alone. No account of the types yet is a note, not an error --
+on a fresh instance nobody has logged in.
+
+**The answer carries every account's `token`.** Decoding keeps `id`,
+`username`, `type` and `permissions` and drops the rest; a change names the
+username, the permission and two booleans, and no error carries anything from
+a body.
+
 ## 20. Not in the pilot
 
 
