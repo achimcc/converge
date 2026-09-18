@@ -338,6 +338,27 @@ fn reconcile_one(
             let task = bindery::Settings { set: set.clone() };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::BinderyOidcProviders(entries) => {
+            // As for the other bindery entries: every secret before the first
+            // request, so a missing credential fails before anything is read.
+            let mut targets = Vec::new();
+            for (id, entry) in entries {
+                let mut secret_fields = std::collections::BTreeMap::new();
+                for (field, credential) in &entry.secret_fields {
+                    secret_fields.insert(
+                        field.clone(),
+                        read_credential(credentials, credential).map_err(fail)?,
+                    );
+                }
+                targets.push(bindery::OidcTarget {
+                    id: id.clone(),
+                    set: entry.set.clone(),
+                    secret_fields,
+                });
+            }
+            let task = bindery::OidcProviders { entries: targets };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
         Desired::Naming(set)
         | Desired::MediaManagement(set)
         | Desired::DownloadClientConfig(set) => {
@@ -618,6 +639,7 @@ fn schema_check(args: &[String]) -> ExitCode {
             | Desired::AccountSubscriptions(_)
             | Desired::BinderyEntries(..)
             | Desired::BinderySettings(_)
+            | Desired::BinderyOidcProviders(_)
             | Desired::SeerrMain(_)
             | Desired::SeerrJellyfin(_)
             | Desired::SeerrServers(..)

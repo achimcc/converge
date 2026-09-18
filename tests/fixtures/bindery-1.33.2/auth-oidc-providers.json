@@ -1,0 +1,10 @@
+[
+  {
+    "id": "authentik",
+    "name": "Authentik",
+    "issuer": "https://auth.example.org/application/o/bindery/",
+    "client_id": "bindery",
+    "scopes": ["openid", "profile", "email"],
+    "status": { "state": "ok", "last_attempt": "0001-01-01T00:00:00Z" }
+  }
+]

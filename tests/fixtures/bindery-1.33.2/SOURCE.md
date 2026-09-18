@@ -20,3 +20,9 @@ are the host's zone addresses, which its public configuration names anyway.
 
 At recording time the host's desired state matched: `plan` reported
 `unchanged` for all four bindery specs.
+
+- `auth-oidc-providers.json` — `GET /api/v1/auth/oidc/providers`, recorded
+  2026-09-18 from the running bindery. The issuer's host is replaced by
+  `auth.example.org`; everything else is verbatim. The answer carries **no**
+  `client_secret`: it is write-only (`ProviderPublicConfig`), which is why a
+  spec hands it over on every apply, as for the other write-only fields (§14).

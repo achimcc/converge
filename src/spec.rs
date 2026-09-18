@@ -109,6 +109,7 @@ enum TaskName {
     Indexers,
     IndexerProxies,
     ProwlarrInstances,
+    OidcProviders,
     Settings,
     Main,
     Jellyfin,
@@ -138,7 +139,9 @@ impl TaskName {
                 service.is_servarr() || service == Service::Prowlarr || service == Service::Bindery
             }
             TaskName::Notifications => service.is_servarr() || service == Service::Prowlarr,
-            TaskName::ProwlarrInstances | TaskName::Settings => service == Service::Bindery,
+            TaskName::ProwlarrInstances | TaskName::Settings | TaskName::OidcProviders => {
+                service == Service::Bindery
+            }
             TaskName::Applications | TaskName::Indexers | TaskName::IndexerProxies => {
                 service == Service::Prowlarr
             }
@@ -564,6 +567,7 @@ pub enum Desired {
     IndexerProxies(ProviderSettings),
     BinderyEntries(BinderyKind, BTreeMap<String, BinderyEntry>),
     BinderySettings(BTreeMap<String, serde_json::Value>),
+    BinderyOidcProviders(BTreeMap<String, BinderyEntry>),
     SeerrMain(BTreeMap<String, serde_json::Value>),
     SeerrJellyfin(SeerrJellyfin),
     SeerrServers(SeerrKind, BTreeMap<String, SeerrServer>),
@@ -853,6 +857,54 @@ impl Spec {
                     }
                 }
                 Desired::BinderyEntries(kind, entries)
+            }
+            // bindery's own login. The entries are keyed by the provider's
+            // `id`, and the only write-only field here is `client_secret` —
+            // NOT bindery's `apiKey`/`password`, which belong to the entries
+            // above.
+            TaskName::OidcProviders => {
+                let mut outer: BTreeMap<String, BTreeMap<String, BinderyEntry>> =
+                    serde_json::from_value(raw.desired)
+                        .map_err(|e| invalid(format!("desired: {e}")))?;
+                if outer.len() != 1 || !outer.contains_key("providers") {
+                    return Err(invalid(
+                        "desired must be an object with exactly the key providers".to_string(),
+                    ));
+                }
+                let entries = outer.remove("providers").unwrap_or_default();
+                if entries.is_empty() {
+                    return Err(invalid("desired.providers names nothing".to_string()));
+                }
+                for (id, entry) in &entries {
+                    let at = format!("desired.providers.{id}");
+                    if id.is_empty() {
+                        return Err(invalid("desired.providers: an id is empty".to_string()));
+                    }
+                    for (field, credential) in &entry.secret_fields {
+                        if field != "client_secret" {
+                            return Err(invalid(format!(
+                                "{at}.secret_fields: {field} is not bindery's write-only OIDC field (client_secret)"
+                            )));
+                        }
+                        credential_name(credential, &format!("{at}.secret_fields.{field}"))
+                            .map_err(invalid)?;
+                        if entry.set.contains_key(field) {
+                            return Err(invalid(format!(
+                                "{at}: {field} is both in set and in secret_fields"
+                            )));
+                        }
+                    }
+                    // The id addresses the entry, `status` is bindery's own.
+                    for own in ["id", "status"] {
+                        if entry.set.contains_key(own) {
+                            return Err(invalid(format!("{at}.set: {own} is not set this way")));
+                        }
+                    }
+                    if entry.set.is_empty() && entry.secret_fields.is_empty() {
+                        return Err(invalid(format!("{at} names no field")));
+                    }
+                }
+                Desired::BinderyOidcProviders(entries)
             }
             // Not reachable: `belongs_to` lets it through for bindery only,
             // and the guarded arm above takes it there.
@@ -1449,6 +1501,7 @@ impl Spec {
             Desired::BinderyEntries(BinderyKind::ProwlarrInstances, _) => "prowlarr-instances",
             Desired::BinderyEntries(BinderyKind::RootFolders, _) => "root-folders",
             Desired::BinderySettings(_) => "settings",
+            Desired::BinderyOidcProviders(_) => "oidc-providers",
             Desired::SeerrMain(_) => "main",
             Desired::SeerrJellyfin(_) => "jellyfin",
             Desired::SeerrServers(SeerrKind::Radarr, _) => "radarr-servers",

@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.16.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.17.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11) and
 **SuggestArr** (2.14), each
 replacing a shell unit or an OpenTofu resource on the host it was written
@@ -44,6 +44,7 @@ for:
 | Trailarr | `trailer-profiles` | fields every trailer profile gets |
 | bindery | `download-clients`, `prowlarr-instances` | entries by name: top-level fields; secrets from credentials handed over on every `apply` in a `PUT` with only the secret (bindery answers them empty) |
 | bindery | `root-folders`, `settings` | root folders by path (added when missing); settings by key |
+| bindery | `oidc-providers` | the providers of bindery's own login, by `id`: fields compared, `client_secret` handed over on every `apply` (write-only); `PUT` replaces the whole list, so a provider the spec does not name travels back untouched |
 | ntfy | `account-subscriptions` | subscriptions of an account; the topics are secrets, read from a credential and never printed |
 | Seerr | `main` | top-level fields of the main settings (merged) |
 | Seerr | `jellyfin` | the link to Jellyfin (key from a credential, compared) and the libraries Seerr scans, by name -- exactly these |

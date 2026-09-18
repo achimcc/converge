@@ -1265,6 +1265,33 @@ answer without it. A spec naming it against Sonarr fails at the field check,
 which is the rule from §3 and not a special case: a path the answer does not
 carry is an error, never an addition.
 
+## 22. bindery: the OIDC providers of its own login (v0.17.0, 2026-09-18)
+
+The host wrote them in `bindery-einrichten`: a `PUT` with the provider built by
+`jq`, once per guest start, `RemainAfterExit` on the unit. A rotated
+`client_secret` therefore arrived only at the next start of the container --
+the same gap the download clients had before §14.
+
+Three things make this its own task rather than another `ResourceApi`:
+
+- **`PUT` replaces the whole list.** There is no per-entry route. So the task
+  reads the list, applies the declared fields to the entries it names, appends
+  the ones bindery does not hold yet, and sends everything back. A provider the
+  spec does not name is reported as a note and travels back unchanged --
+  dropping it would delete it, and converge does not delete (§1).
+- **`client_secret` is write-only.** It is not in the answer
+  (`ProviderPublicConfig`), so a stale one cannot be seen. It travels on every
+  `apply`, like bindery's `apiKey` and `password` (§14), and it is *always*
+  included for an entry being added, because bindery refuses a new provider
+  without it ("client_secret required for new provider").
+- **`status` is bindery's own.** It holds the result of the discovery check and
+  is stripped from what goes back; a spec that tried to set it is refused.
+
+What stays in the unit is the check that follows a write: bindery validates the
+issuer's discovery document and puts the outcome in `status.state`, and an entry
+can stand there while nobody can log in. That is a reading of a *result*, not a
+desired state -- the shell waits for `ok` or `failed` and fails loudly.
+
 ## 20. Not in the pilot
 
 

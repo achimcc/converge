@@ -368,6 +368,211 @@ impl Task for Resources {
     }
 }
 
+// --- OIDC providers --------------------------------------------------------------
+
+/// The provider list of bindery's own login. `GET` answers the public view of
+/// every provider -- `client_secret` is write-only and never in it
+/// (`ProviderPublicConfig`) -- and `PUT` **replaces the whole list**. So an
+/// entry the spec does not name goes back untouched, and nothing is deleted.
+///
+/// The secret travels like bindery's other write-only fields (§14): on every
+/// `apply`, because a stale one cannot be seen by reading. bindery needs it
+/// when a provider is **added** ("client_secret required for new provider")
+/// and keeps the stored one when it is left out for an existing entry.
+pub const OIDC_LIST: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/v1/auth/oidc/providers",
+    request: None,
+    response: None,
+};
+
+pub struct OidcTarget {
+    pub id: String,
+    pub set: BTreeMap<String, Value>,
+    pub secret_fields: BTreeMap<String, Secret>,
+}
+
+pub struct OidcProviders {
+    pub entries: Vec<OidcTarget>,
+}
+
+impl OidcProviders {
+    fn subject(id: &str) -> String {
+        format!("OIDC provider {id}")
+    }
+
+    fn find<'a>(current: &'a [Map<String, Value>], id: &str) -> Option<&'a Map<String, Value>> {
+        current
+            .iter()
+            .find(|e| e.get("id").and_then(Value::as_str) == Some(id))
+    }
+
+    /// The declared fields that differ from the answer. A field the answer
+    /// does not carry is an error, never an addition (§3).
+    fn changes_of(
+        target: &OidcTarget,
+        entry: &Map<String, Value>,
+        missing: &mut Vec<String>,
+    ) -> Vec<Change> {
+        let mut changes = Vec::new();
+        for (field, desired) in &target.set {
+            match entry.get(field) {
+                None => missing.push(format!("{}: {field}", Self::subject(&target.id))),
+                Some(value) if value != desired => changes.push(Change {
+                    subject: Self::subject(&target.id),
+                    field: field.clone(),
+                    current: shortened(value),
+                    desired: shortened(desired),
+                }),
+                Some(_) => {}
+            }
+        }
+        changes
+    }
+
+    /// The list as it goes back: every entry bindery holds, with the declared
+    /// fields set, plus the declared entries it does not hold yet. `status` is
+    /// bindery's own and is not sent back.
+    fn list_to_send(&self, current: &[Map<String, Value>], with_secrets: bool) -> Vec<Value> {
+        let mut out: Vec<Map<String, Value>> = current
+            .iter()
+            .map(|entry| {
+                let mut row = entry.clone();
+                row.remove("status");
+                if let Some(id) = entry.get("id").and_then(Value::as_str) {
+                    if let Some(target) = self.entries.iter().find(|t| t.id == id) {
+                        for (field, value) in &target.set {
+                            row.insert(field.clone(), value.clone());
+                        }
+                        if with_secrets {
+                            for (field, secret) in &target.secret_fields {
+                                row.insert(field.clone(), Value::from(secret.expose()));
+                            }
+                        }
+                    }
+                }
+                row
+            })
+            .collect();
+        for target in &self.entries {
+            if Self::find(current, &target.id).is_some() {
+                continue;
+            }
+            let mut row = Map::new();
+            row.insert("id".to_string(), Value::from(target.id.clone()));
+            for (field, value) in &target.set {
+                row.insert(field.clone(), value.clone());
+            }
+            // A new provider is refused without its secret, so it travels here
+            // even when nothing else changed.
+            for (field, secret) in &target.secret_fields {
+                row.insert(field.clone(), Value::from(secret.expose()));
+            }
+            out.push(row);
+        }
+        out.into_iter().map(Value::Object).collect()
+    }
+
+    fn put_list(&self, t: &dyn Transport, list: Vec<Value>) -> Result<(), Error> {
+        let path = OIDC_LIST.path;
+        let body = Value::Array(list);
+        let text = serde_json::to_string(&body).map_err(|_| Error::Request {
+            method: "PUT",
+            path: path.to_string(),
+            reason: "cannot serialize the body".to_string(),
+        })?;
+        let reply = t.put_json(path, &text)?;
+        expect_status_at("PUT", path, &reply, &[200, 201, 204])?;
+        Ok(())
+    }
+}
+
+impl Task for OidcProviders {
+    type Current = Vec<Map<String, Value>>;
+
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        probe(t)
+    }
+
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        let path = OIDC_LIST.path;
+        let reply = t.get(path)?;
+        expect_status_at("GET", path, &reply, &[200])?;
+        let entries: Vec<Map<String, Value>> = serde_json::from_value(decode(path, &reply.body)?)
+            .map_err(|e| Error::Decode {
+            path: path.to_string(),
+            reason: e.to_string(),
+        })?;
+        if let Some(index) = entries
+            .iter()
+            .position(|e| e.get("id").and_then(Value::as_str).is_none())
+        {
+            return Err(Error::MissingName {
+                path: path.to_string(),
+                index,
+            });
+        }
+        Ok(entries)
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        let (mut missing, mut changes) = (Vec::new(), Vec::new());
+        for target in &self.entries {
+            match Self::find(current, &target.id) {
+                Some(entry) => changes.extend(Self::changes_of(target, entry, &mut missing)),
+                None => changes.push(Change {
+                    subject: Self::subject(&target.id),
+                    field: String::new(),
+                    current: "(missing)".to_string(),
+                    desired: "(added)".to_string(),
+                }),
+            }
+        }
+        if missing.is_empty() {
+            Ok(changes)
+        } else {
+            Err(Error::MissingField(missing))
+        }
+    }
+
+    fn notes(&self, current: &Self::Current) -> Vec<String> {
+        current
+            .iter()
+            .filter_map(|e| e.get("id").and_then(Value::as_str))
+            .filter(|id| !self.entries.iter().any(|t| t.id == *id))
+            .map(|id| format!("not in the spec: {}", Self::subject(id)))
+            .collect()
+    }
+
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        self.put_list(t, self.list_to_send(current, false))
+    }
+
+    /// The secret on every `apply`, with the whole list around it.
+    fn hand_over(&self, t: &dyn Transport, current: &Self::Current) -> Result<Vec<String>, Error> {
+        let with_secrets: Vec<&OidcTarget> = self
+            .entries
+            .iter()
+            .filter(|t| !t.secret_fields.is_empty())
+            .collect();
+        if with_secrets.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.put_list(t, self.list_to_send(current, true))?;
+        Ok(with_secrets
+            .iter()
+            .map(|target| {
+                let names: Vec<&str> = target.secret_fields.keys().map(String::as_str).collect();
+                format!(
+                    "{}: {} handed over from credentials (write-only; the list travels whole)",
+                    Self::subject(&target.id),
+                    names.join(", ")
+                )
+            })
+            .collect())
+    }
+}
+
 // --- settings --------------------------------------------------------------------
 
 /// Settings by key: `GET /api/v1/setting/{key}` answers `{key, value}`, and
@@ -458,6 +663,7 @@ mod tests {
     const HEALTH_OK: &str = include_str!("../../tests/fixtures/bindery-1.33.2/health.json");
     const CLIENTS: &str = include_str!("../../tests/fixtures/bindery-1.33.2/downloadclient.json");
     const PROWLARR: &str = include_str!("../../tests/fixtures/bindery-1.33.2/prowlarr.json");
+    const OIDC: &str = include_str!("../../tests/fixtures/bindery-1.33.2/auth-oidc-providers.json");
     const FOLDERS: &str = include_str!("../../tests/fixtures/bindery-1.33.2/rootfolder.json");
     const IMPORT_MODE: &str =
         include_str!("../../tests/fixtures/bindery-1.33.2/setting-import.mode.json");
@@ -750,5 +956,135 @@ mod tests {
             .unwrap()
             .to_string()
             .contains("setting nope"));
+    }
+
+    fn oidc(set: serde_json::Value, mit_geheimnis: bool) -> OidcProviders {
+        OidcProviders {
+            entries: vec![OidcTarget {
+                id: "authentik".to_string(),
+                set: set.as_object().unwrap().clone().into_iter().collect(),
+                secret_fields: if mit_geheimnis {
+                    BTreeMap::from([(
+                        "client_secret".to_string(),
+                        Secret::new("s3cret".to_string()),
+                    )])
+                } else {
+                    BTreeMap::new()
+                },
+            }],
+        }
+    }
+
+    /// The recorded answer matches what the host declares, so a spec over it
+    /// is `unchanged` -- and the secret still travels.
+    #[test]
+    fn the_oidc_provider_of_the_host_is_unchanged_and_the_secret_is_handed_over() {
+        let task = oidc(
+            json!({"client_id": "bindery", "scopes": ["openid", "profile", "email"]}),
+            true,
+        );
+        let t = FakeTransport::default()
+            .on_get(HEALTH.path, vec![ok(HEALTH_OK)])
+            .on_get(OIDC_LIST.path, vec![ok(OIDC), ok(OIDC)])
+            .on_put(vec![Step::Answer(200, String::new())]);
+        let report = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        assert_eq!(report.outcome, Outcome::Unchanged);
+        assert_eq!(report.handed_over.len(), 1);
+        assert!(report.handed_over[0].contains("client_secret handed over"));
+        // The list goes back whole, with the secret and without `status`.
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1);
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(sent[0]["client_secret"], "s3cret");
+        assert_eq!(
+            sent[0]["issuer"],
+            "https://auth.example.org/application/o/bindery/"
+        );
+        assert!(sent[0].get("status").is_none(), "status is bindery's own");
+    }
+
+    /// A foreign provider is left alone, and it travels back untouched --
+    /// `PUT` replaces the whole list, so dropping it would delete it.
+    #[test]
+    fn a_provider_the_spec_does_not_name_travels_back_unchanged() {
+        let mut list: Value = serde_json::from_str(OIDC).unwrap();
+        list.as_array_mut().unwrap().push(json!({
+            "id": "fremd", "name": "Fremd", "issuer": "https://example.com/",
+            "client_id": "x", "scopes": ["openid"]
+        }));
+        let body = list.to_string();
+        let task = oidc(json!({"client_id": "bindery"}), false);
+        let t = FakeTransport::default()
+            .on_get(HEALTH.path, vec![ok(HEALTH_OK)])
+            .on_get(OIDC_LIST.path, vec![ok(&body)]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+        assert_eq!(
+            task.notes(&current),
+            vec!["not in the spec: OIDC provider fremd".to_string()]
+        );
+        let sent = task.list_to_send(&current, false);
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[1]["id"], "fremd");
+        assert_eq!(sent[1]["client_id"], "x");
+    }
+
+    /// A changed field is one change, and the whole list carries it back.
+    #[test]
+    fn a_changed_issuer_is_written_with_the_whole_list() {
+        let task = oidc(
+            json!({"issuer": "https://auth.example.org/application/o/bindery2/"}),
+            false,
+        );
+        let changed = {
+            let mut v: Value = serde_json::from_str(OIDC).unwrap();
+            v[0]["issuer"] = "https://auth.example.org/application/o/bindery2/".into();
+            v.to_string()
+        };
+        let t = FakeTransport::default()
+            .on_get(HEALTH.path, vec![ok(HEALTH_OK)])
+            .on_get(OIDC_LIST.path, vec![ok(OIDC), ok(&changed)])
+            .on_put(vec![Step::Answer(200, String::new())]);
+        let report = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        match report.outcome {
+            Outcome::Changed(changes) => assert_eq!(
+                changes[0].to_string(),
+                "OIDC provider authentik: issuer \"https://auth.example.org/application/o/bindery/\" -> \"https://auth.example.org/application/o/bindery2/\""
+            ),
+            other => panic!("expected Changed, got {other:?}"),
+        }
+    }
+
+    /// A missing provider is added -- with its secret, because bindery
+    /// refuses a new one without it.
+    #[test]
+    fn a_missing_provider_is_added_with_its_secret() {
+        let task = oidc(json!({"client_id": "bindery"}), true);
+        let t = FakeTransport::default()
+            .on_get(HEALTH.path, vec![ok(HEALTH_OK)])
+            .on_get(OIDC_LIST.path, vec![ok("[]"), ok(OIDC), ok(OIDC)])
+            .on_put(vec![
+                Step::Answer(200, String::new()),
+                Step::Answer(200, String::new()),
+            ]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(
+            task.diff(&current).unwrap()[0].to_string(),
+            "OIDC provider authentik: (missing) -> (added)"
+        );
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(sent[0]["client_secret"], "s3cret");
+    }
+
+    /// A field the answer does not carry is an error, never an addition.
+    #[test]
+    fn an_unknown_field_is_an_error() {
+        let task = oidc(json!({"gibtsnicht": true}), false);
+        let t = FakeTransport::default().on_get(OIDC_LIST.path, vec![ok(OIDC)]);
+        let current = task.read(&t).unwrap();
+        let reason = task.diff(&current).unwrap_err().to_string();
+        assert!(reason.contains("gibtsnicht"), "{reason}");
     }
 }
