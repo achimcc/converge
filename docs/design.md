@@ -1342,6 +1342,10 @@ another `PUT` puts it back, because the handler sets the field again. On
 the same guest start: its shell unit `PUT`s every row on every start. The task
 writes only the rows that differ, which on a settled host is none.
 
+Before release, `plan` ran on the host against the running bindery with the
+spec it deploys: `unchanged`, with the note `left alone, not a torznab
+indexer: indexer Treasure Maps`.
+
 ## 20. Not in the pilot
 
 
