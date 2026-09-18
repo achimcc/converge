@@ -19,9 +19,9 @@ script should have been:
 
 ## Status
 
-Early. **v0.17.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
-**Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11) and
-**SuggestArr** (2.14), each
+Early. **v0.20.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+**Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11),
+**SuggestArr** (2.14) and **Kavita** (0.9), each
 replacing a shell unit or an OpenTofu resource on the host it was written
 for:
 
@@ -54,6 +54,7 @@ for:
 | Seerr | `radarr-servers`, `sonarr-servers` | entries by name: top-level fields, key from a credential; quality profile and root folder by name, resolved through Seerr's connection test; missing entries are added |
 | Seerr | `webhook` | the webhook agent: fields by path, the payload template as an object (stored the way the agent parses it), header values from credentials |
 | Koel | `radio-stations` | the account's own stations by name (refused while its `include_public_media` is on), every field written whole; a logo from an image file (at most 2 MiB), sent only where a station has none; missing stations are added |
+| Kavita | `server-settings` | fields of `ServerSettingDto`, by path -- among them the OIDC switches. The key is an auth key of an administrator in `x-api-key`. What the host writes into `appsettings.json` (authority, client id, secret, scopes, port, addresses, base URL, cache size), the SMTP password and Kavita's own install fields are refused |
 | SuggestArr | `configuration` | the whole flat configuration: plain fields by name, secret fields from credentials (never shown), and the Jellyfin libraries derived from what the service reports, minus the collection types named |
 
 ## A spec
@@ -223,7 +224,7 @@ leave out are named; a rule that would leave nothing is an error
 |---|---|---|
 | `converge apply [--deadline <s>] <spec>...` | reconcile, write, read back | 0 done, 1 any spec failed |
 | `converge plan [--deadline <s>] <spec>...` | show what `apply` would change | 0 equal, 2 differs, 1 error |
-| `converge schema-check --service <radarr\|sonarr\|lidarr\|prowlarr\|jellyfin\|trailarr> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
+| `converge schema-check --service <radarr\|sonarr\|lidarr\|prowlarr\|jellyfin\|trailarr\|kavita> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
 | `converge schema-check --service <ntfy\|bindery\|seerr\|koel\|suggestarr> [--spec <spec>]...` | ntfy and bindery publish no OpenAPI description, Seerr's misnames its fields, Koel's describes a long-gone version, SuggestArr's covers only its public `/api/v1`: only validate the specs (`--openapi` is refused) | 0 / 1 |
 
 Several specs are processed in order; one failing does not skip the next.

@@ -22,6 +22,7 @@ pub enum Service {
     Koel,
     #[serde(rename = "suggestarr")]
     SuggestArr,
+    Kavita,
 }
 
 impl Service {
@@ -38,6 +39,7 @@ impl Service {
             Service::Seerr => "seerr",
             Service::Koel => "koel",
             Service::SuggestArr => "suggestarr",
+            Service::Kavita => "kavita",
         }
     }
 
@@ -49,7 +51,8 @@ impl Service {
             | Service::Lidarr
             | Service::Prowlarr
             | Service::Bindery
-            | Service::Seerr => "X-Api-Key",
+            | Service::Seerr
+            | Service::Kavita => "X-Api-Key",
             Service::Jellyfin => "X-Emby-Token",
             Service::Trailarr => "X-API-KEY",
             Service::Ntfy | Service::Koel | Service::SuggestArr => "Authorization",
@@ -120,6 +123,7 @@ enum TaskName {
     Webhook,
     RadioStations,
     Configuration,
+    ServerSettings,
 }
 
 impl TaskName {
@@ -158,6 +162,7 @@ impl TaskName {
             | TaskName::Webhook => service == Service::Seerr,
             TaskName::RadioStations => service == Service::Koel,
             TaskName::Configuration => service == Service::SuggestArr,
+            TaskName::ServerSettings => service == Service::Kavita,
         }
     }
 }
@@ -583,6 +588,7 @@ pub enum Desired {
     SeerrWebhook(SeerrWebhook),
     KoelRadioStations(Vec<KoelStation>),
     SuggestArrConfiguration(SuggestArrConfiguration),
+    KavitaServerSettings(BTreeMap<String, serde_json::Value>),
 }
 
 fn web_url(url: &str) -> bool {
@@ -658,6 +664,42 @@ fn plain_fields(
                 "{what}: {name} is not set this way (these are not: {})",
                 forbidden.join(", ")
             ));
+        }
+    }
+    Ok(())
+}
+
+/// Paths of Kavita's server settings a spec may not name (design §25), with
+/// the reason. A path that contains one of them, or is contained in one
+/// (`oidcConfig` as a whole), is refused as well.
+const KAVITA_NOT_SET_HERE: [(&str, &str); 15] = [
+    ("oidcConfig.authority", "the host writes it into appsettings.json, Kavita copies it into the database at every start, and a change clears every account's OIDC link"),
+    ("oidcConfig.clientId", "the host writes it into appsettings.json, and Kavita copies it into the database at every start"),
+    ("oidcConfig.secret", "a secret; the host writes it into appsettings.json, and Kavita answers it masked"),
+    ("oidcConfig.customScopes", "the host writes it into appsettings.json, and Kavita copies it into the database at every start"),
+    ("oidcConfig.enabled", "Kavita derives it"),
+    ("smtpConfig.password", "a secret, and a spec is no place for one"),
+    ("port", "the host writes it into appsettings.json"),
+    ("ipAddresses", "the host writes it into appsettings.json"),
+    ("baseUrl", "the host writes it into appsettings.json"),
+    ("cacheSize", "the host writes it into appsettings.json"),
+    ("cacheDirectory", "Kavita ignores a change"),
+    ("installId", "Kavita's own"),
+    ("installVersion", "Kavita's own"),
+    ("firstInstallDate", "Kavita's own"),
+    ("firstInstallVersion", "Kavita's own"),
+];
+
+fn kavita_paths(map: &BTreeMap<String, serde_json::Value>) -> Result<(), String> {
+    let within =
+        |outer: &str, inner: &str| inner == outer || inner.starts_with(&format!("{outer}."));
+    for path in map.keys() {
+        for (refused, why) in KAVITA_NOT_SET_HERE {
+            if within(refused, path) || within(path, refused) {
+                return Err(format!(
+                    "desired: {path} is not set this way ({refused}: {why})"
+                ));
+            }
         }
     }
     Ok(())
@@ -1201,6 +1243,13 @@ impl Spec {
                 }
                 Desired::QualityProfiles(policy)
             }
+            TaskName::ServerSettings => {
+                let map: BTreeMap<String, serde_json::Value> = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                field_paths(&map, "desired").map_err(invalid)?;
+                kavita_paths(&map).map_err(invalid)?;
+                Desired::KavitaServerSettings(map)
+            }
             TaskName::ServerConfiguration => {
                 let map: BTreeMap<String, serde_json::Value> = serde_json::from_value(raw.desired)
                     .map_err(|e| invalid(format!("desired: {e}")))?;
@@ -1561,6 +1610,7 @@ impl Spec {
             Desired::SeerrWebhook(_) => "webhook",
             Desired::KoelRadioStations(_) => "radio-stations",
             Desired::SuggestArrConfiguration(_) => "configuration",
+            Desired::KavitaServerSettings(_) => "server-settings",
         }
     }
 }
@@ -2032,6 +2082,37 @@ mod tests {
         let bad_credential = good.replace("ntfy-abo-topics", "a/b");
         assert!(reason(ntfy(&bad_credential)).contains("is not a credential name"));
         assert!(reason(ntfy(r#"{}"#)).contains("missing field"));
+    }
+
+    fn kavita(desired: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"kavita","base_url":"http://127.0.0.1:5000","api_key_credential":"kavita-converge-key","task":"server-settings","desired":{desired}}}"#
+        ))
+    }
+
+    #[test]
+    fn kavita_takes_setting_paths_but_not_what_the_host_or_kavita_own() {
+        let spec = kavita(r#"{"oidcConfig.autoLogin": true, "enableOpds": true}"#).unwrap();
+        assert_eq!(spec.task_name(), "server-settings");
+        assert_eq!(spec.service.key_header(), "X-Api-Key");
+        for path in [
+            "oidcConfig.authority",
+            "oidcConfig.secret",
+            "oidcConfig.customScopes",
+            "oidcConfig",
+            "smtpConfig",
+            "smtpConfig.password",
+            "port",
+            "installId",
+        ] {
+            let err = reason(kavita(&format!(r#"{{"{path}": 1}}"#)));
+            assert!(err.contains("is not set this way"), "{path}: {err}");
+        }
+        // A field next to a refused one is fine.
+        assert!(kavita(r#"{"smtpConfig.host": "mail"}"#).is_ok());
+        assert!(reason(kavita("{}")).contains("names no field"));
+        let other = r#"{"service":"jellyfin","base_url":"http://x","api_key_credential":"k","task":"server-settings","desired":{"a":1}}"#;
+        assert!(reason(parse(other)).contains("does not belong"));
     }
 
     #[test]

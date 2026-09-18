@@ -1396,6 +1396,62 @@ the specs it deploys: `indexer-config` `unchanged` everywhere, and
 `delay-profiles` reporting exactly the one intended difference,
 `torrentDelay 0 -> 30`.
 
+## 25. Kavita: its server settings (v0.20.0, 2026-09-18)
+
+The host set Kavita's OIDC switches with `sqlite3` in a unit that ran before
+every start of the service and was *required* by it. Twice (2026-09-08,
+2026-09-14) a database still locked by the stopping process failed that unit,
+and with it Kavita. The reason given for staying with SQLite was "there is no
+API access": no account had an API key.
+
+**That was measured in the wrong table.** Since 0.8.9 Kavita keeps keys in
+`AppUserAuthKey` (`ManualMigrations/v0.8.9/MigrateToAuthKeys.cs`), and
+`AspNetUsers.ApiKey` is read by nobody -- a key written there was refused, and
+the conclusion was drawn from that. Every account on the host already held two
+keys (`opds`, `image-only`).
+
+An auth key in `x-api-key` is tried before any other scheme
+(`IdentityServiceExtensions.cs`, `ForwardDefaultSelector`) and signs the
+request in **as its account, with all its roles**
+(`AuthKeyAuthenticationHandler`). Kavita does not restrict a key by its name.
+So an administrator's key reaches every administrator's endpoint, the settings
+among them. The probe asks one of those (`/api/Server/server-info-slim`), so a
+key of an account that is no administrator fails at once instead of at the
+first write.
+
+| task | read | write |
+|---|---|---|
+| `server-settings` | `GET /api/Settings` | `POST /api/Settings` (the whole document) |
+
+Checked by path against `ServerSettingDto` of the description in Kavita's
+source tree (`openapi/SOURCE.md`), like Jellyfin's `server-configuration` (§6).
+The OIDC block takes effect at once: `SettingsService.UpdateSettings` sets
+`Configuration.OidcSettings` in the running process; no restart.
+
+### What a spec may not name
+
+Kavita copies `authority`, `clientId`, `secret` and `customScopes` from
+`appsettings.json` into the database **at every start** (`Seed.cs`), and the
+host writes that file. A spec setting them would be undone at the next start
+-- and a changed `authority` clears every account's OIDC link
+(`oidcService.ClearOidcIds()`). `port`, `ipAddresses`, `baseUrl` and
+`cacheSize` are "managed in appSetting.json" in Kavita's own words, and the
+host writes that file too. `enabled` is derived, the install fields are
+Kavita's. The SMTP password is a secret, and a spec is no place for one. All of
+these are refused when the spec is loaded, and so is any path containing or
+contained in one of them (`oidcConfig` as a whole).
+
+### Two values in the answer
+
+`oidcConfig.secret` comes back as asterisks of its length; when exactly those
+asterisks come back in a `POST`, Kavita puts the stored secret in again
+(`UpdateOidcSettings`). A round trip keeps it -- which is why the task sends the
+document as it was read. `smtpConfig.password` comes back in clear text. No
+change can show either (neither can be named), and no error carries anything
+from a settings body: a decode error says only where it failed, and a refused
+write shows Kavita's sentence only when it is one short line (Kavita answers a
+translated rule, never a value).
+
 ## 20. Not in the pilot
 
 

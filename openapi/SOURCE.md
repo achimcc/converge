@@ -23,6 +23,18 @@ holds names, types and defaults, no configured values.
 |---|---|---|
 | `trailarr-0.11.5.json` | `GET /api/v1/openapi.json` of that container, `jq -S` | `11251eebd9493881e400c7b44e548f2be36cf1c2f09b9e38f5b19878c5a66257` |
 
+`kavita-0.9.1.4.json` comes from the source tree of the release Kavita ships
+as `v0.9.1.4` (https://github.com/kareadita/kavita/archive/v0.9.1.4.tar.gz,
+the nixpkgs source of the package the host deploys; fetched 2026-09-18),
+copied byte for byte. It declares `info.version` 0.9.1.1: Kavita did not
+regenerate it for the two patch releases after that, and the running 0.9.1.4
+reports itself as 0.9.1.3. The file is named after the package, because that
+is the version a consumer passes in.
+
+| file | source | sha256 |
+|---|---|---|
+| `kavita-0.9.1.4.json` | `openapi.json` at the top of that tree | `e7ced995b077a067d4b9fc741e8fe24fee9f11346b123f2f53887379cb9e45df` |
+
 ntfy publishes no OpenAPI description at all; its fields are checked by
 recorded answers and at runtime only (`docs/design.md` §10).
 

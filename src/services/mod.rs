@@ -1,6 +1,7 @@
 pub mod arr;
 pub mod bindery;
 pub mod jellyfin;
+pub mod kavita;
 pub mod koel;
 pub mod ntfy;
 pub mod providers;

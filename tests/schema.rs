@@ -684,3 +684,40 @@ fn the_hosts_documents_are_checked_by_name_type_and_enum() {
         Vec::<String>::new()
     );
 }
+
+fn kavita() -> Value {
+    doc("kavita-0.9.1.4")
+}
+
+#[test]
+fn the_kavita_endpoints_and_wire_types_match() {
+    let found = check(
+        &kavita(),
+        &converge::services::kavita::ENDPOINTS,
+        &converge::services::kavita::wire_types(),
+    );
+    assert_eq!(found, Vec::<String>::new());
+}
+
+#[test]
+fn kavitas_oidc_switches_are_paths_of_its_settings_and_a_typo_is_not() {
+    use converge::services::kavita::SERVER_SETTINGS;
+    let desired = serde_json::json!({
+        "oidcConfig.provisionAccounts": true,
+        "oidcConfig.syncUserSettings": true,
+        "oidcConfig.requireVerifiedEmail": false,
+        "oidcConfig.disablePasswordAuthentication": true,
+        "oidcConfig.autoLogin": true,
+        "oidcConfig.rolesClaim": "kavita_roles",
+        "oidcConfig.rolesPrefix": ""
+    });
+    let map = desired.as_object().unwrap().clone().into_iter().collect();
+    assert_eq!(
+        converge::schema::check_paths(&kavita(), SERVER_SETTINGS, &map),
+        Vec::<String>::new()
+    );
+    let typo = serde_json::json!({"oidcConfig.autoLogn": true, "oidcConfig.autoLogin": "yes"});
+    let map = typo.as_object().unwrap().clone().into_iter().collect();
+    let found = converge::schema::check_paths(&kavita(), SERVER_SETTINGS, &map);
+    assert_eq!(found.len(), 2, "{found:?}");
+}

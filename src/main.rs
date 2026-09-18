@@ -11,7 +11,7 @@ use converge::{
     error::Error,
     schema,
     services::{
-        arr, bindery, jellyfin, koel, ntfy, providers, seerr, servarr, suggestarr, trailarr,
+        arr, bindery, jellyfin, kavita, koel, ntfy, providers, seerr, servarr, suggestarr, trailarr,
     },
     spec::{Desired, Service, Spec},
 };
@@ -19,7 +19,7 @@ use converge::{
 const USAGE: &str = "usage:
   converge apply [--deadline <seconds>] <spec.json>...
   converge plan [--deadline <seconds>] <spec.json>...
-  converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr> --openapi <file> [--spec <spec.json>]...
+  converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr|kavita> --openapi <file> [--spec <spec.json>]...
   converge schema-check --service ntfy|bindery|seerr|koel|suggestarr [--spec <spec.json>]...";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -138,6 +138,10 @@ fn reconcile_one(
         }
         Desired::ServerConfiguration(set) => {
             let task = jellyfin::ServerConfiguration { set: set.clone() };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        Desired::KavitaServerSettings(set) => {
+            let task = kavita::ServerSettings { set: set.clone() };
             run(mode, &task, &transport, &SystemClock, timing)
         }
         Desired::NamedConfiguration(settings) => {
@@ -562,6 +566,7 @@ fn schema_check(args: &[String]) -> ExitCode {
         }
         "jellyfin" => (jellyfin::ENDPOINTS.to_vec(), jellyfin::wire_types()),
         "trailarr" => (trailarr::ENDPOINTS.to_vec(), trailarr::wire_types()),
+        "kavita" => (kavita::ENDPOINTS.to_vec(), kavita::wire_types()),
         _ => return usage(Some(&format!("unknown service {service:?}"))),
     };
     let document = std::fs::read_to_string(&openapi)
@@ -600,6 +605,10 @@ fn schema_check(args: &[String]) -> ExitCode {
             Desired::PluginConfigurations(_) => (Vec::new(), 0),
             Desired::ServerConfiguration(set) => (
                 schema::check_paths(&document, jellyfin::SERVER_CONFIGURATION, set),
+                set.len(),
+            ),
+            Desired::KavitaServerSettings(set) => (
+                schema::check_paths(&document, kavita::SERVER_SETTINGS, set),
                 set.len(),
             ),
             Desired::NamedConfiguration(settings) => (
