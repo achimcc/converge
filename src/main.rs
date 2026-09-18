@@ -144,6 +144,12 @@ fn reconcile_one(
             let task = kavita::ServerSettings { set: set.clone() };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::KavitaLibraries(libraries) => {
+            let task = kavita::Libraries {
+                libraries: libraries.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
         Desired::NamedConfiguration(settings) => {
             let task = jellyfin::NamedConfiguration {
                 key: settings.key,
@@ -611,6 +617,24 @@ fn schema_check(args: &[String]) -> ExitCode {
                 schema::check_paths(&document, kavita::SERVER_SETTINGS, set),
                 set.len(),
             ),
+            // Written with the update's body, compared with the answer: each
+            // field must be a property of both.
+            Desired::KavitaLibraries(libraries) => {
+                let mut found = Vec::new();
+                for (folder, fields) in libraries {
+                    for component in [
+                        kavita::LIBRARY_UPDATE_COMPONENT,
+                        kavita::LIBRARY_READ_COMPONENT,
+                    ] {
+                        found.extend(
+                            schema::check_paths(&document, component, fields)
+                                .into_iter()
+                                .map(|f| format!("library {folder}: {f}")),
+                        );
+                    }
+                }
+                (found, libraries.values().map(|f| f.len()).sum())
+            }
             Desired::NamedConfiguration(settings) => (
                 schema::check_paths(&document, settings.key.component(), &settings.set),
                 settings.set.len(),

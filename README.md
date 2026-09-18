@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.20.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.21.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11),
 **SuggestArr** (2.14) and **Kavita** (0.9), each
 replacing a shell unit or an OpenTofu resource on the host it was written
@@ -55,6 +55,7 @@ for:
 | Seerr | `webhook` | the webhook agent: fields by path, the payload template as an object (stored the way the agent parses it), header values from credentials |
 | Koel | `radio-stations` | the account's own stations by name (refused while its `include_public_media` is on), every field written whole; a logo from an image file (at most 2 MiB), sent only where a station has none; missing stations are added |
 | Kavita | `server-settings` | fields of `ServerSettingDto`, by path -- among them the OIDC switches. The key is an auth key of an administrator in `x-api-key`. What the host writes into `appsettings.json` (authority, client id, secret, scopes, port, addresses, base URL, cache size), the SMTP password and Kavita's own install fields are refused |
+| Kavita | `libraries` | libraries by a folder they hold: fields of the update, written whole; a change of `type` is followed by a forced scan. converge does not create libraries |
 | SuggestArr | `configuration` | the whole flat configuration: plain fields by name, secret fields from credentials (never shown), and the Jellyfin libraries derived from what the service reports, minus the collection types named |
 
 ## A spec

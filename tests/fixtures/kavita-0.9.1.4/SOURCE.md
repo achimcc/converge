@@ -6,6 +6,8 @@ an auth key of an administrator in `x-api-key` (design §25):
 
 - `settings.json` — `GET /api/Settings`.
 - `server-info-slim.json` — `GET /api/Server/server-info-slim`.
+- `libraries.json` — `GET /api/Library/libraries` (recorded the same day,
+  unmasked: folder paths, names and switches carry no secret).
 
 **This is masked, not verbatim.** Before the answers left the host:
 

@@ -721,3 +721,33 @@ fn kavitas_oidc_switches_are_paths_of_its_settings_and_a_typo_is_not() {
     let found = converge::schema::check_paths(&kavita(), SERVER_SETTINGS, &map);
     assert_eq!(found.len(), 2, "{found:?}");
 }
+
+#[test]
+fn a_kavita_library_field_must_be_in_the_update_and_in_the_answer() {
+    use converge::services::kavita::{LIBRARY_READ_COMPONENT, LIBRARY_UPDATE_COMPONENT};
+    let map = serde_json::json!({"name": "Buecher", "type": 2, "folderWatching": true})
+        .as_object()
+        .unwrap()
+        .clone()
+        .into_iter()
+        .collect();
+    for component in [LIBRARY_UPDATE_COMPONENT, LIBRARY_READ_COMPONENT] {
+        assert_eq!(
+            converge::schema::check_paths(&kavita(), component, &map),
+            Vec::<String>::new(),
+            "{component}"
+        );
+    }
+    // `coverImage` is in the answer but not in the update; `fileGroupTypes`
+    // the other way round.
+    let only_read = serde_json::json!({"coverImage": "x"})
+        .as_object()
+        .unwrap()
+        .clone()
+        .into_iter()
+        .collect();
+    assert_eq!(
+        converge::schema::check_paths(&kavita(), LIBRARY_UPDATE_COMPONENT, &only_read).len(),
+        1
+    );
+}

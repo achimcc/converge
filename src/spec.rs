@@ -124,6 +124,7 @@ enum TaskName {
     RadioStations,
     Configuration,
     ServerSettings,
+    Libraries,
 }
 
 impl TaskName {
@@ -162,7 +163,7 @@ impl TaskName {
             | TaskName::Webhook => service == Service::Seerr,
             TaskName::RadioStations => service == Service::Koel,
             TaskName::Configuration => service == Service::SuggestArr,
-            TaskName::ServerSettings => service == Service::Kavita,
+            TaskName::ServerSettings | TaskName::Libraries => service == Service::Kavita,
         }
     }
 }
@@ -589,6 +590,7 @@ pub enum Desired {
     KoelRadioStations(Vec<KoelStation>),
     SuggestArrConfiguration(SuggestArrConfiguration),
     KavitaServerSettings(BTreeMap<String, serde_json::Value>),
+    KavitaLibraries(BTreeMap<String, BTreeMap<String, serde_json::Value>>),
 }
 
 fn web_url(url: &str) -> bool {
@@ -1250,6 +1252,36 @@ impl Spec {
                 kavita_paths(&map).map_err(invalid)?;
                 Desired::KavitaServerSettings(map)
             }
+            // Kavita's libraries by a folder they hold (design §26).
+            TaskName::Libraries => {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Raw {
+                    libraries: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+                }
+                let desired: Raw = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if desired.libraries.is_empty() {
+                    return Err(invalid("desired.libraries names no library".to_string()));
+                }
+                for (folder, fields) in &desired.libraries {
+                    let at = format!("desired.libraries.{folder}");
+                    if !folder.starts_with('/') || folder.len() < 2 {
+                        return Err(invalid(format!(
+                            "{at}: a library is named by an absolute folder"
+                        )));
+                    }
+                    // The id and the folders say WHICH library is meant; the
+                    // file types travel under two names and are left alone.
+                    plain_fields(
+                        fields,
+                        &at,
+                        &["id", "folders", "fileGroupTypes", "libraryFileTypes"],
+                    )
+                    .map_err(invalid)?;
+                }
+                Desired::KavitaLibraries(desired.libraries)
+            }
             TaskName::ServerConfiguration => {
                 let map: BTreeMap<String, serde_json::Value> = serde_json::from_value(raw.desired)
                     .map_err(|e| invalid(format!("desired: {e}")))?;
@@ -1611,6 +1643,7 @@ impl Spec {
             Desired::KoelRadioStations(_) => "radio-stations",
             Desired::SuggestArrConfiguration(_) => "configuration",
             Desired::KavitaServerSettings(_) => "server-settings",
+            Desired::KavitaLibraries(_) => "libraries",
         }
     }
 }
@@ -2113,6 +2146,25 @@ mod tests {
         assert!(reason(kavita("{}")).contains("names no field"));
         let other = r#"{"service":"jellyfin","base_url":"http://x","api_key_credential":"k","task":"server-settings","desired":{"a":1}}"#;
         assert!(reason(parse(other)).contains("does not belong"));
+    }
+
+    #[test]
+    fn kavita_libraries_are_named_by_folder_and_not_by_id() {
+        let lib = |d: &str| {
+            parse(&format!(
+                r#"{{"service":"kavita","base_url":"http://127.0.0.1:5000","api_key_credential":"k","task":"libraries","desired":{d}}}"#
+            ))
+        };
+        let spec =
+            lib(r#"{"libraries":{"/tank/data/media/books":{"name":"Buecher","type":2}}}"#).unwrap();
+        assert_eq!(spec.task_name(), "libraries");
+        for field in ["id", "folders", "fileGroupTypes", "libraryFileTypes"] {
+            let d = format!(r#"{{"libraries":{{"/b":{{"{field}":1}}}}}}"#);
+            assert!(reason(lib(&d)).contains("is not set this way"), "{field}");
+        }
+        assert!(reason(lib(r#"{"libraries":{"books":{"type":2}}}"#)).contains("absolute folder"));
+        assert!(reason(lib(r#"{"libraries":{}}"#)).contains("names no library"));
+        assert!(reason(lib(r#"{"libraries":{"/b":{}}}"#)).contains("names no field"));
     }
 
     #[test]

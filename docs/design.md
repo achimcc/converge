@@ -1452,6 +1452,40 @@ from a settings body: a decode error says only where it failed, and a refused
 write shows Kavita's sentence only when it is one short line (Kavita answers a
 translated rule, never a value).
 
+## 26. Kavita: its libraries (v0.21.0, 2026-09-18)
+
+The host kept its one library at the declared name and type with `sqlite3`
+before every start of Kavita -- because "the update needs an administrator".
+With an auth key (§25) it has one.
+
+| task | read | write |
+|---|---|---|
+| `libraries` | `GET /api/Library/libraries` | `POST /api/Library/update` (the whole library), then `POST /api/Library/scan?libraryId=&force=true` after a change of `type` |
+
+**Found by a folder it holds**, not by id or name: an id is a row, and the
+name is one of the things being set. A folder no library holds is an error --
+converge does not create libraries -- and so is a folder two libraries hold.
+Libraries the spec does not name are listed as notes.
+
+**The update is written whole, from the answer.** `UpdateLibraryDto` requires
+fifteen fields; the answer (`LibraryDto`) carries each under the same name,
+except the file types, `libraryFileTypes` there and `fileGroupTypes` here. A
+field the answer lacks is an error before anything is sent. `id`, `folders`
+and the file types cannot be named by a spec. Each spec field is checked
+against both components: it is written with one and compared with the other.
+
+**A change of `type` forces a scan.** Kavita's update scans after a type change
+-- without `force`, and its scanner skips files that did not change on disk. A
+library switched from Manga to Book would keep every series as the manga
+parser read it. The host did this before by turning scan timestamps back in
+the database; here it is the scan endpoint with `force=true`, sent only when
+`type` differs.
+
+Kavita's side navigation keeps a copy of a library's name per user
+(`AppUserSideNavStream.Name`). The web interface reads the library itself
+(`UserRepository.GetSideNavStreams`), only OPDS shows the copy; the task does
+not touch it.
+
 ## 20. Not in the pilot
 
 
