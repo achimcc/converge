@@ -1391,6 +1391,11 @@ pinned an open door, because the default was *on*. A declared value that matches
 is a guard; an undeclared one is a coincidence that the next upstream release
 may end.
 
+Before release, `plan` ran on the host against all three running services with
+the specs it deploys: `indexer-config` `unchanged` everywhere, and
+`delay-profiles` reporting exactly the one intended difference,
+`torrentDelay 0 -> 30`.
+
 ## 20. Not in the pilot
 
 
