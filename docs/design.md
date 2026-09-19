@@ -1635,6 +1635,42 @@ every spec of the run.
 (`core/scheduling.py`: disabled unless a cron or a positive interval is set).
 A spec that wants a guide that stays current says so.
 
+## 30. Dispatcharr: an Xtream Codes account from credentials (v0.26.0, 2026-09-19)
+
+The host adds a paid Xtream Codes provider next to the public broadcasters.
+Such an account is three secrets -- the provider's `server_url`, a `username`
+and a `password` -- and §29 kept all credentials out of a spec, because a plan
+prints what differs. An account now takes them from credentials:
+
+```json
+"accounts": {"Anbieter": {"account_type": "XC", "is_active": true,
+  "secret_fields": {"server_url": "xt-url", "username": "xt-user", "password": "xt-pass"}}}
+```
+
+`secret_fields` is not a Dispatcharr field; it maps a field to the credential
+that holds its value, for M3U accounts only, and a field may not stand both
+there and among the plain ones. The field names are still checked against the
+OpenAPI components, so a renamed field fails the schema check.
+
+Read in `M3UAccountSerializer` (0.31.0) and in the recorded answer:
+`server_url` and `username` come back in the clear, `password` is
+`write_only` and answers as `""`. So the two are **compared without being
+shown** -- a change reads `(another value, not shown) -> (the credential's,
+not shown)` -- and the password is **handed over on every `apply`**, as for
+bindery (§14): a `PATCH` that carries only the password. Dispatcharr saves it
+without side effects: `refresh_account_on_save` acts only on a created
+account, and the refresh schedule is rewritten only when `refresh_interval`,
+`is_active` or `refresh_task` change (`apps/m3u/signals.py`).
+
+When an account is added or one of its readable secrets differs, the body
+carries every secret: a new user name with the old password would be half an
+account. A rotated password alone therefore reaches Dispatcharr on the next
+`apply` without a change in the plan -- the plan cannot see it.
+
+Nothing else changes for a group: an Xtream account's groups load like a
+file's, asynchronously after the account's first refresh, and `m3u-groups`
+waits for them as before.
+
 ## 20. Not in the pilot
 
 

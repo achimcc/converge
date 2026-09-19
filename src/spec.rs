@@ -636,10 +636,12 @@ pub struct DispatcharrDesired {
 pub enum DispatcharrTask {
     /// The default stream profile, by name.
     StreamSettings { default_stream_profile: String },
-    /// M3U accounts or EPG sources by name, their fields by name.
+    /// M3U accounts or EPG sources by name, their fields by name, and an
+    /// account's secret fields by the credential that holds each (§30).
     Entries(
         crate::services::dispatcharr::EntryKind,
         BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+        BTreeMap<String, BTreeMap<String, String>>,
     ),
     /// account name -> group name -> fields.
     Groups(BTreeMap<String, BTreeMap<String, BTreeMap<String, serde_json::Value>>>),
@@ -1796,10 +1798,13 @@ impl Spec {
                 DispatcharrTask::Entries(
                     crate::services::dispatcharr::EntryKind::M3uAccount,
                     _,
+                    _,
                 ) => "m3u-accounts",
-                DispatcharrTask::Entries(crate::services::dispatcharr::EntryKind::EpgSource, _) => {
-                    "epg-sources"
-                }
+                DispatcharrTask::Entries(
+                    crate::services::dispatcharr::EntryKind::EpgSource,
+                    _,
+                    _,
+                ) => "epg-sources",
                 DispatcharrTask::Groups(_) => "m3u-groups",
             },
         }
@@ -1812,7 +1817,7 @@ fn dispatcharr_desired(
     task: TaskName,
     desired: serde_json::Value,
 ) -> Result<DispatcharrDesired, String> {
-    use crate::services::dispatcharr::{EntryKind, GROUP_FIELDS};
+    use crate::services::dispatcharr::{EntryKind, GROUP_FIELDS, SECRET_FIELDS};
     type Fields = BTreeMap<String, serde_json::Value>;
 
     fn fields_ok(at: &str, fields: &Fields, allowed: Option<&[&str]>) -> Result<(), String> {
@@ -1899,13 +1904,43 @@ fn dispatcharr_desired(
             if entries.is_empty() {
                 return Err(format!("{at} names no entry"));
             }
-            for (name, fields) in &entries {
+            let mut plain = BTreeMap::new();
+            let mut secrets = BTreeMap::new();
+            for (name, mut fields) in entries {
                 if name.is_empty() {
                     return Err(format!("{at}: an entry name is empty"));
                 }
-                fields_ok(&format!("{at}.{name}"), fields, None)?;
+                let here = format!("{at}.{name}");
+                // `secret_fields` is not a Dispatcharr field: field -> the
+                // credential holding its value, for M3U accounts only.
+                if let Some(raw) = fields.remove("secret_fields") {
+                    if kind != EntryKind::M3uAccount {
+                        return Err(format!("{here}: secret_fields are for an M3U account only"));
+                    }
+                    let map: BTreeMap<String, String> = serde_json::from_value(raw)
+                        .map_err(|e| format!("{here}.secret_fields: {e}"))?;
+                    for (field, credential) in &map {
+                        if !SECRET_FIELDS.contains(&field.as_str()) {
+                            return Err(format!(
+                                "{here}.secret_fields: {field} is not a secret field ({})",
+                                SECRET_FIELDS.join(", ")
+                            ));
+                        }
+                        if fields.contains_key(field) {
+                            return Err(format!(
+                                "{here}: {field} is both a field and in secret_fields"
+                            ));
+                        }
+                        credential_name(credential, &format!("{here}.secret_fields.{field}"))?;
+                    }
+                    if !map.is_empty() {
+                        secrets.insert(name.clone(), map);
+                    }
+                }
+                fields_ok(&here, &fields, None)?;
+                plain.insert(name, fields);
             }
-            (username, DispatcharrTask::Entries(kind, entries))
+            (username, DispatcharrTask::Entries(kind, plain, secrets))
         }
         TaskName::M3uGroups => {
             let d: Groups = serde_json::from_value(desired).map_err(parse_err)?;
@@ -3047,5 +3082,59 @@ mod tests {
             r#"{"service":"jellyfin","base_url":"http://x","api_key_credential":"k","task":"m3u-accounts","desired":{"username":"c","accounts":{"A":{"file_path":"/a"}}}}"#,
         );
         assert!(other.is_err(), "Dispatcharr only");
+    }
+
+    #[test]
+    fn an_xtream_account_takes_its_secrets_from_credentials() {
+        let spec = dispatcharr(
+            "m3u-accounts",
+            r#"{"username":"c","accounts":{"X":{"account_type":"XC","secret_fields":{"server_url":"xt-url","username":"xt-user","password":"xt-pass"}}}}"#,
+        )
+        .unwrap();
+        let Desired::Dispatcharr(d) = &spec.desired else {
+            panic!("not a Dispatcharr spec")
+        };
+        let DispatcharrTask::Entries(_, entries, secrets) = &d.task else {
+            panic!("not an entries task")
+        };
+        // The credential names are not fields Dispatcharr would be sent.
+        assert_eq!(entries["X"].keys().collect::<Vec<_>>(), ["account_type"]);
+        assert_eq!(secrets["X"]["password"], "xt-pass");
+        assert_eq!(secrets["X"]["server_url"], "xt-url");
+        assert_eq!(secrets["X"].len(), 3);
+    }
+
+    #[test]
+    fn secret_fields_are_checked() {
+        let refused =
+            |task: &str, desired: &str| dispatcharr(task, desired).unwrap_err().to_string();
+        let source = refused(
+            "epg-sources",
+            r#"{"username":"c","sources":{"E":{"url":"https://x/e.xml","secret_fields":{"username":"k"}}}}"#,
+        );
+        assert!(source.contains("M3U account"), "{source}");
+        let unknown = refused(
+            "m3u-accounts",
+            r#"{"username":"c","accounts":{"X":{"account_type":"XC","secret_fields":{"max_streams":"k"}}}}"#,
+        );
+        assert!(
+            unknown.contains("server_url, username, password"),
+            "{unknown}"
+        );
+        let twice = refused(
+            "m3u-accounts",
+            r#"{"username":"c","accounts":{"X":{"server_url":"http://a","secret_fields":{"server_url":"k"}}}}"#,
+        );
+        assert!(twice.contains("both"), "{twice}");
+        let path = refused(
+            "m3u-accounts",
+            r#"{"username":"c","accounts":{"X":{"account_type":"XC","secret_fields":{"password":"../k"}}}}"#,
+        );
+        assert!(path.contains("secret_fields.password"), "{path}");
+        let not_a_map = refused(
+            "m3u-accounts",
+            r#"{"username":"c","accounts":{"X":{"account_type":"XC","secret_fields":["password"]}}}"#,
+        );
+        assert!(not_a_map.contains("secret_fields"), "{not_a_map}");
     }
 }

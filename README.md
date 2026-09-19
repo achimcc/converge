@@ -58,7 +58,7 @@ for:
 | Kavita | `libraries` | libraries by a folder they hold: fields of the update, written whole; a change of `type` is followed by a forced scan. converge does not create libraries |
 | Audiobookshelf | `auth-settings` | the authentication settings by name, `PATCH`ed key by key; the OIDC client secret from a credential, compared without being shown. `""` and `null` are one value, as Audiobookshelf treats them (except the redirect subfolder) |
 | Dispatcharr | `stream-settings` | the default stream profile, by name |
-| Dispatcharr | `m3u-accounts`, `epg-sources` | accounts and sources by name: a missing one is added, the named fields are set; every task logs in as a service account, once per run |
+| Dispatcharr | `m3u-accounts`, `epg-sources` | accounts and sources by name: a missing one is added, the named fields are set; an account's `server_url`, `username` and `password` may come from credentials (`secret_fields`: compared unseen, the password handed over on every apply); every task logs in as a service account, once per run |
 | Dispatcharr | `m3u-groups` | the settings of channel groups within an account; readiness waits until the account's playlist has been read |
 | Audiobookshelf | `admin-permissions` | permissions every account of the named types must hold, `PATCH`ed per account with the differing keys only; the answer carries every account's token, and nothing but username, type and the named permissions is ever shown |
 | SuggestArr | `configuration` | the whole flat configuration: plain fields by name, secret fields from credentials (never shown), and the Jellyfin libraries derived from what the service reports, minus the collection types named |

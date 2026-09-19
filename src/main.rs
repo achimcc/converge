@@ -184,10 +184,23 @@ fn reconcile_one(
                 };
                 run(mode, &task, &transport, &SystemClock, timing)
             }
-            DispatcharrTask::Entries(kind, entries) => {
+            DispatcharrTask::Entries(kind, entries, credentials_of) => {
+                // Every hidden value before the first request, as for plugins.
+                let mut secrets = std::collections::BTreeMap::new();
+                for (name, fields) in credentials_of {
+                    let mut values = std::collections::BTreeMap::new();
+                    for (field, credential) in fields {
+                        values.insert(
+                            field.clone(),
+                            read_credential(credentials, credential).map_err(fail)?,
+                        );
+                    }
+                    secrets.insert(name.clone(), values);
+                }
                 let task = dispatcharr::Entries {
                     kind: *kind,
                     entries: entries.clone(),
+                    secrets,
                 };
                 run(mode, &task, &transport, &SystemClock, timing)
             }
@@ -813,7 +826,7 @@ fn schema_check(args: &[String]) -> ExitCode {
             // with (the endpoint's declared body is wrong, design §29).
             Desired::Dispatcharr(desired) => match &desired.task {
                 DispatcharrTask::StreamSettings { .. } => (Vec::new(), 0),
-                DispatcharrTask::Entries(kind, entries) => {
+                DispatcharrTask::Entries(kind, entries, secrets) => {
                     let components = match kind {
                         dispatcharr::EntryKind::M3uAccount => [
                             dispatcharr::M3U_ACCOUNT_CREATE_COMPONENT,
@@ -825,16 +838,24 @@ fn schema_check(args: &[String]) -> ExitCode {
                         ],
                     };
                     let mut found = Vec::new();
+                    let mut count = 0;
                     for (name, fields) in entries {
+                        // The secret fields by name only: their values are
+                        // credentials, but the fields must exist all the same.
+                        let mut named = fields.clone();
+                        for field in secrets.get(name).into_iter().flat_map(|s| s.keys()) {
+                            named.insert(field.clone(), serde_json::Value::Null);
+                        }
+                        count += named.len();
                         for component in components {
                             found.extend(
-                                schema::check_paths(&document, component, fields)
+                                schema::check_paths(&document, component, &named)
                                     .into_iter()
                                     .map(|f| format!("{name}: {f}")),
                             );
                         }
                     }
-                    (found, entries.values().map(|f| f.len()).sum())
+                    (found, count)
                 }
                 DispatcharrTask::Groups(accounts) => {
                     let mut found = Vec::new();

@@ -446,10 +446,22 @@ impl Task for StreamSettings {
 /// Entries by name, fields by name. A missing entry is added with its fields;
 /// converge never removes one. The same shape for M3U accounts and EPG
 /// sources, which differ only in their endpoints.
+///
+/// An M3U account may also carry `secrets` from credentials (design §30):
+/// `server_url` and `username`, which Dispatcharr answers in the clear and
+/// which are compared without being shown, and `password`, which it answers
+/// as `""` and which is therefore handed over on every `apply`.
 pub struct Entries {
     pub kind: EntryKind,
     pub entries: BTreeMap<String, BTreeMap<String, Value>>,
+    /// Entry name -> field -> value, read from credentials.
+    pub secrets: BTreeMap<String, BTreeMap<String, Secret>>,
 }
+
+/// The secret fields an M3U account may take from a credential, and the one
+/// among them Dispatcharr never answers with (`write_only`).
+pub const SECRET_FIELDS: [&str; 3] = ["server_url", "username", "password"];
+pub const WRITE_ONLY: &str = "password";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EntryKind {
@@ -494,7 +506,34 @@ impl Entries {
         entry: &Entry,
         missing: &mut Vec<String>,
     ) -> Vec<Change> {
-        compare(&self.subject(name), &entry.rest, set, missing)
+        let subject = self.subject(name);
+        let mut changes = compare(&subject, &entry.rest, set, missing);
+        for (field, secret) in self.secrets.get(name).into_iter().flatten() {
+            if field == WRITE_ONLY {
+                continue;
+            }
+            match entry.rest.get(field) {
+                None => missing.push(format!("{subject}: {field}")),
+                Some(now) if now.as_str() != Some(secret.expose()) => changes.push(Change {
+                    subject: subject.clone(),
+                    field: field.clone(),
+                    current: "(another value, not shown)".to_string(),
+                    desired: "(the credential's, not shown)".to_string(),
+                }),
+                Some(_) => {}
+            }
+        }
+        changes
+    }
+
+    /// The spec's fields and, for an entry being written, every secret: a
+    /// changed user name without its password would be half an account.
+    fn body_of(&self, name: &str, set: &BTreeMap<String, Value>) -> Map<String, Value> {
+        let mut body: Map<String, Value> = set.clone().into_iter().collect();
+        for (field, secret) in self.secrets.get(name).into_iter().flatten() {
+            body.insert(field.clone(), json!(secret.expose()));
+        }
+        body
     }
 }
 
@@ -543,7 +582,7 @@ impl Task for Entries {
     fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
         let (_, create, update) = self.kind.endpoints();
         for (name, set) in &self.entries {
-            let mut body: Map<String, Value> = set.clone().into_iter().collect();
+            let mut body = self.body_of(name, set);
             match current.iter().find(|e| &e.name == name) {
                 None => {
                     body.insert("name".to_string(), json!(name));
@@ -564,6 +603,35 @@ impl Task for Entries {
             }
         }
         Ok(())
+    }
+
+    /// The write-only password, on every `apply`: a `PATCH` with nothing
+    /// else, which Dispatcharr saves without a refresh (`refresh_account_on_save`
+    /// acts only on a created account, the schedule only on its own fields).
+    fn hand_over(&self, t: &dyn Transport, current: &Self::Current) -> Result<Vec<String>, Error> {
+        let (_, _, update) = self.kind.endpoints();
+        let mut lines = Vec::new();
+        for (name, secrets) in &self.secrets {
+            let Some(secret) = secrets.get(WRITE_ONLY) else {
+                continue;
+            };
+            let Some(entry) = current.iter().find(|e| &e.name == name) else {
+                return Err(Error::NotFound(vec![self.subject(name)]));
+            };
+            let path = update.path.replace("{id}", &entry.id.to_string());
+            let body = serialize(
+                update.method,
+                &path,
+                &json!({ WRITE_ONLY: secret.expose() }),
+            )?;
+            let reply = t.patch_json(&path, &body)?;
+            expect_status_at(update.method, &path, &reply, &[200])?;
+            lines.push(format!(
+                "{}: {WRITE_ONLY} handed over from credentials (write-only; the rest of the account stays)",
+                self.subject(name)
+            ));
+        }
+        Ok(lines)
     }
 }
 
@@ -811,7 +879,155 @@ mod tests {
         Entries {
             kind: EntryKind::M3uAccount,
             entries: BTreeMap::from([("Oeffentlich-rechtlich".to_string(), fields(set))]),
+            secrets: BTreeMap::new(),
         }
+    }
+
+    const PASSWORD: &str = "xtream-password-never-print";
+    const USERNAME: &str = "xtream-user-never-print";
+    const SERVER: &str = "http://xtream.example:8080";
+
+    /// The recorded account turned into an Xtream Codes account, as a
+    /// provider's would answer: `server_url` and `username` in the clear,
+    /// `password` as an empty string (write-only, `M3UAccountSerializer`).
+    fn xtream_answer(server: &str, user: &str) -> String {
+        with(ACCOUNTS_JSON, |v| {
+            let account = &mut v[1];
+            account["account_type"] = json!("XC");
+            account["server_url"] = json!(server);
+            account["username"] = json!(user);
+            account["password"] = json!("");
+        })
+    }
+
+    fn xtream(set: &[(&str, Value)]) -> Entries {
+        let mut task = accounts(set);
+        task.secrets = BTreeMap::from([(
+            "Oeffentlich-rechtlich".to_string(),
+            BTreeMap::from([
+                ("server_url".to_string(), Secret::new(SERVER.to_string())),
+                ("username".to_string(), Secret::new(USERNAME.to_string())),
+                ("password".to_string(), Secret::new(PASSWORD.to_string())),
+            ]),
+        )]);
+        task
+    }
+
+    fn never_printed(text: &str) {
+        for secret in [PASSWORD, USERNAME, SERVER, "xtream.example", "old-user"] {
+            assert!(!text.contains(secret), "a secret was printed: {text}");
+        }
+    }
+
+    #[test]
+    fn readable_secrets_are_compared_without_being_shown() {
+        let task = xtream(&[("account_type", json!("XC"))]);
+        let same = FakeTransport::default().on_get(
+            M3U_ACCOUNTS.path,
+            vec![ok(&xtream_answer(SERVER, USERNAME))],
+        );
+        assert_eq!(task.diff(&task.read(&same).unwrap()).unwrap(), vec![]);
+
+        let other = FakeTransport::default().on_get(
+            M3U_ACCOUNTS.path,
+            vec![ok(&xtream_answer("http://old.xtream.example", "old-user"))],
+        );
+        let changes = task.diff(&task.read(&other).unwrap()).unwrap();
+        let lines: Vec<String> = changes.iter().map(ToString::to_string).collect();
+        assert_eq!(
+            lines,
+            [
+                "M3U account Oeffentlich-rechtlich: server_url (another value, not shown) -> (the credential's, not shown)",
+                "M3U account Oeffentlich-rechtlich: username (another value, not shown) -> (the credential's, not shown)",
+            ]
+        );
+        never_printed(&lines.join("\n"));
+    }
+
+    #[test]
+    fn a_missing_xtream_account_is_added_with_every_secret() {
+        let task = xtream(&[("account_type", json!("XC")), ("is_active", json!(true))]);
+        let t = FakeTransport::default()
+            .on_get(M3U_ACCOUNTS.path, vec![ok("[]")])
+            .on_put(vec![Step::Answer(201, "{}".to_string())]);
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        never_printed(&changes[0].to_string());
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written[0].0, "/api/m3u/accounts/");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(
+            sent,
+            json!({
+                "name": "Oeffentlich-rechtlich",
+                "account_type": "XC",
+                "is_active": true,
+                "server_url": SERVER,
+                "username": USERNAME,
+                "password": PASSWORD,
+            })
+        );
+    }
+
+    #[test]
+    fn a_changed_readable_secret_is_patched_with_the_password() {
+        // Dispatcharr's `XCClient` logs in with all three; a new user name
+        // with the old password would be a half-written account.
+        let task = xtream(&[("account_type", json!("XC"))]);
+        let t = FakeTransport::default()
+            .on_get(
+                M3U_ACCOUNTS.path,
+                vec![ok(&xtream_answer(SERVER, "old-user"))],
+            )
+            .on_put(vec![Step::Answer(200, "{}".to_string())]);
+        let current = task.read(&t).unwrap();
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written[0].0, "/api/m3u/accounts/2/");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(
+            sent,
+            json!({
+                "account_type": "XC",
+                "server_url": SERVER,
+                "username": USERNAME,
+                "password": PASSWORD,
+            })
+        );
+    }
+
+    #[test]
+    fn the_password_is_handed_over_alone_on_every_apply() {
+        let task = xtream(&[("account_type", json!("XC"))]);
+        let t = FakeTransport::default()
+            .on_get(
+                M3U_ACCOUNTS.path,
+                vec![ok(&xtream_answer(SERVER, USERNAME))],
+            )
+            .on_put(vec![Step::Answer(200, "{}".to_string())]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+        let lines = task.hand_over(&t, &current).unwrap();
+        assert_eq!(
+            lines,
+            ["M3U account Oeffentlich-rechtlich: password handed over from credentials (write-only; the rest of the account stays)"]
+        );
+        never_printed(&lines.join("\n"));
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].0, "/api/m3u/accounts/2/");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(sent, json!({"password": PASSWORD}));
+    }
+
+    #[test]
+    fn an_account_without_secrets_hands_nothing_over() {
+        let task = accounts(&[("is_active", json!(true))]);
+        let t = FakeTransport::default().on_get(M3U_ACCOUNTS.path, vec![ok(ACCOUNTS_JSON)]);
+        let current = task.read(&t).unwrap();
+        assert!(task.hand_over(&t, &current).unwrap().is_empty());
+        assert!(t.written.borrow().is_empty());
     }
 
     #[test]
@@ -862,6 +1078,7 @@ mod tests {
                     ("refresh_interval", json!(12)),
                 ]),
             )]),
+            secrets: BTreeMap::new(),
         };
         let empty = FakeTransport::default()
             .on_get(EPG_SOURCES.path, vec![ok("[]")])
@@ -887,6 +1104,7 @@ mod tests {
                 "epgshare01-de".to_string(),
                 fields(&[("refresh_interval", json!(12))]),
             )]),
+            secrets: BTreeMap::new(),
         };
         assert_eq!(
             task.diff(&task.read(&t).unwrap()).unwrap()[0].to_string(),
