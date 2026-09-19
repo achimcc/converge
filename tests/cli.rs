@@ -1423,7 +1423,7 @@ fn schema_check_checks_dispatcharr_entries_against_create_and_update() {
     let out = check(&[&accounts, &groups]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("13 endpoints"), "{stdout}");
+    assert!(stdout.contains("16 endpoints"), "{stdout}");
 
     // A misspelt field is found in both bodies it would travel in.
     let typo = spec(

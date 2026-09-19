@@ -1,0 +1,2256 @@
+[
+  {
+    "id": 1,
+    "tvg_id": "Das.Erste.de",
+    "name": "Das Erste",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 2,
+    "tvg_id": "ZDF.de",
+    "name": "ZDF",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 3,
+    "tvg_id": "RTL.de",
+    "name": "RTL",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 4,
+    "tvg_id": "SAT.1.de",
+    "name": "SAT.1",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 5,
+    "tvg_id": "ProSieben.de",
+    "name": "ProSieben",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 6,
+    "tvg_id": "kabel.eins.de",
+    "name": "kabel eins",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 7,
+    "tvg_id": "RTLZWEI.de",
+    "name": "RTLZWEI",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 8,
+    "tvg_id": "VOX.de",
+    "name": "VOX",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 9,
+    "tvg_id": "3sat.de",
+    "name": "3sat",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 10,
+    "tvg_id": "ARTE.de",
+    "name": "ARTE",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 11,
+    "tvg_id": "DF1.de",
+    "name": "DF1",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 12,
+    "tvg_id": "Dokusat.de",
+    "name": "Dokusat",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 13,
+    "tvg_id": "Servus.TV.Österreich.de",
+    "name": "Servus TV Österreich",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 14,
+    "tvg_id": "Tele.5.de",
+    "name": "Tele 5",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 15,
+    "tvg_id": "DMAX.de",
+    "name": "DMAX",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 16,
+    "tvg_id": "sixx.de",
+    "name": "sixx",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 17,
+    "tvg_id": "NITRO.de",
+    "name": "NITRO",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 18,
+    "tvg_id": "RTLup.de",
+    "name": "RTLup",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 19,
+    "tvg_id": "SAT.1.Gold.de",
+    "name": "SAT.1 Gold",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 20,
+    "tvg_id": "ProSieben.MAXX.de",
+    "name": "ProSieben MAXX",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 21,
+    "tvg_id": "Comedy.Central.de",
+    "name": "Comedy Central",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 22,
+    "tvg_id": "WDR.de",
+    "name": "WDR",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 23,
+    "tvg_id": "NDR.de",
+    "name": "NDR",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 24,
+    "tvg_id": "BR.de",
+    "name": "BR",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 25,
+    "tvg_id": "SWR/SR.de",
+    "name": "SWR/SR",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 26,
+    "tvg_id": "HR.de",
+    "name": "HR",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 27,
+    "tvg_id": "MDR.de",
+    "name": "MDR",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 28,
+    "tvg_id": "RBB.de",
+    "name": "RBB",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 29,
+    "tvg_id": "SPORT1.de",
+    "name": "SPORT1",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 30,
+    "tvg_id": "SPORT1+.de",
+    "name": "SPORT1+",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 31,
+    "tvg_id": "SportDigital1+.de",
+    "name": "SportDigital1+",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 32,
+    "tvg_id": "eSports1.de",
+    "name": "eSports1",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 33,
+    "tvg_id": "eSportsONE.de",
+    "name": "eSportsONE",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 34,
+    "tvg_id": "Eurosport.1.de",
+    "name": "Eurosport 1",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 35,
+    "tvg_id": "Eurosport.2.de",
+    "name": "Eurosport 2",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 36,
+    "tvg_id": "EXTREME.SPORTS.de",
+    "name": "EXTREME SPORTS",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 37,
+    "tvg_id": "sportdigital.Fussball.de",
+    "name": "sportdigital Fussball",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 38,
+    "tvg_id": "DAZN.de",
+    "name": "DAZN",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 39,
+    "tvg_id": "Auto.Motor.Sport.de",
+    "name": "Auto Motor Sport",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 40,
+    "tvg_id": "KIKA.de",
+    "name": "KIKA",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 41,
+    "tvg_id": "SUPER.RTL.de",
+    "name": "SUPER RTL",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 42,
+    "tvg_id": "TOGGO.plus.de",
+    "name": "TOGGO plus",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 43,
+    "tvg_id": "RiC.de",
+    "name": "RiC",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 44,
+    "tvg_id": "nick.de",
+    "name": "nick",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 45,
+    "tvg_id": "Fix.&.Foxi.de",
+    "name": "Fix & Foxi",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 46,
+    "tvg_id": "Nick.Jr..de",
+    "name": "Nick Jr.",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 47,
+    "tvg_id": "Nicktoons.de",
+    "name": "Nicktoons",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 48,
+    "tvg_id": "Disney.Channel.de",
+    "name": "Disney Channel",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 49,
+    "tvg_id": "PHOENIX.de",
+    "name": "PHOENIX",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 50,
+    "tvg_id": "ARD.alpha.de",
+    "name": "ARD alpha",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 51,
+    "tvg_id": "ONE.de",
+    "name": "ONE",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 52,
+    "tvg_id": "ZDFneo.de",
+    "name": "ZDFneo",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 53,
+    "tvg_id": "ZDFinfo.de",
+    "name": "ZDFinfo",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 54,
+    "tvg_id": "ANIXE.de",
+    "name": "ANIXE",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 55,
+    "tvg_id": "Bibel.TV.de",
+    "name": "Bibel TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 56,
+    "tvg_id": "K-TV.de",
+    "name": "K-TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 57,
+    "tvg_id": "TLC.de",
+    "name": "TLC",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 58,
+    "tvg_id": "Welt.der.Wunder.TV.de",
+    "name": "Welt der Wunder TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 59,
+    "tvg_id": "More.than.Sports.TV.de",
+    "name": "More than Sports TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 60,
+    "tvg_id": "Bon.Gusto.de",
+    "name": "Bon Gusto",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 61,
+    "tvg_id": "Goldstar.TV.de",
+    "name": "Goldstar TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 62,
+    "tvg_id": "Home.&.Garden.TV.de",
+    "name": "Home & Garden TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 63,
+    "tvg_id": "Marco.Polo.TV.de",
+    "name": "Marco Polo TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 64,
+    "tvg_id": "travelxp.4K.de",
+    "name": "travelxp 4K",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 65,
+    "tvg_id": "Rocket.Beans.TV.de",
+    "name": "Rocket Beans TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 66,
+    "tvg_id": "UHD1.de",
+    "name": "UHD1",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 67,
+    "tvg_id": "VOXup.de",
+    "name": "VOXup",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 68,
+    "tvg_id": "tagesschau24.de",
+    "name": "tagesschau24",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 69,
+    "tvg_id": "ntv.de",
+    "name": "ntv",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 70,
+    "tvg_id": "WELT.de",
+    "name": "WELT",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 71,
+    "tvg_id": "N24.DOKU.de",
+    "name": "N24 DOKU",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 72,
+    "tvg_id": "kabel.eins.Doku.de",
+    "name": "kabel eins Doku",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 73,
+    "tvg_id": "Prime.HD.de",
+    "name": "Prime HD",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 74,
+    "tvg_id": "BBC.World.News.de",
+    "name": "BBC World News",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 75,
+    "tvg_id": "BBC.News.de",
+    "name": "BBC News",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 76,
+    "tvg_id": "Bloomberg.Europe.TV.de",
+    "name": "Bloomberg Europe TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 77,
+    "tvg_id": "CNBC.de",
+    "name": "CNBC",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 78,
+    "tvg_id": "CNN.International.de",
+    "name": "CNN International",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 79,
+    "tvg_id": "CNN.Türk.de",
+    "name": "CNN Türk",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 80,
+    "tvg_id": "euronews.(ger).de",
+    "name": "euronews (ger)",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 81,
+    "tvg_id": "Al.Jazeera.de",
+    "name": "Al Jazeera",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 82,
+    "tvg_id": "France.24.(engl.).de",
+    "name": "France 24 (engl.)",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 83,
+    "tvg_id": "France.24.(franz.).de",
+    "name": "France 24 (franz.)",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 84,
+    "tvg_id": "NHK.World.TV.de",
+    "name": "NHK World TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 85,
+    "tvg_id": "DELUXE.MUSIC.de",
+    "name": "DELUXE MUSIC",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 86,
+    "tvg_id": "DMF.de",
+    "name": "DMF",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 87,
+    "tvg_id": "MTV.de",
+    "name": "MTV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 88,
+    "tvg_id": "MTV.Live.HD.de",
+    "name": "MTV Live HD",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 89,
+    "tvg_id": "MTV.80s.de",
+    "name": "MTV 80s",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 90,
+    "tvg_id": "QVC.de",
+    "name": "QVC",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 91,
+    "tvg_id": "QVC2.de",
+    "name": "QVC2",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 92,
+    "tvg_id": "HSE.de",
+    "name": "HSE",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 93,
+    "tvg_id": "HSE.Extra.de",
+    "name": "HSE Extra",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 94,
+    "tvg_id": "Channel21.de",
+    "name": "Channel21",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 95,
+    "tvg_id": "123.tv.de",
+    "name": "123.tv",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 96,
+    "tvg_id": "Sonnenklar.TV.de",
+    "name": "Sonnenklar.TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 97,
+    "tvg_id": "Hamburg.1.de",
+    "name": "Hamburg 1",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 98,
+    "tvg_id": "münchen.tv.de",
+    "name": "münchen.tv",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 99,
+    "tvg_id": "tv.berlin.de",
+    "name": "tv.berlin",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 100,
+    "tvg_id": "LEIPZIG.FERNSEHEN.de",
+    "name": "LEIPZIG FERNSEHEN",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 101,
+    "tvg_id": "Rhein-Neckar.Fernsehen.de",
+    "name": "Rhein-Neckar Fernsehen",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 102,
+    "tvg_id": "ATV.de",
+    "name": "ATV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 103,
+    "tvg_id": "ATV.II.de",
+    "name": "ATV II",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 104,
+    "tvg_id": "BBC.One.de",
+    "name": "BBC One",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 105,
+    "tvg_id": "BBC.Two.de",
+    "name": "BBC Two",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 106,
+    "tvg_id": "BBC.four.de",
+    "name": "BBC four",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 107,
+    "tvg_id": "Canal+.de",
+    "name": "Canal+",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 108,
+    "tvg_id": "Canal+.Cinéma.de",
+    "name": "Canal+ Cinéma",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 109,
+    "tvg_id": "Canal+.Sport.de",
+    "name": "Canal+ Sport",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 110,
+    "tvg_id": "Canale.5.de",
+    "name": "Canale 5",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 111,
+    "tvg_id": "ORF.1.de",
+    "name": "ORF 1",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 112,
+    "tvg_id": "ORF.2.de",
+    "name": "ORF 2",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 113,
+    "tvg_id": "ORF.III.de",
+    "name": "ORF III",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 114,
+    "tvg_id": "ORF.SPORT.+.de",
+    "name": "ORF SPORT +",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 115,
+    "tvg_id": "oe24.TV.de",
+    "name": "oe24.TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 116,
+    "tvg_id": "PULS.4.de",
+    "name": "PULS 4",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 117,
+    "tvg_id": "SRF.1.de",
+    "name": "SRF 1",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 118,
+    "tvg_id": "SRF.zwei.de",
+    "name": "SRF zwei",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 119,
+    "tvg_id": "3+.de",
+    "name": "3+",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 120,
+    "tvg_id": "PULS.acht.de",
+    "name": "PULS acht",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 121,
+    "tvg_id": "STAR.TV.de",
+    "name": "STAR TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 122,
+    "tvg_id": "DR1.de",
+    "name": "DR1",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 123,
+    "tvg_id": "DR2.de",
+    "name": "DR2",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 124,
+    "tvg_id": "Belgien.1.de",
+    "name": "Belgien 1",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 125,
+    "tvg_id": "TV2.de",
+    "name": "TV2",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 126,
+    "tvg_id": "TV5.Monde.de",
+    "name": "TV5 Monde",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 127,
+    "tvg_id": "Show.Turk.de",
+    "name": "Show Turk",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 128,
+    "tvg_id": "Turkmax.Gurme.de",
+    "name": "Turkmax Gurme",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 129,
+    "tvg_id": "Kanal.7.Int.de",
+    "name": "Kanal 7 Int",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 130,
+    "tvg_id": "Euro.D.de",
+    "name": "Euro D",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 131,
+    "tvg_id": "Euro.Star.de",
+    "name": "Euro Star",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 132,
+    "tvg_id": "France.2.de",
+    "name": "France 2",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 133,
+    "tvg_id": "France.3.de",
+    "name": "France 3",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 134,
+    "tvg_id": "France.4.de",
+    "name": "France 4",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 135,
+    "tvg_id": "France.5.de",
+    "name": "France 5",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 136,
+    "tvg_id": "Sky.Cinema.Premiere.HD.de",
+    "name": "Sky Cinema Premiere HD",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 137,
+    "tvg_id": "Sky.Cinema.Family.HD.de",
+    "name": "Sky Cinema Family HD",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 138,
+    "tvg_id": "Sky.Cinema.Highlights.HD.de",
+    "name": "Sky Cinema Highlights HD",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 139,
+    "tvg_id": "Sky.Cinema.Action.HD.de",
+    "name": "Sky Cinema Action HD",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 140,
+    "tvg_id": "Sky.Cinema.Classics.HD.de",
+    "name": "Sky Cinema Classics HD",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 141,
+    "tvg_id": "Sky.Crime.de",
+    "name": "Sky Crime",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 142,
+    "tvg_id": "Sky.Documentaries.de",
+    "name": "Sky Documentaries",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 143,
+    "tvg_id": "Sky.Nature.de",
+    "name": "Sky Nature",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 144,
+    "tvg_id": "Warner.TV.Film.de",
+    "name": "Warner TV Film",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 145,
+    "tvg_id": "KinoweltTV.de",
+    "name": "KinoweltTV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 146,
+    "tvg_id": "Sky.Sport.Bundesliga.de",
+    "name": "Sky Sport Bundesliga",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 147,
+    "tvg_id": "Sky.Sport.News.de",
+    "name": "Sky Sport News",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 148,
+    "tvg_id": "Sky.Sport.F1.de",
+    "name": "Sky Sport F1",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 149,
+    "tvg_id": "Sky.Sport.Premier.League.de",
+    "name": "Sky Sport Premier League",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 150,
+    "tvg_id": "Sky.Sport.Golf.de",
+    "name": "Sky Sport Golf",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 151,
+    "tvg_id": "Sky.Sport.Mix.de",
+    "name": "Sky Sport Mix",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 152,
+    "tvg_id": "Sky.Sport.Tennis.de",
+    "name": "Sky Sport Tennis",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 153,
+    "tvg_id": "Sky.Sport.Top.Event.de",
+    "name": "Sky Sport Top Event",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 154,
+    "tvg_id": "Sky.Sport.Austria.de",
+    "name": "Sky Sport Austria",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 155,
+    "tvg_id": "Sky.One.de",
+    "name": "Sky One",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 156,
+    "tvg_id": "Sky.Atlantic.HD.de",
+    "name": "Sky Atlantic HD",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 157,
+    "tvg_id": "Sky.Krimi.de",
+    "name": "Sky Krimi",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 158,
+    "tvg_id": "sky.replay.de",
+    "name": "sky replay",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 159,
+    "tvg_id": "sky.showcase.de",
+    "name": "sky showcase",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 160,
+    "tvg_id": "Universal.Channel.HD.de",
+    "name": "Universal Channel HD",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 161,
+    "tvg_id": "The.HISTORY.Channel.de",
+    "name": "The HISTORY Channel",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 162,
+    "tvg_id": "Spiegel.Geschichte.de",
+    "name": "Spiegel Geschichte",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 163,
+    "tvg_id": "Motorvision.TV.de",
+    "name": "Motorvision TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 164,
+    "tvg_id": "Discovery.HD.de",
+    "name": "Discovery HD",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 165,
+    "tvg_id": "Nat.Geo.HD.de",
+    "name": "Nat Geo HD",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 166,
+    "tvg_id": "NAT.GEO.WILD.de",
+    "name": "NAT GEO WILD",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 167,
+    "tvg_id": "13th.Street.Universal.de",
+    "name": "13th Street Universal",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 168,
+    "tvg_id": "SyFy.de",
+    "name": "SyFy",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 169,
+    "tvg_id": "Warner.TV.Serie.de",
+    "name": "Warner TV Serie",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 170,
+    "tvg_id": "Warner.TV.Comedy.de",
+    "name": "Warner TV Comedy",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 171,
+    "tvg_id": "CRIME.+.INVESTIGATION.de",
+    "name": "CRIME + INVESTIGATION",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 172,
+    "tvg_id": "Romance.TV.de",
+    "name": "Romance TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 173,
+    "tvg_id": "Heimatkanal.de",
+    "name": "Heimatkanal",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 174,
+    "tvg_id": "Cartoon.Network.de",
+    "name": "Cartoon Network",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 175,
+    "tvg_id": "Classica.de",
+    "name": "Classica",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 176,
+    "tvg_id": "Beate-Uhse.TV.de",
+    "name": "Beate-Uhse.TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 177,
+    "tvg_id": "Adult.Channel.de",
+    "name": "Adult Channel",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 178,
+    "tvg_id": "Animal.Planet.de",
+    "name": "Animal Planet",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 179,
+    "tvg_id": "AXN.Black.de",
+    "name": "AXN Black",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 180,
+    "tvg_id": "Bergblick.de",
+    "name": "Bergblick",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 181,
+    "tvg_id": "Fashion.TV.de",
+    "name": "Fashion TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 182,
+    "tvg_id": "GEO.Television.de",
+    "name": "GEO Television",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 183,
+    "tvg_id": "Gute.Laune.TV.de",
+    "name": "Gute Laune TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 184,
+    "tvg_id": "Jukebox.de",
+    "name": "Jukebox",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 185,
+    "tvg_id": "LUST.PUR.de",
+    "name": "LUST PUR",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 186,
+    "tvg_id": "Mezzo.de",
+    "name": "Mezzo",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 187,
+    "tvg_id": "MTV.Base.de",
+    "name": "MTV Base",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 188,
+    "tvg_id": "Club.MTV.de",
+    "name": "Club MTV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 189,
+    "tvg_id": "MTV.Hits.de",
+    "name": "MTV Hits",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 190,
+    "tvg_id": "MTV.Brand.New.de",
+    "name": "MTV Brand New",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 191,
+    "tvg_id": "Nautical.Channel.de",
+    "name": "Nautical Channel",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 192,
+    "tvg_id": "Playboy.TV.de",
+    "name": "Playboy TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 193,
+    "tvg_id": "kabel.eins.classics.de",
+    "name": "kabel eins classics",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 194,
+    "tvg_id": "SAT.1.emotions.de",
+    "name": "SAT.1 emotions",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 195,
+    "tvg_id": "ProSieben.Fun.de",
+    "name": "ProSieben Fun",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 196,
+    "tvg_id": "NOW.US.de",
+    "name": "NOW US",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 197,
+    "tvg_id": "RTL.Crime.de",
+    "name": "RTL Crime",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 198,
+    "tvg_id": "RTL.Living.de",
+    "name": "RTL Living",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 199,
+    "tvg_id": "RTL.Passion.de",
+    "name": "RTL Passion",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 200,
+    "tvg_id": "Silverline.de",
+    "name": "Silverline",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 201,
+    "tvg_id": "AXN.White.de",
+    "name": "AXN White",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 202,
+    "tvg_id": "Curiosity.Channel.de",
+    "name": "Curiosity Channel",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 203,
+    "tvg_id": "Trace.TV.de",
+    "name": "Trace TV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 204,
+    "tvg_id": "Cartoonito.de",
+    "name": "Cartoonito",
+    "icon_url": "http://dtil.tmsimg.com/assets/s83741_ll_h15_ab.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 205,
+    "tvg_id": "DAZN.1.de",
+    "name": "DAZN 1",
+    "icon_url": "https://sender.epglogos.de/svg/12188.svg",
+    "epg_source": 1
+  },
+  {
+    "id": 206,
+    "tvg_id": "DAZN.2.de",
+    "name": "DAZN 2",
+    "icon_url": "https://sender.epglogos.de/svg/12189.svg",
+    "epg_source": 1
+  },
+  {
+    "id": 207,
+    "tvg_id": "Motorvision+.de",
+    "name": "Motorvision+",
+    "icon_url": "http://ngiss.t-online.de/cm1s/media/c106fe8ef548c796be95ef4d6e17d7718e8f765e.png",
+    "epg_source": 1
+  },
+  {
+    "id": 208,
+    "tvg_id": "Sky.Replay.HD.de",
+    "name": "Sky Replay HD",
+    "icon_url": "http://dtil.tmsimg.com/assets/s111212_ll_h15_ab.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 209,
+    "tvg_id": "Sky.Showcase.HD.de",
+    "name": "Sky Showcase HD",
+    "icon_url": "http://dtil.tmsimg.com/assets/s125325_ll_h15_aa.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 210,
+    "tvg_id": "Sky.Sport.UHD.de",
+    "name": "Sky Sport UHD",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003GCLC9.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 211,
+    "tvg_id": "Sky.Sport.Austria.1.HD.de",
+    "name": "Sky Sport Austria 1 HD",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FCKJR.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 212,
+    "tvg_id": "Sky.Sport.Austria.2.HD.de",
+    "name": "Sky Sport Austria 2 HD",
+    "icon_url": "http://dtil.tmsimg.com/assets/s111209_ll_h15_ab.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 213,
+    "tvg_id": "Sky.Sport.Austria.3.HD.de",
+    "name": "Sky Sport Austria 3 HD",
+    "icon_url": "http://dtil.tmsimg.com/assets/s111210_ll_h15_ab.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 214,
+    "tvg_id": "Sky.Sport.Austria.4.HD.de",
+    "name": "Sky Sport Austria 4 HD",
+    "icon_url": "http://dtil.tmsimg.com/assets/s111211_ll_h15_ab.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 215,
+    "tvg_id": "Sky.Sport.Austria.5.HD.de",
+    "name": "Sky Sport Austria 5 HD",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FCQ7M.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 216,
+    "tvg_id": "Sky.Sport.Austria.6.HD.de",
+    "name": "Sky Sport Austria 6 HD",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FCQ84.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 217,
+    "tvg_id": "Sky.Sport.Austria.7.HD.de",
+    "name": "Sky Sport Austria 7 HD",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FCQ9J.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 218,
+    "tvg_id": "Sky.Sport.Bundesliga.UHD.de",
+    "name": "Sky Sport Bundesliga UHD",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FD0FG.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 219,
+    "tvg_id": "Sky.Sport.Bundesliga.1.de",
+    "name": "Sky Sport Bundesliga 1",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FCYLV.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 220,
+    "tvg_id": "Sky.Sport.Bundesliga.2.de",
+    "name": "Sky Sport Bundesliga 2",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FCYQ7.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 221,
+    "tvg_id": "Sky.Sport.Bundesliga.3.de",
+    "name": "Sky Sport Bundesliga 3",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FD0CB.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 222,
+    "tvg_id": "Sky.Sport.Bundesliga.4.de",
+    "name": "Sky Sport Bundesliga 4",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FD0CP.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 223,
+    "tvg_id": "Sky.Sport.Bundesliga.5.de",
+    "name": "Sky Sport Bundesliga 5",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FD0CE.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 224,
+    "tvg_id": "Sky.Sport.Bundesliga.6.de",
+    "name": "Sky Sport Bundesliga 6",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FD0D3.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 225,
+    "tvg_id": "Sky.Sport.Bundesliga.7.de",
+    "name": "Sky Sport Bundesliga 7",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FD0DH.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 226,
+    "tvg_id": "Sky.Sport.Bundesliga.8.de",
+    "name": "Sky Sport Bundesliga 8",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FD0DV.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 227,
+    "tvg_id": "Sky.Sport.Bundesliga.9.de",
+    "name": "Sky Sport Bundesliga 9",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FD0F1.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 228,
+    "tvg_id": "Sky.Sport.Bundesliga.10.de",
+    "name": "Sky Sport Bundesliga 10",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FCYLQ.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 229,
+    "tvg_id": "Sky.Sport.1.de",
+    "name": "Sky Sport 1",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FBQVR.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 230,
+    "tvg_id": "Sky.Sport.2.de",
+    "name": "Sky Sport 2",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FBEKP.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 231,
+    "tvg_id": "Sky.Sport.3.de",
+    "name": "Sky Sport 3",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FC2FX.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 232,
+    "tvg_id": "Sky.Sport.4.de",
+    "name": "Sky Sport 4",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FCHBQ.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 233,
+    "tvg_id": "Sky.Sport.5.de",
+    "name": "Sky Sport 5",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FCHE8.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 234,
+    "tvg_id": "Sky.Sport.6.de",
+    "name": "Sky Sport 6",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FCJQK.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 235,
+    "tvg_id": "Sky.Sport.7.de",
+    "name": "Sky Sport 7",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FCNL7.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 236,
+    "tvg_id": "Sky.Sport.8.de",
+    "name": "Sky Sport 8",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FCPZ9.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 237,
+    "tvg_id": "Sky.Sport.9.de",
+    "name": "Sky Sport 9",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FCV4Z.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 238,
+    "tvg_id": "Sky.Sport.10.de",
+    "name": "Sky Sport 10",
+    "icon_url": "http://dtil.tmsimg.com/assets/GNLZZGG003FBYXT.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 239,
+    "tvg_id": "eoTV.de",
+    "name": "eoTV",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 240,
+    "tvg_id": "FUSSBALL.TV.1.de",
+    "name": "FUSSBALL.TV 1",
+    "icon_url": "http://ngiss.t-online.de/cm1s/media/51e9858925ffe8fb6e5df889436a3d07be4b7ac7.png",
+    "epg_source": 1
+  },
+  {
+    "id": 241,
+    "tvg_id": "FUSSBALL.TV.2.de",
+    "name": "FUSSBALL.TV 2",
+    "icon_url": "http://ngiss.t-online.de/cm1s/media/56c747d4ff3b94929a766910b6742e0cb44b5ccf.png",
+    "epg_source": 1
+  },
+  {
+    "id": 242,
+    "tvg_id": "FUSSBALL.TV.3.de",
+    "name": "FUSSBALL.TV 3",
+    "icon_url": "http://ngiss.t-online.de/cm1s/media/d2748256549f804164f6c95a2c6116e62f344d19.png",
+    "epg_source": 1
+  },
+  {
+    "id": 243,
+    "tvg_id": "DOKUSAT.de",
+    "name": "DOKUSAT",
+    "icon_url": "https://cfres-71f3.kxcdn.com/ci/m/pngs/dokusat-medium.png",
+    "epg_source": 1
+  },
+  {
+    "id": 244,
+    "tvg_id": "Top.Serien.de",
+    "name": "Top Serien",
+    "icon_url": "http://dtil.tmsimg.com/assets/s120496_ll_h9_ab.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 245,
+    "tvg_id": "tv-media.PULS.24.de",
+    "name": "PULS 24",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 246,
+    "tvg_id": "DFB.Play.de",
+    "name": "DFB Play",
+    "icon_url": "https://www.dfbplay.tv/images/app-logo-contrast.svg",
+    "epg_source": 1
+  },
+  {
+    "id": 247,
+    "tvg_id": "Prime.de",
+    "name": "Prime",
+    "icon_url": null,
+    "epg_source": 1
+  },
+  {
+    "id": 248,
+    "tvg_id": "Sport.1.-.myTeamTV.de",
+    "name": "Sport 1 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s102885_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 249,
+    "tvg_id": "Sport.2.-.myTeamTV.de",
+    "name": "Sport 2 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s102886_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 250,
+    "tvg_id": "Sport.3.-.myTeamTV.de",
+    "name": "Sport 3 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s102887_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 251,
+    "tvg_id": "Sport.4.-.myTeamTV.de",
+    "name": "Sport 4 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s102888_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 252,
+    "tvg_id": "Sport.5.-.myTeamTV.de",
+    "name": "Sport 5 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s102889_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 253,
+    "tvg_id": "Sport.6.-.myTeamTV.de",
+    "name": "Sport 6 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s102890_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 254,
+    "tvg_id": "Sport.7.-.myTeamTV.de",
+    "name": "Sport 7 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s102891_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 255,
+    "tvg_id": "Sport.8.-.myTeamTV.de",
+    "name": "Sport 8 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s104797_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 256,
+    "tvg_id": "Sport.9.-.myTeamTV.de",
+    "name": "Sport 9 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s104798_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 257,
+    "tvg_id": "Sport.10.-.myTeamTV.de",
+    "name": "Sport 10 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s104799_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 258,
+    "tvg_id": "Sport.11.-.myTeamTV.de",
+    "name": "Sport 11 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s104800_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 259,
+    "tvg_id": "Sport.12.-.myTeamTV.de",
+    "name": "Sport 12 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s104801_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 260,
+    "tvg_id": "Sport.13.-.myTeamTV.de",
+    "name": "Sport 13 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s104802_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 261,
+    "tvg_id": "Sport.14.-.myTeamTV.de",
+    "name": "Sport 14 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s104803_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 262,
+    "tvg_id": "Sport.15.-.myTeamTV.de",
+    "name": "Sport 15 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s100576_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 263,
+    "tvg_id": "Sport.16.-.myTeamTV.de",
+    "name": "Sport 16 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s100577_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 264,
+    "tvg_id": "Sport.17.-.myTeamTV.de",
+    "name": "Sport 17 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s100581_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 265,
+    "tvg_id": "Sport.18.-.myTeamTV.de",
+    "name": "Sport 18 - myTeamTV",
+    "icon_url": "http://dtil.tmsimg.com/assets/s100582_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 266,
+    "tvg_id": "MS.Sport.de",
+    "name": "MS Sport",
+    "icon_url": "http://dtil.tmsimg.com/assets/s111692_ll_h15_ac.png?w=360&h=270",
+    "epg_source": 1
+  },
+  {
+    "id": 1677,
+    "tvg_id": "13thStreet.de",
+    "name": "DE: 13TH STREET HEVC",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6597.jpg?88712",
+    "epg_source": 2
+  },
+  {
+    "id": 1688,
+    "tvg_id": "Syfy.de",
+    "name": "DE: SYFY HEVC",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6611.png?75192",
+    "epg_source": 2
+  },
+  {
+    "id": 1696,
+    "tvg_id": "SkyOne.de",
+    "name": "DE: SKY ONE HEVC",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/12096.jpg?4322",
+    "epg_source": 2
+  },
+  {
+    "id": 1697,
+    "tvg_id": "SkyAtlantic.de",
+    "name": "DE: SKY ATLANTIC HEVC",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6482.jpg?51791",
+    "epg_source": 2
+  },
+  {
+    "id": 1698,
+    "tvg_id": "SkyReplays.de",
+    "name": "DE: SKY REPLAY HEVC",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/3127.jpg?64844",
+    "epg_source": 2
+  },
+  {
+    "id": 1699,
+    "tvg_id": "SkyAction.de",
+    "name": "DE: SKY CINEMA ACTION HEVC",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6475.jpg?87993",
+    "epg_source": 2
+  },
+  {
+    "id": 1701,
+    "tvg_id": "SkyCinemaFamily.de",
+    "name": "DE: SKY CINEMA FAMILY HEVC",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/12184.jpg?36363",
+    "epg_source": 2
+  },
+  {
+    "id": 1703,
+    "tvg_id": "SkyCinemaPremieren.de",
+    "name": "DE: SKY CINEMA PREMIEREN HEVC",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6463.jpg?22502",
+    "epg_source": 2
+  },
+  {
+    "id": 1704,
+    "tvg_id": "SkyCinemaSpecial.de",
+    "name": "DE: SKY CINEMA SPECIAL HEVC",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6465.jpg?52209",
+    "epg_source": 2
+  },
+  {
+    "id": 1706,
+    "tvg_id": "SkyCrime.de",
+    "name": "DE: SKY CRIME HEVC",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13020.jpg?66873",
+    "epg_source": 2
+  },
+  {
+    "id": 1707,
+    "tvg_id": "SkyKrimi.de",
+    "name": "DE: SKY KRIMI HEVC",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6455.jpg?91929",
+    "epg_source": 2
+  },
+  {
+    "id": 1708,
+    "tvg_id": "Sport1.de",
+    "name": "DE: SPORT 1 HEVC",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/1883.png?16084",
+    "epg_source": 2
+  },
+  {
+    "id": 1709,
+    "tvg_id": "Eurosport1.de",
+    "name": "DE: EUROSPORT 1 HEVC",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/1423.png?ver=72432",
+    "epg_source": 2
+  },
+  {
+    "id": 1710,
+    "tvg_id": "Eurosport2.de",
+    "name": "DE: EUROSPORT 2 HEVC",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/1423.png?ver=72432",
+    "epg_source": 2
+  },
+  {
+    "id": 1712,
+    "tvg_id": "DAZN2.de",
+    "name": "DE: DAZN BAR 2 HEVC",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/12401.jpg?56521",
+    "epg_source": 2
+  },
+  {
+    "id": 3073,
+    "tvg_id": "SkyBundesliga10.de",
+    "name": "DE: SKY SPORT BUNDESLIGA 10 (MOBIL)",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13751.png?ver=80180",
+    "epg_source": 2
+  },
+  {
+    "id": 3076,
+    "tvg_id": "SkyBundesliga9.de",
+    "name": "DE: SKY SPORT BUNDESLIGA 9 (MOBIL)",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13751.png?ver=80180",
+    "epg_source": 2
+  },
+  {
+    "id": 3079,
+    "tvg_id": "SkyBundesliga8.de",
+    "name": "DE: SKY SPORT BUNDESLIGA 8 (MOBIL)",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13751.png?ver=80180",
+    "epg_source": 2
+  },
+  {
+    "id": 3082,
+    "tvg_id": "SkyBundesliga7.de",
+    "name": "DE: SKY SPORT BUNDESLIGA 7 (MOBIL)",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13751.png?ver=80180",
+    "epg_source": 2
+  },
+  {
+    "id": 3084,
+    "tvg_id": "SkyBundesliga6.de",
+    "name": "DE: SKY SPORT BUNDESLIGA 7 HD (SAT)",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13751.png?ver=80180",
+    "epg_source": 2
+  },
+  {
+    "id": 3088,
+    "tvg_id": "SkyBundesliga5.de",
+    "name": "DE: SKY SPORT BUNDESLIGA 5 (MOBIL)",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13751.png?ver=80180",
+    "epg_source": 2
+  },
+  {
+    "id": 3091,
+    "tvg_id": "SkyBundesliga4.de",
+    "name": "DE: SKY SPORT BUNDESLIGA 4 (MOBIL)",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13751.png?ver=80180",
+    "epg_source": 2
+  },
+  {
+    "id": 3094,
+    "tvg_id": "SkyBundesliga3.de",
+    "name": "DE: SKY SPORT BUNDESLIGA 3 (MOBIL)",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13751.png?ver=80180",
+    "epg_source": 2
+  },
+  {
+    "id": 3096,
+    "tvg_id": "SkyBundesliga2.de",
+    "name": "DE: SKY SPORT BUNDESLIGA 3 HD (SAT)",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13751.png?ver=80180",
+    "epg_source": 2
+  },
+  {
+    "id": 3100,
+    "tvg_id": "SkyBundesliga1.de",
+    "name": "DE: SKY SPORT BUNDESLIGA 1 (MOBIL)",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13751.png?ver=80180",
+    "epg_source": 2
+  },
+  {
+    "id": 3103,
+    "tvg_id": "SkyBundesligaUHD.de",
+    "name": "DE: SKY SPORT BUNDESLIGA HD (720P)",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13751.png?ver=80180",
+    "epg_source": 2
+  },
+  {
+    "id": 3175,
+    "tvg_id": "SkyCinemaClassics.de",
+    "name": "DE: SKY CINEMA CLASSICS HD (720P)",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6473.jpg?ver=90884",
+    "epg_source": 2
+  },
+  {
+    "id": 3212,
+    "tvg_id": "WDR.de",
+    "name": "DE: WDR HD WUPPERTAL",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6388.jpg?ver=12324",
+    "epg_source": 2
+  },
+  {
+    "id": 3225,
+    "tvg_id": "RBB.de",
+    "name": "DE: RBB HD BRANDENBURG",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/808.jpg?901",
+    "epg_source": 2
+  },
+  {
+    "id": 3229,
+    "tvg_id": "HR.de",
+    "name": "DE: HR HD",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/11030.jpg?31454",
+    "epg_source": 2
+  },
+  {
+    "id": 3232,
+    "tvg_id": "ARTE.de",
+    "name": "DE: ARTE HD",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6348.jpg?49850",
+    "epg_source": 2
+  },
+  {
+    "id": 3233,
+    "tvg_id": "3sat.de",
+    "name": "DE: 3SAT HD",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/801.jpg?32315",
+    "epg_source": 2
+  },
+  {
+    "id": 3234,
+    "tvg_id": "ZDFneo.de",
+    "name": "DE: ZDF NEO HD",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/774.png?70802",
+    "epg_source": 2
+  },
+  {
+    "id": 3235,
+    "tvg_id": "ZDFinfo.de",
+    "name": "DE: ZDFINFO HD",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/776.png?97009",
+    "epg_source": 2
+  },
+  {
+    "id": 3270,
+    "tvg_id": "ZDF.de",
+    "name": "DE: ZDF HD (LOW BIT)",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/775.jpg?71322",
+    "epg_source": 2
+  },
+  {
+    "id": 3344,
+    "tvg_id": "SkySportsGolf.uk",
+    "name": "SKYGO: SKY SPORT GOLF HD",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6441.png?5843",
+    "epg_source": 2
+  },
+  {
+    "id": 3347,
+    "tvg_id": "SkySportsF1.uk",
+    "name": "SKYGO: SKY SPORT F1 4K",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6441.png?5843",
+    "epg_source": 2
+  },
+  {
+    "id": 3348,
+    "tvg_id": "SkySportsMix.uk",
+    "name": "SKYGO: SKY SPORT MIX HD",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6441.png?5843",
+    "epg_source": 2
+  },
+  {
+    "id": 3350,
+    "tvg_id": "SkySportsNews.uk",
+    "name": "SKYGO: SKY SPORT NEWS HD",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6422.jpg?54857",
+    "epg_source": 2
+  },
+  {
+    "id": 3923,
+    "tvg_id": "DAZN1.de",
+    "name": "SKYGO: DAZN 1 HD",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/12401.jpg?29118",
+    "epg_source": 2
+  },
+  {
+    "id": 8467,
+    "tvg_id": "tntsports4.uk",
+    "name": "UK: TNT SPORTS 4 ᴴᴰ ◉",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6398.png?77854",
+    "epg_source": 2
+  },
+  {
+    "id": 8468,
+    "tvg_id": "tntsports3.uk",
+    "name": "UK: TNT SPORTS 3 ᴴᴰ ◉",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6123.png?19664",
+    "epg_source": 2
+  },
+  {
+    "id": 8469,
+    "tvg_id": "tntsports2.uk",
+    "name": "UK: TNT SPORTS 2 ᴴᴰ ◉",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6400.png?54855",
+    "epg_source": 2
+  },
+  {
+    "id": 8470,
+    "tvg_id": "tntsports1.uk",
+    "name": "UK: TNT SPORTS 1 ᴴᴰ ◉",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/1070.png?39337",
+    "epg_source": 2
+  },
+  {
+    "id": 8472,
+    "tvg_id": "skysportsf1.uk",
+    "name": "NOW: SKY SPORTS F1 ᵁᴴᴰ ³⁸⁴⁰ᴾ",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6461.jpg?35736",
+    "epg_source": 2
+  },
+  {
+    "id": 8483,
+    "tvg_id": "skysportsplus.uk",
+    "name": "NOW: SKY SPORTS+ ᴴᴰ",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/11103.png?39144",
+    "epg_source": 2
+  },
+  {
+    "id": 8485,
+    "tvg_id": "skysportsmix.uk",
+    "name": "NOW: SKY SPORTS MIX ᴴᴰ",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/12262.jpg?14409",
+    "epg_source": 2
+  },
+  {
+    "id": 8487,
+    "tvg_id": "skysportsgolf.uk",
+    "name": "NOW: SKY SPORTS GOLF ᴴᴰ",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/12243.jpg?91874",
+    "epg_source": 2
+  },
+  {
+    "id": 8489,
+    "tvg_id": "skysportscricket.uk",
+    "name": "NOW: SKY SPORTS CRICKET ᴴᴰ",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/11981.jpg?42048",
+    "epg_source": 2
+  },
+  {
+    "id": 8491,
+    "tvg_id": "skysportsaction.uk",
+    "name": "NOW: SKY SPORTS ACTION ᴴᴰ",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/12244.jpg?98047",
+    "epg_source": 2
+  },
+  {
+    "id": 8493,
+    "tvg_id": "skysportstennis.uk",
+    "name": "NOW: SKY SPORTS TENNIS ᴴᴰ",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/12307.jpg?81291",
+    "epg_source": 2
+  },
+  {
+    "id": 8496,
+    "tvg_id": "skysportsracing.uk",
+    "name": "NOW: SKY SPORTS RACING ᴿᴬᵂ",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/3130.jpg?96961",
+    "epg_source": 2
+  },
+  {
+    "id": 8499,
+    "tvg_id": "skysportsfootball.uk",
+    "name": "NOW: SKY SPORTS FOOTBALL ᴴᴰ",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/11978.png?85148",
+    "epg_source": 2
+  },
+  {
+    "id": 8501,
+    "tvg_id": "skysportspremiereleague.uk",
+    "name": "NOW: SKY SPORTS PREMIER LEAGUE ᴴᴰ",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/12261.png?89614",
+    "epg_source": 2
+  },
+  {
+    "id": 8503,
+    "tvg_id": "skysportsmainevent.uk",
+    "name": "NOW: SKY SPORTS MAIN EVENT ᴴᴰ",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/12232.jpg?92793",
+    "epg_source": 2
+  },
+  {
+    "id": 8505,
+    "tvg_id": "skysportsnews.uk",
+    "name": "NOW: SKY SPORTS NEWS HQ ᴴᴰ",
+    "icon_url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/12268.jpg?15982",
+    "epg_source": 2
+  }
+]

@@ -113,7 +113,33 @@ pub const EPG_SOURCE_UPDATE: Endpoint = Endpoint {
     request: Some(Shape::Document("PatchedEPGSource")),
     response: None,
 };
-pub const ENDPOINTS: [Endpoint; 13] = [
+/// The description declares a page (`PaginatedChannelList`); without
+/// `page_size` the view answers a plain list -- recorded, and that is how it
+/// is read. So no response shape is checked here; `Channel` is still checked
+/// as a wire type against its component.
+pub const CHANNELS: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/channels/channels/",
+    request: None,
+    response: None,
+};
+/// A list of partial channels; an `override` entry writes the channel's
+/// `ChannelOverride`, which the channel sync leaves alone (design §34). The
+/// description declares no body for it.
+pub const CHANNELS_BULK: Endpoint = Endpoint {
+    method: "PATCH",
+    path: "/api/channels/channels/edit/bulk/",
+    request: None,
+    response: None,
+};
+pub const EPG_DATA: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/epg/epgdata/",
+    request: None,
+    response: Some(Shape::List("EPGData")),
+};
+
+pub const ENDPOINTS: [Endpoint; 16] = [
     TOKEN,
     VERSION,
     STREAM_PROFILES,
@@ -127,6 +153,9 @@ pub const ENDPOINTS: [Endpoint; 13] = [
     EPG_SOURCES,
     EPG_SOURCE_CREATE,
     EPG_SOURCE_UPDATE,
+    CHANNELS,
+    CHANNELS_BULK,
+    EPG_DATA,
 ];
 
 /// The components a spec's fields are checked against: an account's and a
@@ -182,6 +211,8 @@ pub fn wire_types() -> Vec<schemars::Schema> {
         schemars::schema_for!(M3UAccount),
         schemars::schema_for!(ChannelGroup),
         schemars::schema_for!(EPGSource),
+        schemars::schema_for!(Channel),
+        schemars::schema_for!(EPGData),
     ]
 }
 
@@ -247,6 +278,25 @@ pub struct EPGSource {
     #[serde(flatten)]
     #[schemars(skip)]
     pub rest: Map<String, Value>,
+}
+
+/// A channel as the list answers it. The `effective_*` fields are what the
+/// output uses: the channel's own value, or its override.
+#[derive(Deserialize, JsonSchema)]
+pub struct Channel {
+    pub id: i64,
+    pub name: String,
+    pub effective_name: Option<String>,
+    pub effective_epg_data_id: Option<i64>,
+}
+
+/// One channel of one EPG source.
+#[derive(Deserialize, JsonSchema)]
+#[allow(clippy::upper_case_acronyms)]
+pub struct EPGData {
+    pub id: i64,
+    pub tvg_id: Option<String>,
+    pub epg_source: Option<i64>,
 }
 
 /// What a login answered. Only the access token is read.
@@ -904,6 +954,167 @@ impl Task for Groups {
     }
 }
 
+// --- channel-epg -----------------------------------------------------------
+
+/// The guide entry a channel shows: an EPG source by name, a channel of it by
+/// `tvg_id`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EpgTarget {
+    pub source: String,
+    pub tvg_id: String,
+}
+
+/// Channels by name (their effective name), each with the guide entry it is
+/// to show (design §34). Written as the channel's OVERRIDE: the channel sync
+/// sets `epg_data` of an auto-created channel from its stream's tvg-id on
+/// every refresh and would undo a plain assignment by the next morning; an
+/// override it leaves alone.
+pub struct ChannelEpg {
+    pub channels: BTreeMap<String, EpgTarget>,
+}
+
+/// A named channel as `wanted` finds it: channel id, the entry it shows now,
+/// the entry it should show, its name.
+type Wanted = (i64, Option<i64>, i64, String);
+
+pub struct ChannelEpgState {
+    pub channels: Vec<Channel>,
+    pub sources: Vec<EPGSource>,
+    pub data: Vec<EPGData>,
+}
+
+impl ChannelEpg {
+    fn read_state(t: &dyn Transport) -> Result<ChannelEpgState, Error> {
+        Ok(ChannelEpgState {
+            channels: get_list(t, &CHANNELS)?,
+            sources: get_list(t, &EPG_SOURCES)?,
+            data: get_list(t, &EPG_DATA)?,
+        })
+    }
+
+    fn channel<'a>(state: &'a ChannelEpgState, name: &str) -> Option<&'a Channel> {
+        state
+            .channels
+            .iter()
+            .find(|c| c.effective_name.as_deref().unwrap_or(&c.name) == name)
+    }
+
+    /// The guide entry's id, or why it is not there (yet).
+    fn entry(state: &ChannelEpgState, target: &EpgTarget) -> Result<i64, String> {
+        let Some(source) = state.sources.iter().find(|s| s.name == target.source) else {
+            let names: Vec<&str> = state.sources.iter().map(|s| s.name.as_str()).collect();
+            return Err(format!(
+                "EPG source {} does not exist (there are: {})",
+                target.source,
+                names.join(", ")
+            ));
+        };
+        state
+            .data
+            .iter()
+            .find(|e| {
+                e.epg_source == Some(source.id) && e.tvg_id.as_deref() == Some(&target.tvg_id)
+            })
+            .map(|e| e.id)
+            .ok_or_else(|| {
+                format!(
+                    "EPG source {} has no channel {} (yet)",
+                    target.source, target.tvg_id
+                )
+            })
+    }
+
+    /// `source tvg_id` of an entry, for a change line.
+    fn label(state: &ChannelEpgState, id: Option<i64>) -> String {
+        let Some(id) = id else {
+            return "(none)".to_string();
+        };
+        let Some(e) = state.data.iter().find(|e| e.id == id) else {
+            return format!("(entry {id})");
+        };
+        let source = state
+            .sources
+            .iter()
+            .find(|s| Some(s.id) == e.epg_source)
+            .map_or_else(|| "(no source)".to_string(), |s| s.name.clone());
+        format!("{source} {}", e.tvg_id.as_deref().unwrap_or("(no tvg-id)"))
+    }
+
+    /// Every named channel with the entry it should show, or what is missing.
+    fn wanted(&self, state: &ChannelEpgState) -> Result<Vec<Wanted>, Vec<String>> {
+        let mut out = Vec::new();
+        let mut absent = Vec::new();
+        for (name, target) in &self.channels {
+            let Some(channel) = Self::channel(state, name) else {
+                absent.push(format!("channel {name} does not exist (yet)"));
+                continue;
+            };
+            match Self::entry(state, target) {
+                Ok(id) => out.push((channel.id, channel.effective_epg_data_id, id, name.clone())),
+                Err(why) => absent.push(why),
+            }
+        }
+        if absent.is_empty() {
+            Ok(out)
+        } else {
+            Err(absent)
+        }
+    }
+}
+
+impl Task for ChannelEpg {
+    type Current = ChannelEpgState;
+
+    /// Ready when every named channel exists and every named guide entry has
+    /// been read from its source -- a source added in the same run is parsed
+    /// asynchronously.
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        let version = probe(t)?;
+        let state = Self::read_state(t).map_err(|e| Probe::NotYet(e.to_string()))?;
+        self.wanted(&state)
+            .map_err(|absent| Probe::NotYet(absent.join("; ")))?;
+        Ok(version)
+    }
+
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        Self::read_state(t)
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        let wanted = self.wanted(current).map_err(Error::NotFound)?;
+        Ok(wanted
+            .into_iter()
+            .filter(|(_, now, want, _)| *now != Some(*want))
+            .map(|(_, now, want, name)| Change {
+                subject: format!("channel {name}"),
+                field: "epg".to_string(),
+                current: Self::label(current, now),
+                desired: Self::label(current, Some(want)),
+            })
+            .collect())
+    }
+
+    fn notes(&self, _current: &Self::Current) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// One bulk PATCH with an override per channel that differs.
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        let wanted = self.wanted(current).map_err(Error::NotFound)?;
+        let body: Vec<Value> = wanted
+            .into_iter()
+            .filter(|(_, now, want, _)| *now != Some(*want))
+            .map(|(id, _, want, _)| json!({"id": id, "override": {"epg_data": want}}))
+            .collect();
+        if body.is_empty() {
+            return Ok(());
+        }
+        let text = serialize(CHANNELS_BULK.method, CHANNELS_BULK.path, &body)?;
+        let reply = t.patch_json(CHANNELS_BULK.path, &text)?;
+        expect_status_at(CHANNELS_BULK.method, CHANNELS_BULK.path, &reply, &[200])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1474,6 +1685,125 @@ mod tests {
             json!({"stream_profile_id": 3, "name_match_regex": " 4K$", "name_regex_pattern": "^SKYGO: | 4K$"}),
         );
         assert_eq!(task.diff(&task.read(&done).unwrap()).unwrap(), vec![]);
+    }
+
+    const CHANNELS_JSON: &str =
+        include_str!("../../tests/fixtures/dispatcharr-0.31.0/channels-channels.json");
+    const EPGDATA_JSON: &str =
+        include_str!("../../tests/fixtures/dispatcharr-0.31.0/epg-epgdata-trimmed.json");
+
+    /// The recorded source list plus source 2, the provider's guide, which
+    /// was not recorded again because its URL carries a password.
+    fn sources_with_provider() -> String {
+        with(SOURCES_JSON, |v| {
+            let mut second = v[0].clone();
+            second["id"] = json!(2);
+            second["name"] = json!("Xtream");
+            second["url"] = json!("http://provider.example/xmltv.php");
+            v.as_array_mut().unwrap().push(second);
+        })
+    }
+
+    fn channel_epg(pairs: &[(&str, &str, &str)]) -> ChannelEpg {
+        ChannelEpg {
+            channels: pairs
+                .iter()
+                .map(|(c, s, t)| {
+                    (
+                        c.to_string(),
+                        EpgTarget {
+                            source: s.to_string(),
+                            tvg_id: t.to_string(),
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    fn epg_transport() -> FakeTransport {
+        FakeTransport::default()
+            .on_get(VERSION.path, vec![ok(VERSION_JSON)])
+            .on_get(CHANNELS.path, vec![ok(CHANNELS_JSON)])
+            .on_get(EPG_SOURCES.path, vec![ok(&sources_with_provider())])
+            .on_get(EPG_DATA.path, vec![ok(EPGDATA_JSON)])
+            .on_put(vec![Step::Answer(200, "[]".to_string())])
+    }
+
+    #[test]
+    fn a_channel_already_on_its_guide_entry_is_unchanged() {
+        let task = channel_epg(&[("Das Erste", "epgshare01-de", "Das.Erste.de")]);
+        let t = epg_transport();
+        assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn a_channel_is_moved_to_another_guide_by_an_override() {
+        let task = channel_epg(&[(
+            "SKY CINEMA ACTION",
+            "epgshare01-de",
+            "Sky.Cinema.Action.HD.de",
+        )]);
+        let t = epg_transport();
+        let current = task.read(&t).unwrap();
+        let lines: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(
+            lines,
+            ["channel SKY CINEMA ACTION: epg Xtream SkyAction.de -> epgshare01-de Sky.Cinema.Action.HD.de"]
+        );
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written[0].0, "/api/channels/channels/edit/bulk/");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        let wanted = current
+            .data
+            .iter()
+            .find(|e| {
+                e.tvg_id.as_deref() == Some("Sky.Cinema.Action.HD.de") && e.epg_source == Some(1)
+            })
+            .unwrap()
+            .id;
+        let channel = current
+            .channels
+            .iter()
+            .find(|c| c.effective_name.as_deref() == Some("SKY CINEMA ACTION"))
+            .unwrap()
+            .id;
+        assert_eq!(
+            sent,
+            json!([{"id": channel, "override": {"epg_data": wanted}}])
+        );
+    }
+
+    #[test]
+    fn readiness_waits_for_the_channel_and_for_the_guide_entry() {
+        let missing_entry = channel_epg(&[("SKY CINEMA ACTION", "epgshare01-de", "Nicht.Da.de")]);
+        match missing_entry.probe(&epg_transport()) {
+            Err(Probe::NotYet(why)) => assert!(why.contains("Nicht.Da.de"), "{why}"),
+            _ => panic!("ready without the guide entry"),
+        }
+        let missing_channel = channel_epg(&[("GIBT ES NICHT", "epgshare01-de", "Das.Erste.de")]);
+        match missing_channel.probe(&epg_transport()) {
+            Err(Probe::NotYet(why)) => assert!(why.contains("GIBT ES NICHT"), "{why}"),
+            _ => panic!("ready without the channel"),
+        }
+        let ready = channel_epg(&[("Das Erste", "epgshare01-de", "Das.Erste.de")]);
+        assert!(ready.probe(&epg_transport()).is_ok());
+    }
+
+    #[test]
+    fn an_unknown_source_names_the_sources_there_are() {
+        let task = channel_epg(&[("Das Erste", "epgshare01-uk", "Das.Erste.de")]);
+        let e = match task.probe(&epg_transport()) {
+            Err(Probe::NotYet(why)) => why,
+            _ => panic!("ready with an unknown source"),
+        };
+        assert!(e.contains("epgshare01-uk") && e.contains("Xtream"), "{e}");
     }
 
     #[test]

@@ -142,6 +142,7 @@ enum TaskName {
     M3uAccounts,
     M3uGroups,
     EpgSources,
+    ChannelEpg,
 }
 
 impl TaskName {
@@ -187,7 +188,8 @@ impl TaskName {
             TaskName::StreamSettings
             | TaskName::M3uAccounts
             | TaskName::M3uGroups
-            | TaskName::EpgSources => service == Service::Dispatcharr,
+            | TaskName::EpgSources
+            | TaskName::ChannelEpg => service == Service::Dispatcharr,
         }
     }
 }
@@ -645,6 +647,8 @@ pub enum DispatcharrTask {
     ),
     /// account name -> group name -> fields.
     Groups(BTreeMap<String, BTreeMap<String, BTreeMap<String, serde_json::Value>>>),
+    /// channel name -> the guide entry it shows (§34).
+    ChannelEpg(BTreeMap<String, crate::services::dispatcharr::EpgTarget>),
 }
 
 /// Fields a Dispatcharr spec may not name: the entry's identity, and the
@@ -1339,7 +1343,8 @@ impl Spec {
             TaskName::StreamSettings
             | TaskName::M3uAccounts
             | TaskName::M3uGroups
-            | TaskName::EpgSources => {
+            | TaskName::EpgSources
+            | TaskName::ChannelEpg => {
                 Desired::Dispatcharr(dispatcharr_desired(raw.task, raw.desired).map_err(invalid)?)
             }
             TaskName::AdminPermissions => {
@@ -1806,6 +1811,7 @@ impl Spec {
                     _,
                 ) => "epg-sources",
                 DispatcharrTask::Groups(_) => "m3u-groups",
+                DispatcharrTask::ChannelEpg(_) => "channel-epg",
             },
         }
     }
@@ -1975,6 +1981,42 @@ fn dispatcharr_desired(
                 }
             }
             (d.username, DispatcharrTask::Groups(d.accounts))
+        }
+        TaskName::ChannelEpg => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Target {
+                source: String,
+                tvg_id: String,
+            }
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Channels {
+                username: String,
+                channels: BTreeMap<String, Target>,
+            }
+            let d: Channels = serde_json::from_value(desired).map_err(parse_err)?;
+            if d.channels.is_empty() {
+                return Err("desired.channels names no channel".to_string());
+            }
+            let mut channels = BTreeMap::new();
+            for (name, t) in d.channels {
+                let at = format!("desired.channels.{name}");
+                if name.is_empty() {
+                    return Err("desired.channels: a channel name is empty".to_string());
+                }
+                if t.source.is_empty() || t.tvg_id.is_empty() {
+                    return Err(format!("{at}: source and tvg_id are both named"));
+                }
+                channels.insert(
+                    name,
+                    crate::services::dispatcharr::EpgTarget {
+                        source: t.source,
+                        tvg_id: t.tvg_id,
+                    },
+                );
+            }
+            (d.username, DispatcharrTask::ChannelEpg(channels))
         }
         _ => unreachable!("only Dispatcharr's tasks come here"),
     };
@@ -3161,6 +3203,24 @@ mod tests {
             ["source_type"]
         );
         assert_eq!(secrets["Anbieter"]["url"], "xt-epg");
+    }
+
+    #[test]
+    fn channel_epg_names_a_source_and_a_tvg_id_per_channel() {
+        let spec = dispatcharr(
+            "channel-epg",
+            r#"{"username":"c","channels":{"SKY SPORT NEWS":{"source":"epgshare01-de","tvg_id":"Sky.Sport.News.de"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "channel-epg");
+        for bad in [
+            r#"{"username":"c","channels":{}}"#,
+            r#"{"username":"c","channels":{"X":{"source":"","tvg_id":"a"}}}"#,
+            r#"{"username":"c","channels":{"X":{"source":"s","tvg_id":""}}}"#,
+            r#"{"username":"c","channels":{"X":{"source":"s","tvg_id":"a","epg_data_id":3}}}"#,
+        ] {
+            assert!(dispatcharr("channel-epg", bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

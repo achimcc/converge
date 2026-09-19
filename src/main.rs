@@ -210,6 +210,12 @@ fn reconcile_one(
                 };
                 run(mode, &task, &transport, &SystemClock, timing)
             }
+            DispatcharrTask::ChannelEpg(channels) => {
+                let task = dispatcharr::ChannelEpg {
+                    channels: channels.clone(),
+                };
+                run(mode, &task, &transport, &SystemClock, timing)
+            }
         },
         Desired::AudiobookshelfAdminPermissions(desired) => {
             let task = audiobookshelf::AdminPermissions {
@@ -826,6 +832,8 @@ fn schema_check(args: &[String]) -> ExitCode {
             // with (the endpoint's declared body is wrong, design §29).
             Desired::Dispatcharr(desired) => match &desired.task {
                 DispatcharrTask::StreamSettings { .. } => (Vec::new(), 0),
+                // Names only: a channel, a source, a tvg-id -- no field of a body.
+                DispatcharrTask::ChannelEpg(_) => (Vec::new(), 0),
                 DispatcharrTask::Entries(kind, entries, secrets) => {
                     let components = match kind {
                         dispatcharr::EntryKind::M3uAccount => [

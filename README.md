@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.29.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.31.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11),
 **SuggestArr** (2.14), **Kavita** (0.9), **Audiobookshelf** (2.36) and
 **Dispatcharr** (0.31), each replacing a shell unit or an OpenTofu resource on
@@ -61,6 +61,7 @@ the host it was written for:
 | Dispatcharr | `stream-settings` | the default stream profile, by name |
 | Dispatcharr | `m3u-accounts`, `epg-sources` | accounts and sources by name: a missing one is added, the named fields are set; an account's `server_url`, `username` and `password` and a source's `url` may come from credentials (`secret_fields`: compared unseen, the write-only password handed over on every apply); every task logs in as a service account, once per run |
 | Dispatcharr | `m3u-groups` | the settings of channel groups within an account, among them the stream profile the group's channels get (by name) and the name filters that pick and rename them; each group is written whole, so what the spec does not name stays; readiness waits until the account's playlist has been read |
+| Dispatcharr | `channel-epg` | the guide entry of channels by name -- a source by name and a tvg-id -- written as the channel's override, which the channel sync leaves alone |
 | SuggestArr | `configuration` | the whole flat configuration: plain fields by name, secret fields from credentials (never shown), and the Jellyfin libraries derived from what the service reports, minus the collection types named |
 
 ## A spec

@@ -1754,6 +1754,35 @@ the kind of error, where it broke, `missing field` names and what the types
 expected -- and drops what came from the answer. Every decode of a service's
 answer goes through it; the spec's own file does not need to.
 
+## 34. Dispatcharr: the guide entry of a channel, as an override (v0.31.0, 2026-09-19)
+
+The Xtream provider's guide has no categories at all -- measured on the
+host: 1131 programmes of the 60 channels, none with a `<category>` -- so a
+media server cannot tell a football match from a film, and twelve of the
+channels bring no tvg-id. The public guides of epgshare01 carry categories
+(`Fußball`, `Sports`, `Motor Sports`, …) and know those channels, under
+their own ids (`Sky.Sport.News.de`, `SkySp.PL.HD.uk`).
+
+A channel's guide entry cannot simply be set: the channel sync of an
+auto-created channel re-resolves `epg_data` from its stream's tvg-id on every
+refresh (`apps/m3u/tasks.py`) and would undo it by the next morning. What the
+sync leaves alone is the channel's **override** (`ChannelOverride`), and
+`PATCH /api/channels/channels/edit/bulk/` with
+`[{"id": …, "override": {"epg_data": …}}]` writes one -- measured on the host:
+`override.epg_data_id` and `effective_epg_data_id` both the new entry, the
+channel's own `epg_data_id` untouched. The same write queues the programme
+import for the new entry.
+
+The task `channel-epg` takes channels by their effective name, each with a
+source by name and a tvg-id, and compares `effective_epg_data_id`. Readiness
+waits until every named channel exists and every named entry has been read
+from its source; a source added in the same run is parsed asynchronously.
+
+Two things the description gets wrong or leaves open: `GET
+/api/channels/channels/` is declared as a page, but answers a plain list
+without `page_size` (recorded, and read that way, so no response shape is
+checked); and `EPGData.tvg_id` and `epg_source` are nullable.
+
 ## 20. Not in the pilot
 
 
