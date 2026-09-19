@@ -1,0 +1,1597 @@
+{
+  "count": 265,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": 9,
+      "name": "tagesschau24",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 16,
+      "name": "rbb",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 8,
+      "name": "phoenix",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 13,
+      "name": "hr-fernsehen",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 6,
+      "name": "ZDFneo",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 7,
+      "name": "ZDFinfo",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 2,
+      "name": "ZDF",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 18,
+      "name": "WDR",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 17,
+      "name": "SWR",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 445,
+      "name": "SKYGO: SYFY HD",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 459,
+      "name": "SKYGO: SYFY 4K",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 403,
+      "name": "SKYGO: SPORT 1 PLUS 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 402,
+      "name": "SKYGO: SPORT 1 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 366,
+      "name": "SKYGO: SKY SPORT TOP EVENT HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 396,
+      "name": "SKYGO: SKY SPORT TOP EVENT 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 371,
+      "name": "SKYGO: SKY SPORT TENNIS HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 401,
+      "name": "SKYGO: SKY SPORT TENNIS 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 367,
+      "name": "SKYGO: SKY SPORT PREMIER LEAGUE HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 397,
+      "name": "SKYGO: SKY SPORT PREMIER LEAGUE 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 364,
+      "name": "SKYGO: SKY SPORT NEWS HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 394,
+      "name": "SKYGO: SKY SPORT NEWS 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 368,
+      "name": "SKYGO: SKY SPORT MIX HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 398,
+      "name": "SKYGO: SKY SPORT MIX 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 370,
+      "name": "SKYGO: SKY SPORT GOLF HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 400,
+      "name": "SKYGO: SKY SPORT GOLF 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 369,
+      "name": "SKYGO: SKY SPORT F1 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 399,
+      "name": "SKYGO: SKY SPORT F1 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 365,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 380,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 9 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 419,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 9 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 379,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 8 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 418,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 8 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 378,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 7 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 417,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 7 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 377,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 6 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 416,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 6 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 376,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 5 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 415,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 5 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 395,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 375,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 4 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 414,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 4 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 374,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 3 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 413,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 3 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 373,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 2 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 412,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 2 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 381,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 10 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 420,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 10 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 372,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 1 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 411,
+      "name": "SKYGO: SKY SPORT BUNDESLIGA 1 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 410,
+      "name": "SKYGO: SKY SPORT AUSTRIA 7 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 409,
+      "name": "SKYGO: SKY SPORT AUSTRIA 6 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 408,
+      "name": "SKYGO: SKY SPORT AUSTRIA 5 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 407,
+      "name": "SKYGO: SKY SPORT AUSTRIA 4 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 406,
+      "name": "SKYGO: SKY SPORT AUSTRIA 3 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 405,
+      "name": "SKYGO: SKY SPORT AUSTRIA 2 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 404,
+      "name": "SKYGO: SKY SPORT AUSTRIA 1 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 390,
+      "name": "SKYGO: SKY SPORT 9 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 429,
+      "name": "SKYGO: SKY SPORT 9 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 389,
+      "name": "SKYGO: SKY SPORT 8 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 428,
+      "name": "SKYGO: SKY SPORT 8 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 388,
+      "name": "SKYGO: SKY SPORT 7 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 427,
+      "name": "SKYGO: SKY SPORT 7 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 387,
+      "name": "SKYGO: SKY SPORT 6 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 426,
+      "name": "SKYGO: SKY SPORT 6 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 386,
+      "name": "SKYGO: SKY SPORT 5 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 425,
+      "name": "SKYGO: SKY SPORT 5 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 385,
+      "name": "SKYGO: SKY SPORT 4 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 424,
+      "name": "SKYGO: SKY SPORT 4 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 384,
+      "name": "SKYGO: SKY SPORT 3 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 423,
+      "name": "SKYGO: SKY SPORT 3 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 383,
+      "name": "SKYGO: SKY SPORT 2 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 422,
+      "name": "SKYGO: SKY SPORT 2 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 391,
+      "name": "SKYGO: SKY SPORT 10 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 430,
+      "name": "SKYGO: SKY SPORT 10 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 382,
+      "name": "SKYGO: SKY SPORT 1 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 421,
+      "name": "SKYGO: SKY SPORT 1 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 440,
+      "name": "SKYGO: SKY SHOWCASE HD",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 454,
+      "name": "SKYGO: SKY SHOWCASE 4K",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 439,
+      "name": "SKYGO: SKY REPLAY HD",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 453,
+      "name": "SKYGO: SKY REPLAY 4K",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 443,
+      "name": "SKYGO: SKY ONE HD",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 457,
+      "name": "SKYGO: SKY ONE 4K",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 441,
+      "name": "SKYGO: SKY KRIMI HD",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 456,
+      "name": "SKYGO: SKY KRIMI 4K",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 442,
+      "name": "SKYGO: SKY CRIME HD",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 455,
+      "name": "SKYGO: SKY CRIME 4K",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 436,
+      "name": "SKYGO: SKY CINEMA SPECIAL HD",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 450,
+      "name": "SKYGO: SKY CINEMA SPECIAL 4K",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 435,
+      "name": "SKYGO: SKY CINEMA PREMIEREN HD",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 449,
+      "name": "SKYGO: SKY CINEMA PREMIEREN 4K",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 437,
+      "name": "SKYGO: SKY CINEMA HIGHLIGHTS HD",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 451,
+      "name": "SKYGO: SKY CINEMA HIGHLIGHTS 4K",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 434,
+      "name": "SKYGO: SKY CINEMA FAMILY HD",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 448,
+      "name": "SKYGO: SKY CINEMA FAMILY 4K",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 433,
+      "name": "SKYGO: SKY CINEMA CLASSICS HD",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 447,
+      "name": "SKYGO: SKY CINEMA CLASSICS 4K",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 432,
+      "name": "SKYGO: SKY CINEMA ACTION HD",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 446,
+      "name": "SKYGO: SKY CINEMA ACTION 4K",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 438,
+      "name": "SKYGO: SKY ATLANTIC HD",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 452,
+      "name": "SKYGO: SKY ATLANTIC 4K",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 362,
+      "name": "SKYGO: DAZN 2 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 393,
+      "name": "SKYGO: DAZN 2 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 361,
+      "name": "SKYGO: DAZN 1 HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 392,
+      "name": "SKYGO: DAZN 1 4K",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 363,
+      "name": "SKYGO: BLUE SPORT ZOOM HD",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 444,
+      "name": "SKYGO: 13TH STREET HD",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 458,
+      "name": "SKYGO: 13TH STREET 4K",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 5,
+      "name": "ONE",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 50,
+      "name": "NOW: TNT SPORTS 4 ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 51,
+      "name": "NOW: TNT SPORTS 4 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 48,
+      "name": "NOW: TNT SPORT 3 ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 49,
+      "name": "NOW: TNT SPORT 3 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 46,
+      "name": "NOW: TNT SPORT 2 ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 47,
+      "name": "NOW: TNT SPORT 2 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 44,
+      "name": "NOW: TNT SPORT 1 ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 45,
+      "name": "NOW: TNT SPORT 1 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 42,
+      "name": "NOW: SKY SPORTS+ ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 43,
+      "name": "NOW: SKY SPORTS+ ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 32,
+      "name": "NOW: SKY SPORTS TENNIS ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 33,
+      "name": "NOW: SKY SPORTS TENNIS ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 30,
+      "name": "NOW: SKY SPORTS RACING ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 31,
+      "name": "NOW: SKY SPORTS RACING ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 24,
+      "name": "NOW: SKY SPORTS PREMIER LEAGUE ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 25,
+      "name": "NOW: SKY SPORTS PREMIER LEAGUE ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 20,
+      "name": "NOW: SKY SPORTS NEWS HQ ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 21,
+      "name": "NOW: SKY SPORTS NEWS HQ ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 40,
+      "name": "NOW: SKY SPORTS MIX ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 41,
+      "name": "NOW: SKY SPORTS MIX ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 22,
+      "name": "NOW: SKY SPORTS MAIN EVENT ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 23,
+      "name": "NOW: SKY SPORTS MAIN EVENT ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 38,
+      "name": "NOW: SKY SPORTS GOLF ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 39,
+      "name": "NOW: SKY SPORTS GOLF ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 26,
+      "name": "NOW: SKY SPORTS FOOTBALL ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 27,
+      "name": "NOW: SKY SPORTS FOOTBALL ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 28,
+      "name": "NOW: SKY SPORTS F1 ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 29,
+      "name": "NOW: SKY SPORTS F1 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 36,
+      "name": "NOW: SKY SPORTS CRICKET ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 37,
+      "name": "NOW: SKY SPORTS CRICKET ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 34,
+      "name": "NOW: SKY SPORTS ACTION ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 35,
+      "name": "NOW: SKY SPORTS ACTION ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 325
+    },
+    {
+      "id": 15,
+      "name": "NDR",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 14,
+      "name": "MDR",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 10,
+      "name": "KiKA",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 1,
+      "name": "Das Erste",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 601,
+      "name": "DE: TENNIS CHANNEL",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 600,
+      "name": "DE: SPORTDIGITAL HD",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 599,
+      "name": "DE: SPORT1+ HD",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 562,
+      "name": "DE: SPORT1 HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 598,
+      "name": "DE: SPORT1 HD",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 615,
+      "name": "DE: SKY SPORT ᵁᴴᴰ ³⁸⁴⁰ᴾ",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 613,
+      "name": "DE: SKY SPORT TOP EVENT HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 543,
+      "name": "DE: SKY SPORT TOP EVENT HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 564,
+      "name": "DE: SKY SPORT TOP EVENT HD",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 618,
+      "name": "DE: SKY SPORT TENNIS HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 548,
+      "name": "DE: SKY SPORT TENNIS HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 614,
+      "name": "DE: SKY SPORT PREMIER LEAGUE HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 544,
+      "name": "DE: SKY SPORT PREMIER LEAGUE HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 612,
+      "name": "DE: SKY SPORT NEWS HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 542,
+      "name": "DE: SKY SPORT NEWS HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 563,
+      "name": "DE: SKY SPORT NEWS HD",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 616,
+      "name": "DE: SKY SPORT MIX HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 545,
+      "name": "DE: SKY SPORT MIX HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 617,
+      "name": "DE: SKY SPORT GOLF HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 547,
+      "name": "DE: SKY SPORT GOLF HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 546,
+      "name": "DE: SKY SPORT F1 HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 565,
+      "name": "DE: SKY SPORT F1 (MOBIL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 627,
+      "name": "DE: SKY SPORT 9 HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 557,
+      "name": "DE: SKY SPORT 9 HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 574,
+      "name": "DE: SKY SPORT 9 (MOBIL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 626,
+      "name": "DE: SKY SPORT 8 HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 556,
+      "name": "DE: SKY SPORT 8 HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 573,
+      "name": "DE: SKY SPORT 8 (MOBIL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 625,
+      "name": "DE: SKY SPORT 7 HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 555,
+      "name": "DE: SKY SPORT 7 HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 572,
+      "name": "DE: SKY SPORT 7 (MOBIL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 624,
+      "name": "DE: SKY SPORT 6 HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 554,
+      "name": "DE: SKY SPORT 6 HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 571,
+      "name": "DE: SKY SPORT 6 (MOBIL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 623,
+      "name": "DE: SKY SPORT 5 HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 553,
+      "name": "DE: SKY SPORT 5 HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 570,
+      "name": "DE: SKY SPORT 5 (MOBIL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 622,
+      "name": "DE: SKY SPORT 4 HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 552,
+      "name": "DE: SKY SPORT 4 HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 569,
+      "name": "DE: SKY SPORT 4 (MOBIL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 621,
+      "name": "DE: SKY SPORT 3 HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 551,
+      "name": "DE: SKY SPORT 3 HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 568,
+      "name": "DE: SKY SPORT 3 (MOBIL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 620,
+      "name": "DE: SKY SPORT 2 HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 550,
+      "name": "DE: SKY SPORT 2 HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 567,
+      "name": "DE: SKY SPORT 2 (MOBIL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 559,
+      "name": "DE: SKY SPORT 11 HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 576,
+      "name": "DE: SKY SPORT 11 HD",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 577,
+      "name": "DE: SKY SPORT 11 (MOBIL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 628,
+      "name": "DE: SKY SPORT 10 HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 558,
+      "name": "DE: SKY SPORT 10 HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 575,
+      "name": "DE: SKY SPORT 10 (MOBIL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 619,
+      "name": "DE: SKY SPORT 1 HD (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 549,
+      "name": "DE: SKY SPORT 1 HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 566,
+      "name": "DE: SKY SPORT 1 (MOBIL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 578,
+      "name": "DE: MS SPORT ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 581,
+      "name": "DE: MS GOLF 2 ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 579,
+      "name": "DE: MS GOLF 1 ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 597,
+      "name": "DE: MOTORVISION HD",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 909,
+      "name": "DE: MAGENTATV INFO ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 918,
+      "name": "DE: MAGENTA SPORT PPV 9 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 917,
+      "name": "DE: MAGENTA SPORT PPV 8 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 916,
+      "name": "DE: MAGENTA SPORT PPV 7 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 915,
+      "name": "DE: MAGENTA SPORT PPV 6 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 914,
+      "name": "DE: MAGENTA SPORT PPV 5 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 913,
+      "name": "DE: MAGENTA SPORT PPV 4 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 912,
+      "name": "DE: MAGENTA SPORT PPV 3 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 911,
+      "name": "DE: MAGENTA SPORT PPV 2 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 927,
+      "name": "DE: MAGENTA SPORT PPV 18 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 926,
+      "name": "DE: MAGENTA SPORT PPV 17 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 925,
+      "name": "DE: MAGENTA SPORT PPV 16 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 924,
+      "name": "DE: MAGENTA SPORT PPV 15 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 923,
+      "name": "DE: MAGENTA SPORT PPV 14 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 922,
+      "name": "DE: MAGENTA SPORT PPV 13 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 921,
+      "name": "DE: MAGENTA SPORT PPV 12 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 920,
+      "name": "DE: MAGENTA SPORT PPV 11 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 919,
+      "name": "DE: MAGENTA SPORT PPV 10 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 910,
+      "name": "DE: MAGENTA SPORT PPV 1 ᴴᴰ",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 603,
+      "name": "DE: FC BAYERN TV HD",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 593,
+      "name": "DE: EUROSPORT360 HD 9",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 592,
+      "name": "DE: EUROSPORT360 HD 8",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 591,
+      "name": "DE: EUROSPORT360 HD 7",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 590,
+      "name": "DE: EUROSPORT360 HD 6",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 589,
+      "name": "DE: EUROSPORT360 HD 5",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 588,
+      "name": "DE: EUROSPORT360 HD 4",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 587,
+      "name": "DE: EUROSPORT360 HD 3",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 586,
+      "name": "DE: EUROSPORT360 HD 2",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 585,
+      "name": "DE: EUROSPORT360 HD 1",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 582,
+      "name": "DE: EUROSPORT 2 HD (MOBIL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 561,
+      "name": "DE: EUROSPORT 2 HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 584,
+      "name": "DE: EUROSPORT 2 HD",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 580,
+      "name": "DE: EUROSPORT 1 HD (MOBIL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 560,
+      "name": "DE: EUROSPORT 1 HD (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 583,
+      "name": "DE: EUROSPORT 1 HD",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 596,
+      "name": "DE: ESPO.ts1 HD",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 595,
+      "name": "DE: EDGE SPORT HD",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 602,
+      "name": "DE: DFB.TV HD",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 605,
+      "name": "DE: DAZN 2 ᴿᴬᵂ (WEB 1080)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 609,
+      "name": "DE: DAZN 2 ᴿᴬᵂ (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 607,
+      "name": "DE: DAZN 2 ᴿᴬᵂ (KABEL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 611,
+      "name": "DE: DAZN 2 ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 541,
+      "name": "DE: DAZN 2 ᴴᴰ (WEB 720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 537,
+      "name": "DE: DAZN 2 ᴴᴰ (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 539,
+      "name": "DE: DAZN 2 (MOBILE)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 604,
+      "name": "DE: DAZN 1 ᴿᴬᵂ (WEB 1080)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 608,
+      "name": "DE: DAZN 1 ᴿᴬᵂ (SAT)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 606,
+      "name": "DE: DAZN 1 ᴿᴬᵂ (KABEL)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 610,
+      "name": "DE: DAZN 1 ᴿᴬᵂ",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 540,
+      "name": "DE: DAZN 1 ᴴᴰ (WEB 720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 536,
+      "name": "DE: DAZN 1 ᴴᴰ (720P)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 538,
+      "name": "DE: DAZN 1 (MOBILE)",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 594,
+      "name": "DE: AUTO MOTOR SPORT CHANNEL HD",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 12,
+      "name": "BR Fernsehen",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 4,
+      "name": "ARTE",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 11,
+      "name": "ARD alpha",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 3,
+      "name": "3sat",
+      "m3u_account": 2,
+      "channel_group": 2
+    },
+    {
+      "id": 535,
+      "name": "##### SPORT HD/4K #####",
+      "m3u_account": 3,
+      "channel_group": 402
+    },
+    {
+      "id": 908,
+      "name": "#### MAGENTA PPV ᴴᴰ ᴳᴼᴸᴰ ####",
+      "m3u_account": 3,
+      "channel_group": 416
+    },
+    {
+      "id": 360,
+      "name": "### SKYGO SPORT VIP ###",
+      "m3u_account": 3,
+      "channel_group": 396
+    },
+    {
+      "id": 431,
+      "name": "### SKYGO CINEMA VIP ###",
+      "m3u_account": 3,
+      "channel_group": 397
+    },
+    {
+      "id": 19,
+      "name": "## NOW TV SPORT ᴴᴰ/ᴿᴬᵂ ##",
+      "m3u_account": 3,
+      "channel_group": 325
+    }
+  ]
+}

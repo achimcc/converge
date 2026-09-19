@@ -1990,6 +1990,7 @@ fn dispatcharr_desired(
                 tvg_id: Option<String>,
                 name: Option<String>,
                 logo_url: Option<String>,
+                fallback_streams: Option<Vec<String>>,
             }
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
@@ -2029,7 +2030,25 @@ fn dispatcharr_desired(
                         return Err(format!("{at}.logo_url must start with http:// or https://"));
                     }
                 }
-                if epg.is_none() && l.name.is_none() && l.logo_url.is_none() {
+                if let Some(fallbacks) = &l.fallback_streams {
+                    if fallbacks.is_empty() {
+                        return Err(format!("{at}.fallback_streams names no stream"));
+                    }
+                    let mut seen = std::collections::BTreeSet::new();
+                    for f in fallbacks {
+                        if f.is_empty() {
+                            return Err(format!("{at}.fallback_streams: a stream name is empty"));
+                        }
+                        if !seen.insert(f) {
+                            return Err(format!("{at}.fallback_streams names {f} twice"));
+                        }
+                    }
+                }
+                if epg.is_none()
+                    && l.name.is_none()
+                    && l.logo_url.is_none()
+                    && l.fallback_streams.is_none()
+                {
                     return Err(format!("{at} names nothing to show"));
                 }
                 channels.insert(
@@ -2038,6 +2057,7 @@ fn dispatcharr_desired(
                         epg,
                         name: l.name,
                         logo_url: l.logo_url,
+                        fallback_streams: l.fallback_streams.unwrap_or_default(),
                     },
                 );
             }
@@ -3243,7 +3263,15 @@ mod tests {
             r#"{"username":"c","channels":{"SKY SPORT NEWS":{"name":"Sky Sport News","logo_url":"https://l.example/n.png"}}}"#,
         );
         assert!(look.is_ok(), "name and logo alone: {look:?}");
+        let fallback = dispatcharr(
+            "channel-epg",
+            r#"{"username":"c","channels":{"SKY SPORT GOLF":{"fallback_streams":["SKYGO: SKY SPORT GOLF HD"]}}}"#,
+        );
+        assert!(fallback.is_ok(), "fallback streams alone: {fallback:?}");
         for bad in [
+            r#"{"username":"c","channels":{"X":{"fallback_streams":[]}}}"#,
+            r#"{"username":"c","channels":{"X":{"fallback_streams":[""]}}}"#,
+            r#"{"username":"c","channels":{"X":{"fallback_streams":["a","a"]}}}"#,
             r#"{"username":"c","channels":{}}"#,
             r#"{"username":"c","channels":{"X":{"source":"","tvg_id":"a"}}}"#,
             r#"{"username":"c","channels":{"X":{"source":"s","tvg_id":""}}}"#,

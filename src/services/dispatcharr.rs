@@ -139,7 +139,7 @@ pub const EPG_DATA: Endpoint = Endpoint {
     response: Some(Shape::List("EPGData")),
 };
 
-pub const ENDPOINTS: [Endpoint; 18] = [
+pub const ENDPOINTS: [Endpoint; 19] = [
     TOKEN,
     VERSION,
     STREAM_PROFILES,
@@ -158,6 +158,7 @@ pub const ENDPOINTS: [Endpoint; 18] = [
     EPG_DATA,
     LOGOS,
     LOGO_CREATE,
+    STREAMS,
 ];
 
 /// The components a spec's fields are checked against: an account's and a
@@ -216,6 +217,7 @@ pub fn wire_types() -> Vec<schemars::Schema> {
         schemars::schema_for!(Channel),
         schemars::schema_for!(EPGData),
         schemars::schema_for!(Logo),
+        schemars::schema_for!(Stream),
     ]
 }
 
@@ -292,6 +294,20 @@ pub struct Channel {
     pub effective_name: Option<String>,
     pub effective_epg_data_id: Option<i64>,
     pub effective_logo_id: Option<i64>,
+    /// Stream ids in play order: the first is played, the rest are the
+    /// fallbacks the proxy switches to when one fails.
+    #[serde(default)]
+    pub streams: Vec<i64>,
+}
+
+/// A stream as the list answers it. Only these fields are read: an Xtream
+/// stream's `url` carries the provider's user name and password.
+#[derive(Deserialize, JsonSchema)]
+pub struct Stream {
+    pub id: i64,
+    pub name: String,
+    pub m3u_account: Option<i64>,
+    pub channel_group: Option<i64>,
 }
 
 /// One channel of one EPG source.
@@ -975,6 +991,10 @@ pub struct ChannelLook {
     pub epg: Option<EpgTarget>,
     pub name: Option<String>,
     pub logo_url: Option<String>,
+    /// Streams by name, played in this order after the channel's own (design
+    /// §36). Only streams of the SAME group as the channel's own: the sync of
+    /// any other group would count the channel as its own and delete it.
+    pub fallback_streams: Vec<String>,
 }
 
 /// Channels by their OWN name -- the one the channel sync gives them, not the
@@ -1022,6 +1042,39 @@ fn logos_page(n: usize) -> String {
     format!("{}?page={n}&page_size=1000", LOGOS.path)
 }
 
+/// The stream list is paginated (recorded: `count`, `next`, `results`).
+pub const STREAMS: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/channels/streams/",
+    request: None,
+    response: None,
+};
+
+fn streams_page(n: usize) -> String {
+    format!("{}?page={n}&page_size=1000", STREAMS.path)
+}
+
+/// Every stream, page by page, until the answer names no next page.
+fn read_streams(t: &dyn Transport) -> Result<Vec<Stream>, Error> {
+    let mut all = Vec::new();
+    for n in 1.. {
+        let path = streams_page(n);
+        let reply = t.get(&path)?;
+        expect_status_at(STREAMS.method, &path, &reply, &[200])?;
+        let page: Page<Stream> = decode(&path, &reply.body)?;
+        all.extend(page.results);
+        if page.next.is_none() {
+            break;
+        }
+    }
+    if all.is_empty() {
+        return Err(Error::EmptyList {
+            path: STREAMS.path.to_string(),
+        });
+    }
+    Ok(all)
+}
+
 /// Every logo, page by page, until the answer names no next page.
 fn read_logos(t: &dyn Transport) -> Result<Vec<Logo>, Error> {
     let mut all = Vec::new();
@@ -1048,6 +1101,8 @@ struct Wanted {
     epg: Option<i64>,
     display: Option<String>,
     logo: Option<Result<i64, String>>,
+    /// The whole stream list to write, when it differs.
+    streams: Option<Vec<i64>>,
 }
 
 pub struct ChannelEpgState {
@@ -1056,11 +1111,29 @@ pub struct ChannelEpgState {
     pub data: Vec<EPGData>,
     /// Read only when a channel names a logo.
     pub logos: Vec<Logo>,
+    /// Read only when a channel names a fallback stream.
+    pub streams: Vec<Stream>,
+}
+
+/// What the named fallbacks of one channel come to.
+struct Fallbacks {
+    /// The stream list the channel is to play: its own stream, then every
+    /// named fallback that exists.
+    wanted: Vec<i64>,
+    /// Named, but not in the list: the provider dropped it. A note, not a
+    /// wait -- it may not come back.
+    missing: Vec<String>,
+    /// Named, but refused: another group, or not one stream.
+    refused: Vec<String>,
 }
 
 impl ChannelEpg {
     fn read_state(&self, t: &dyn Transport) -> Result<ChannelEpgState, Error> {
         let wants_logos = self.channels.values().any(|l| l.logo_url.is_some());
+        let wants_streams = self
+            .channels
+            .values()
+            .any(|l| !l.fallback_streams.is_empty());
         Ok(ChannelEpgState {
             channels: get_list(t, &CHANNELS)?,
             sources: get_list(t, &EPG_SOURCES)?,
@@ -1070,7 +1143,101 @@ impl ChannelEpg {
             } else {
                 Vec::new()
             },
+            streams: if wants_streams {
+                read_streams(t)?
+            } else {
+                Vec::new()
+            },
         })
+    }
+
+    /// The channel's own stream is the first of its list: the one the sync
+    /// assigned. Fallbacks are looked up in its account and must share its
+    /// group -- the sync of a group deletes every auto channel holding one
+    /// of the group's streams when its filter matches none of them
+    /// (`apps/m3u/tasks.py`, "Delete channels whose streams have all
+    /// disappeared"), and a fallback's group is not filtered for it.
+    fn fallbacks(state: &ChannelEpgState, channel: &Channel, names: &[String]) -> Fallbacks {
+        let mut out = Fallbacks {
+            wanted: Vec::new(),
+            missing: Vec::new(),
+            refused: Vec::new(),
+        };
+        let Some(&own_id) = channel.streams.first() else {
+            out.refused
+                .push(format!("channel {} has no stream of its own", channel.name));
+            return out;
+        };
+        let Some(own) = state.streams.iter().find(|s| s.id == own_id) else {
+            out.refused.push(format!(
+                "stream {own_id} of channel {} is not in the stream list",
+                channel.name
+            ));
+            return out;
+        };
+        out.wanted.push(own.id);
+        for name in names {
+            let found: Vec<&Stream> = state
+                .streams
+                .iter()
+                .filter(|s| &s.name == name && s.m3u_account == own.m3u_account)
+                .collect();
+            match found.as_slice() {
+                [] => out.missing.push(format!(
+                    "channel {}: fallback stream {name} is not in the account's stream list",
+                    channel.name
+                )),
+                [s] if s.channel_group != own.channel_group => out.refused.push(format!(
+                    "channel {}: fallback stream {name} is in group {} and the channel's own \
+                     stream in group {}; the sync of that group would delete the channel",
+                    channel.name,
+                    s.channel_group
+                        .map_or("(none)".to_string(), |g| g.to_string()),
+                    own.channel_group
+                        .map_or("(none)".to_string(), |g| g.to_string()),
+                )),
+                [s] if s.id == own.id => {}
+                [s] => {
+                    if !out.wanted.contains(&s.id) {
+                        out.wanted.push(s.id);
+                    }
+                }
+                many => out.refused.push(format!(
+                    "channel {}: {} streams are named {name}",
+                    channel.name,
+                    many.len()
+                )),
+            }
+        }
+        out
+    }
+
+    /// Every refusal of every named channel that exists.
+    fn refusals(&self, state: &ChannelEpgState) -> Vec<String> {
+        self.channels
+            .iter()
+            .filter(|(_, l)| !l.fallback_streams.is_empty())
+            .filter_map(|(name, l)| {
+                Self::channel(state, name).map(|c| Self::fallbacks(state, c, &l.fallback_streams))
+            })
+            .flat_map(|f| f.refused)
+            .collect()
+    }
+
+    fn stream_names(state: &ChannelEpgState, ids: &[i64]) -> String {
+        if ids.is_empty() {
+            return "(none)".to_string();
+        }
+        ids.iter()
+            .map(|id| {
+                state
+                    .streams
+                    .iter()
+                    .find(|s| s.id == *id)
+                    .map_or_else(|| format!("(stream {id})"), |s| s.name.clone())
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     fn channel<'a>(state: &'a ChannelEpgState, name: &str) -> Option<&'a Channel> {
@@ -1135,7 +1302,22 @@ impl ChannelEpg {
                 epg: None,
                 display: None,
                 logo: None,
+                streams: None,
             };
+            if !look.fallback_streams.is_empty() {
+                let f = Self::fallbacks(state, channel, &look.fallback_streams);
+                // Refusals are reported by `refusals`; a refused list is
+                // not written half.
+                if f.refused.is_empty() && f.wanted != channel.streams {
+                    w.changes.push(Change {
+                        subject: subject.clone(),
+                        field: "streams".to_string(),
+                        current: Self::stream_names(state, &channel.streams),
+                        desired: Self::stream_names(state, &f.wanted),
+                    });
+                    w.streams = Some(f.wanted);
+                }
+            }
             if let Some(target) = &look.epg {
                 match Self::entry(state, target) {
                     Ok(want) if channel.effective_epg_data_id != Some(want) => {
@@ -1210,6 +1392,11 @@ impl Task for ChannelEpg {
             .map_err(|e| Probe::NotYet(e.to_string()))?;
         self.wanted(&state)
             .map_err(|absent| Probe::NotYet(absent.join("; ")))?;
+        // Waiting does not move a stream into another group.
+        let refused = self.refusals(&state);
+        if !refused.is_empty() {
+            return Err(Probe::Fatal(Error::Mismatch(refused)));
+        }
         Ok(version)
     }
 
@@ -1219,11 +1406,24 @@ impl Task for ChannelEpg {
 
     fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
         let wanted = self.wanted(current).map_err(Error::NotFound)?;
+        let refused = self.refusals(current);
+        if !refused.is_empty() {
+            return Err(Error::Mismatch(refused));
+        }
         Ok(wanted.into_iter().flat_map(|w| w.changes).collect())
     }
 
-    fn notes(&self, _current: &Self::Current) -> Vec<String> {
-        Vec::new()
+    /// Named fallbacks the provider does not list (any more).
+    fn notes(&self, current: &Self::Current) -> Vec<String> {
+        self.channels
+            .iter()
+            .filter(|(_, l)| !l.fallback_streams.is_empty())
+            .filter_map(|(name, l)| {
+                Self::channel(current, name)
+                    .map(|c| Self::fallbacks(current, c, &l.fallback_streams))
+            })
+            .flat_map(|f| f.missing)
+            .collect()
     }
 
     /// Missing logos first (one POST each), then one bulk PATCH with an
@@ -1258,7 +1458,17 @@ impl Task for ChannelEpg {
                 }
                 None => {}
             }
-            body.push(json!({"id": w.id, "override": o}));
+            // Only what differs: an empty override is not "nothing" to the
+            // view, it is an override to write.
+            let mut entry = Map::new();
+            entry.insert("id".to_string(), json!(w.id));
+            if !o.is_empty() {
+                entry.insert("override".to_string(), Value::Object(o));
+            }
+            if let Some(streams) = &w.streams {
+                entry.insert("streams".to_string(), json!(streams));
+            }
+            body.push(Value::Object(entry));
         }
         if body.is_empty() {
             return Ok(());
@@ -1872,6 +2082,7 @@ mod tests {
                             }),
                             name: None,
                             logo_url: None,
+                            fallback_streams: Vec::new(),
                         },
                     )
                 })
@@ -1988,6 +2199,7 @@ mod tests {
                     epg: None,
                     name: name.map(str::to_string),
                     logo_url: logo.map(str::to_string),
+                    fallback_streams: Vec::new(),
                 },
             )]),
         }
@@ -2061,6 +2273,151 @@ mod tests {
             .on_get(EPG_SOURCES.path, vec![ok(&sources_with_provider())])
             .on_get(EPG_DATA.path, vec![ok(EPGDATA_JSON)]);
         assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
+    }
+
+    const STREAMS_JSON: &str =
+        include_str!("../../tests/fixtures/dispatcharr-0.31.0/channels-streams-trimmed.json");
+
+    fn fallbacks(channel: &str, names: &[&str]) -> ChannelEpg {
+        ChannelEpg {
+            channels: BTreeMap::from([(
+                channel.to_string(),
+                ChannelLook {
+                    epg: None,
+                    name: None,
+                    logo_url: None,
+                    fallback_streams: names.iter().map(|n| n.to_string()).collect(),
+                },
+            )]),
+        }
+    }
+
+    fn stream_transport(channels: &str) -> FakeTransport {
+        FakeTransport::default()
+            .on_get(VERSION.path, vec![ok(VERSION_JSON)])
+            .on_get(CHANNELS.path, vec![ok(channels)])
+            .on_get(EPG_SOURCES.path, vec![ok(&sources_with_provider())])
+            .on_get(EPG_DATA.path, vec![ok(EPGDATA_JSON)])
+            .on_get(&streams_page(1), vec![ok(STREAMS_JSON)])
+            .on_put(vec![Step::Answer(200, "[]".to_string())])
+    }
+
+    fn channel_id(current: &ChannelEpgState, name: &str) -> i64 {
+        current.channels.iter().find(|c| c.name == name).unwrap().id
+    }
+
+    fn stream_id(name: &str) -> i64 {
+        let v: Value = serde_json::from_str(STREAMS_JSON).unwrap();
+        v["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == name)
+            .unwrap()["id"]
+            .as_i64()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_fallback_of_the_same_group_follows_the_channels_own_stream() {
+        let task = fallbacks("SKY SPORT GOLF", &["SKYGO: SKY SPORT GOLF HD"]);
+        let t = stream_transport(CHANNELS_JSON);
+        let current = task.read(&t).unwrap();
+        let lines: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(
+            lines,
+            ["channel SKY SPORT GOLF: streams SKYGO: SKY SPORT GOLF 4K -> SKYGO: SKY SPORT GOLF 4K, SKYGO: SKY SPORT GOLF HD"]
+        );
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written[0].0, "/api/channels/channels/edit/bulk/");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        // No override: an empty one is not "nothing", it is a write.
+        assert_eq!(
+            sent,
+            json!([{
+                "id": channel_id(&current, "SKY SPORT GOLF"),
+                "streams": [stream_id("SKYGO: SKY SPORT GOLF 4K"), stream_id("SKYGO: SKY SPORT GOLF HD")]
+            }])
+        );
+    }
+
+    #[test]
+    fn a_channel_that_carries_its_fallback_is_unchanged() {
+        let carried = with(CHANNELS_JSON, |v| {
+            for c in v.as_array_mut().unwrap() {
+                if c["name"] == "SKY SPORT GOLF" {
+                    c["streams"] = json!([
+                        stream_id("SKYGO: SKY SPORT GOLF 4K"),
+                        stream_id("SKYGO: SKY SPORT GOLF HD")
+                    ]);
+                }
+            }
+        });
+        let task = fallbacks("SKY SPORT GOLF", &["SKYGO: SKY SPORT GOLF HD"]);
+        let t = stream_transport(&carried);
+        assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn a_fallback_from_another_group_is_refused_because_its_sync_would_delete_the_channel() {
+        let task = fallbacks("SKY SPORT GOLF", &["DE: SKY SPORT GOLF HD (SAT)"]);
+        let e = match task.probe(&stream_transport(CHANNELS_JSON)) {
+            Err(Probe::Fatal(e)) => e.to_string(),
+            _ => panic!("a fallback from another group was accepted"),
+        };
+        assert!(
+            e.contains("DE: SKY SPORT GOLF HD (SAT)") && e.contains("group"),
+            "{e}"
+        );
+        let t = stream_transport(CHANNELS_JSON);
+        assert!(task.diff(&task.read(&t).unwrap()).is_err());
+    }
+
+    #[test]
+    fn a_missing_fallback_is_a_note_and_the_rest_is_kept() {
+        let task = fallbacks(
+            "SKY SPORT GOLF",
+            &["GIBT ES NICHT", "SKYGO: SKY SPORT GOLF HD"],
+        );
+        let t = stream_transport(CHANNELS_JSON);
+        assert!(
+            task.probe(&t).is_ok(),
+            "a vanished stream is not worth waiting for"
+        );
+        let current = task.read(&t).unwrap();
+        let notes = task.notes(&current);
+        assert!(
+            notes.iter().any(|n| n.contains("GIBT ES NICHT")),
+            "{notes:?}"
+        );
+        let lines: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert!(
+            lines[0].ends_with("SKY SPORT GOLF 4K, SKYGO: SKY SPORT GOLF HD"),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn streams_and_override_go_into_one_entry() {
+        let mut task = fallbacks("SKY SPORT GOLF", &["SKYGO: SKY SPORT GOLF HD"]);
+        task.channels.get_mut("SKY SPORT GOLF").unwrap().name = Some("Sky Sport Golf".into());
+        let t = stream_transport(CHANNELS_JSON);
+        let current = task.read(&t).unwrap();
+        task.write(&t, &current).unwrap();
+        let sent: Value = serde_json::from_str(&t.written.borrow()[0].1).unwrap();
+        assert_eq!(sent[0]["override"], json!({"name": "Sky Sport Golf"}));
+        assert_eq!(sent[0]["streams"].as_array().unwrap().len(), 2);
     }
 
     #[test]

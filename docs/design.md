@@ -1805,6 +1805,45 @@ compares the URL behind `effective_logo_id`, and creates a missing logo with
 override carries only the fields that differ, so the rest of an existing
 override stays.
 
+## 36. Dispatcharr: fallback streams, from the channel's own group (v0.33.0, 2026-09-19)
+
+Each Xtream channel plays one stream, the best variant its group's name
+filter picks (`SKYGO: SKY SPORT GOLF 4K`). The provider carries others of the
+same channel -- in the same group (`… HD`) and, for the German sports
+channels, in another (`DE: SKY SPORT GOLF HD (SAT)`, group `DE| SPORT
+HD/4K`). A channel's stream list is ordered, and Dispatcharr's proxy switches
+to the next stream when one fails; so `channel-epg` takes, per channel,
+`fallback_streams` by name, and makes the channel's list its own stream
+followed by those.
+
+**The channel sync leaves such a list alone** -- measured on the host: channel
+`SKY SPORT GOLF` given `[400, 370]` by hand, the account refreshed, the sync
+reported "0 created, 0 updated, 0 deleted" and the list was still
+`[400, 370]`. The sync maps every stream of its group to the auto channel
+holding it and deletes a channel when none of its streams in the group is
+matched any more; a fallback the filter does not match is simply not looked
+at.
+
+**And that is exactly why a fallback from ANOTHER group is refused.** The
+sync of that group finds the channel through the fallback, sees none of the
+channel's streams in its group matched -- its filter was written for other
+channels -- and deletes the channel ("Delete channels whose streams have all
+disappeared", `apps/m3u/tasks.py`). The SAT variants above sit in the group
+that feeds the Eurosport channels, which is synced. converge refuses such a
+fallback as a `Mismatch` (fatal in the probe: waiting does not move a stream
+into another group) instead of writing a list that deletes its channel on the
+next refresh.
+
+The channel's own stream is the FIRST of its list: the one the sync assigned.
+Fallbacks are looked up by name in the stream list of the same account; one
+that is not there is a note, not a wait -- the provider may have dropped it
+for good -- and the list is written without it. A name that matches several
+streams is refused. The stream list is paginated and read only when a channel
+names a fallback. `PATCH /api/channels/channels/edit/bulk/` takes `streams`
+next to `override` and keeps the given order (`api_views.py`, `edit_bulk`);
+an entry now carries only what differs, since an empty `override` is a write,
+not nothing.
+
 ## 20. Not in the pilot
 
 

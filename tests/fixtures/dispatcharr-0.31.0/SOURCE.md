@@ -50,3 +50,9 @@ carries the provider's user name and password in its `url`. The tests use
   whatever is asked. Logo names and image URLs only (the public broadcasters'
   logos from tv-logo/tv-logos and the provider's channel pictures). The
   second page the tests need is constructed in the test code.
+- `channels-streams-trimmed.json` — `GET /api/channels/streams/?page_size=1000`
+  (recorded 2026-09-19, 18:12 CEST), **trimmed**: every stream of the answer
+  (265, one page, `next` null), but only `id`, `name`, `m3u_account` and
+  `channel_group` of each. Everything else is dropped because an Xtream
+  stream's `url` carries the provider's user name and password; `count`,
+  `next` and `previous` are kept as answered.
