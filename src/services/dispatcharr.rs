@@ -447,7 +447,8 @@ impl Task for StreamSettings {
 /// converge never removes one. The same shape for M3U accounts and EPG
 /// sources, which differ only in their endpoints.
 ///
-/// An M3U account may also carry `secrets` from credentials (design §30):
+/// An M3U account may also carry `secrets` from credentials (design §30),
+/// and an EPG source its `url` (§31, compared like `server_url`):
 /// `server_url` and `username`, which Dispatcharr answers in the clear and
 /// which are compared without being shown, and `password`, which it answers
 /// as `""` and which is therefore handed over on every `apply`.
@@ -462,6 +463,19 @@ pub struct Entries {
 /// among them Dispatcharr never answers with (`write_only`).
 pub const SECRET_FIELDS: [&str; 3] = ["server_url", "username", "password"];
 pub const WRITE_ONLY: &str = "password";
+/// An EPG source's one secret field: an Xtream provider's guide URL carries
+/// the account's user name and password in its query (design §31).
+pub const SOURCE_SECRET_FIELDS: [&str; 1] = ["url"];
+
+impl EntryKind {
+    /// The fields this kind may take from a credential.
+    pub fn secret_fields(self) -> &'static [&'static str] {
+        match self {
+            EntryKind::M3uAccount => &SECRET_FIELDS,
+            EntryKind::EpgSource => &SOURCE_SECRET_FIELDS,
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EntryKind {
@@ -1019,6 +1033,56 @@ mod tests {
         assert_eq!(written[0].0, "/api/m3u/accounts/2/");
         let sent: Value = serde_json::from_str(&written[0].1).unwrap();
         assert_eq!(sent, json!({"password": PASSWORD}));
+    }
+
+    const EPG_URL: &str =
+        "http://xtream.example:8080/xmltv.php?username=u&password=xtream-password-never-print";
+
+    fn secret_source() -> Entries {
+        Entries {
+            kind: EntryKind::EpgSource,
+            entries: BTreeMap::from([(
+                "epgshare01-de".to_string(),
+                fields(&[("source_type", json!("xmltv"))]),
+            )]),
+            secrets: BTreeMap::from([(
+                "epgshare01-de".to_string(),
+                BTreeMap::from([("url".to_string(), Secret::new(EPG_URL.to_string()))]),
+            )]),
+        }
+    }
+
+    #[test]
+    fn a_source_url_from_a_credential_is_compared_unseen_and_nothing_is_handed_over() {
+        let task = secret_source();
+        let same = FakeTransport::default().on_get(
+            EPG_SOURCES.path,
+            vec![ok(&with(SOURCES_JSON, |v| v[0]["url"] = json!(EPG_URL)))],
+        );
+        let current = task.read(&same).unwrap();
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+        assert!(task.hand_over(&same, &current).unwrap().is_empty());
+        assert!(same.written.borrow().is_empty());
+
+        let other = FakeTransport::default()
+            .on_get(EPG_SOURCES.path, vec![ok(SOURCES_JSON)])
+            .on_put(vec![Step::Answer(200, "{}".to_string())]);
+        let current = task.read(&other).unwrap();
+        let lines: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(
+            lines,
+            ["EPG source epgshare01-de: url (another value, not shown) -> (the credential's, not shown)"]
+        );
+        never_printed(&lines.join("\n"));
+        assert!(!lines.join("\n").contains("xmltv.php"));
+        task.write(&other, &current).unwrap();
+        let sent: Value = serde_json::from_str(&other.written.borrow()[0].1).unwrap();
+        assert_eq!(sent, json!({"source_type": "xmltv", "url": EPG_URL}));
     }
 
     #[test]

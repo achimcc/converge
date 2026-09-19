@@ -1671,6 +1671,22 @@ Nothing else changes for a group: an Xtream account's groups load like a
 file's, asynchronously after the account's first refresh, and `m3u-groups`
 waits for them as before.
 
+## 31. Dispatcharr: an EPG source's URL from a credential (v0.27.0, 2026-09-19)
+
+An Xtream Codes provider serves its guide at
+`<server>/xmltv.php?username=<user>&password=<password>` -- measured on the
+host's provider: 78 MB, 8350 channels, two days ahead, among them the German
+Sky, DAZN and Eurosport channels its streams name in `epg_channel_id`.
+Dispatcharr has no Xtream source type (`xmltv`, `schedules_direct`,
+`dummy`), so the guide is an XMLTV source whose URL carries the account's
+password. That URL cannot stand in a spec.
+
+An EPG source therefore takes `url` from `secret_fields`, and only `url`.
+Dispatcharr answers it in the clear (`EPGSourceSerializer`), so it is
+compared without being shown, like an account's `server_url`; nothing is
+handed over. The caller composes the credential -- on the host a sops
+template joins the three values of the account.
+
 ## 20. Not in the pilot
 
 

@@ -1817,7 +1817,7 @@ fn dispatcharr_desired(
     task: TaskName,
     desired: serde_json::Value,
 ) -> Result<DispatcharrDesired, String> {
-    use crate::services::dispatcharr::{EntryKind, GROUP_FIELDS, SECRET_FIELDS};
+    use crate::services::dispatcharr::{EntryKind, GROUP_FIELDS};
     type Fields = BTreeMap<String, serde_json::Value>;
 
     fn fields_ok(at: &str, fields: &Fields, allowed: Option<&[&str]>) -> Result<(), String> {
@@ -1912,18 +1912,16 @@ fn dispatcharr_desired(
                 }
                 let here = format!("{at}.{name}");
                 // `secret_fields` is not a Dispatcharr field: field -> the
-                // credential holding its value, for M3U accounts only.
+                // credential holding its value (§30 accounts, §31 sources).
                 if let Some(raw) = fields.remove("secret_fields") {
-                    if kind != EntryKind::M3uAccount {
-                        return Err(format!("{here}: secret_fields are for an M3U account only"));
-                    }
+                    let allowed = kind.secret_fields();
                     let map: BTreeMap<String, String> = serde_json::from_value(raw)
                         .map_err(|e| format!("{here}.secret_fields: {e}"))?;
                     for (field, credential) in &map {
-                        if !SECRET_FIELDS.contains(&field.as_str()) {
+                        if !allowed.contains(&field.as_str()) {
                             return Err(format!(
                                 "{here}.secret_fields: {field} is not a secret field ({})",
-                                SECRET_FIELDS.join(", ")
+                                allowed.join(", ")
                             ));
                         }
                         if fields.contains_key(field) {
@@ -3105,14 +3103,47 @@ mod tests {
     }
 
     #[test]
+    fn an_epg_source_takes_its_url_from_a_credential() {
+        let spec = dispatcharr(
+            "epg-sources",
+            r#"{"username":"c","sources":{"Anbieter":{"source_type":"xmltv","secret_fields":{"url":"xt-epg"}}}}"#,
+        )
+        .unwrap();
+        let Desired::Dispatcharr(d) = &spec.desired else {
+            panic!("not a Dispatcharr spec")
+        };
+        let DispatcharrTask::Entries(_, entries, secrets) = &d.task else {
+            panic!("not an entries task")
+        };
+        assert_eq!(
+            entries["Anbieter"].keys().collect::<Vec<_>>(),
+            ["source_type"]
+        );
+        assert_eq!(secrets["Anbieter"]["url"], "xt-epg");
+    }
+
+    #[test]
     fn secret_fields_are_checked() {
         let refused =
             |task: &str, desired: &str| dispatcharr(task, desired).unwrap_err().to_string();
         let source = refused(
             "epg-sources",
-            r#"{"username":"c","sources":{"E":{"url":"https://x/e.xml","secret_fields":{"username":"k"}}}}"#,
+            r#"{"username":"c","sources":{"E":{"source_type":"xmltv","secret_fields":{"username":"k"}}}}"#,
         );
-        assert!(source.contains("M3U account"), "{source}");
+        assert!(source.contains("not a secret field (url)"), "{source}");
+        let account_url = refused(
+            "m3u-accounts",
+            r#"{"username":"c","accounts":{"X":{"account_type":"XC","secret_fields":{"url":"k"}}}}"#,
+        );
+        assert!(
+            account_url.contains("server_url, username, password"),
+            "{account_url}"
+        );
+        let url_twice = refused(
+            "epg-sources",
+            r#"{"username":"c","sources":{"E":{"url":"https://x/e.xml","secret_fields":{"url":"k"}}}}"#,
+        );
+        assert!(url_twice.contains("both"), "{url_twice}");
         let unknown = refused(
             "m3u-accounts",
             r#"{"username":"c","accounts":{"X":{"account_type":"XC","secret_fields":{"max_streams":"k"}}}}"#,

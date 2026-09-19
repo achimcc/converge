@@ -19,11 +19,11 @@ script should have been:
 
 ## Status
 
-Early. **v0.23.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.27.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11),
-**SuggestArr** (2.14), **Kavita** (0.9) and **Audiobookshelf** (2.36), each
-replacing a shell unit or an OpenTofu resource on the host it was written
-for:
+**SuggestArr** (2.14), **Kavita** (0.9), **Audiobookshelf** (2.36) and
+**Dispatcharr** (0.31), each replacing a shell unit or an OpenTofu resource on
+the host it was written for:
 
 | service | task | desired state |
 |---|---|---|
@@ -57,10 +57,10 @@ for:
 | Kavita | `server-settings` | fields of `ServerSettingDto`, by path -- among them the OIDC switches. The key is an auth key of an administrator in `x-api-key`. What the host writes into `appsettings.json` (authority, client id, secret, scopes, port, addresses, base URL, cache size), the SMTP password and Kavita's own install fields are refused |
 | Kavita | `libraries` | libraries by a folder they hold: fields of the update, written whole; a change of `type` is followed by a forced scan. converge does not create libraries |
 | Audiobookshelf | `auth-settings` | the authentication settings by name, `PATCH`ed key by key; the OIDC client secret from a credential, compared without being shown. `""` and `null` are one value, as Audiobookshelf treats them (except the redirect subfolder) |
-| Dispatcharr | `stream-settings` | the default stream profile, by name |
-| Dispatcharr | `m3u-accounts`, `epg-sources` | accounts and sources by name: a missing one is added, the named fields are set; an account's `server_url`, `username` and `password` may come from credentials (`secret_fields`: compared unseen, the password handed over on every apply); every task logs in as a service account, once per run |
-| Dispatcharr | `m3u-groups` | the settings of channel groups within an account; readiness waits until the account's playlist has been read |
 | Audiobookshelf | `admin-permissions` | permissions every account of the named types must hold, `PATCH`ed per account with the differing keys only; the answer carries every account's token, and nothing but username, type and the named permissions is ever shown |
+| Dispatcharr | `stream-settings` | the default stream profile, by name |
+| Dispatcharr | `m3u-accounts`, `epg-sources` | accounts and sources by name: a missing one is added, the named fields are set; an account's `server_url`, `username` and `password` and a source's `url` may come from credentials (`secret_fields`: compared unseen, the write-only password handed over on every apply); every task logs in as a service account, once per run |
+| Dispatcharr | `m3u-groups` | the settings of channel groups within an account; readiness waits until the account's playlist has been read |
 | SuggestArr | `configuration` | the whole flat configuration: plain fields by name, secret fields from credentials (never shown), and the Jellyfin libraries derived from what the service reports, minus the collection types named |
 
 ## A spec
