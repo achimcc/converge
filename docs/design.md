@@ -1783,6 +1783,28 @@ Two things the description gets wrong or leaves open: `GET
 without `page_size` (recorded, and read that way, so no response shape is
 checked); and `EPGData.tvg_id` and `epg_source` are nullable.
 
+## 35. Dispatcharr: a channel's name and logo, next to its guide (v0.32.0, 2026-09-19)
+
+The Xtream channels are named what the provider calls its variants
+(`SKY SPORT BUNDESLIGA 3` after the group's rename) and many share one
+picture -- all ten Bundesliga channels the same. A name and a logo are
+override fields too, and the channel sync resets both of an auto-created
+channel on every refresh, so `channel-epg` now takes, next to the guide
+entry, a display `name` and a `logo_url`; each is optional, and an entry
+names at least one.
+
+Channels are now found by their OWN name, the one the sync gives them; the
+displayed name is what this task changes, so a lookup by it would lose the
+channel after the first run.
+
+A logo is an object of its own with a unique `url` (`Logo.url`). converge
+reads every logo -- the list is paginated whatever is asked (recorded: 50 a
+page, `next` set; the view allows 1000) and only when a channel names one --
+compares the URL behind `effective_logo_id`, and creates a missing logo with
+`POST /api/channels/logos/` (201) before the override names its id. The bulk
+override carries only the fields that differ, so the rest of an existing
+override stays.
+
 ## 20. Not in the pilot
 
 

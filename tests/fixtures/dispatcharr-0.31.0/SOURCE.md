@@ -44,3 +44,9 @@ service account `converge`, the token in a curl config file:
 `GET /api/epg/sources/` was NOT recorded again: the Xtream guide's source
 carries the provider's user name and password in its `url`. The tests use
 `epg-sources.json` above, with source 2 added in the test code.
+- `channels-logos-page1.json` — `GET /api/channels/logos/` without
+  parameters (recorded 2026-09-19, 12:10 CEST, verbatim): the FIRST page of a
+  paginated answer (50 of 192, `next` set) -- the logo list is paginated
+  whatever is asked. Logo names and image URLs only (the public broadcasters'
+  logos from tv-logo/tv-logos and the provider's channel pictures). The
+  second page the tests need is constructed in the test code.

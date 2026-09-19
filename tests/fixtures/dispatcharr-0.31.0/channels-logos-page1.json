@@ -1,0 +1,483 @@
+{
+  "count": 192,
+  "next": "http://127.0.0.1:9191/api/channels/logos/?page=2",
+  "previous": null,
+  "results": [
+    {
+      "id": 16,
+      "name": "### DAZN EXCLUSIVE ᴴᴰ/ᴿᴬᵂ ###",
+      "url": "https://i.ibb.co/vCPR3CSF/DAZN-Logo-Gif.gif",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/16/cache/?v=3d6a7866",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 14,
+      "name": "### SKY BUNDESLIGA HD/4K ###",
+      "url": "https://i.ibb.co/DqMvHdP/Bundesliga-Logo-GIF.gif",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/14/cache/?v=83b7129d",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 90,
+      "name": "##### PREMIER LEAGUE #####",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/2/2d/Animated-Flag-United-Kingdom.gif",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/90/cache/?v=b87d8074",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 1,
+      "name": "###### VIP BOX FILME ######",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/f/f6/Animated-Flag-Germany.gif",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/1/cache/?v=2f4e9e3c",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 177,
+      "name": "3sat",
+      "url": "https://raw.githubusercontent.com/tv-logo/tv-logos/d32e347bb7c4c640dceec23957802ad9182f58a6/countries/germany/3sat-de.png",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/177/cache/?v=577a4431",
+      "channel_count": 1,
+      "is_used": true,
+      "channel_names": [
+        "Channel: 3sat"
+      ]
+    },
+    {
+      "id": 185,
+      "name": "ARD alpha",
+      "url": "https://raw.githubusercontent.com/tv-logo/tv-logos/d32e347bb7c4c640dceec23957802ad9182f58a6/countries/germany/ard-alpha-de.png",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/185/cache/?v=340f0f43",
+      "channel_count": 1,
+      "is_used": true,
+      "channel_names": [
+        "Channel: ARD alpha"
+      ]
+    },
+    {
+      "id": 178,
+      "name": "ARTE",
+      "url": "https://raw.githubusercontent.com/tv-logo/tv-logos/d32e347bb7c4c640dceec23957802ad9182f58a6/countries/germany/arte-de.png",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/178/cache/?v=0e18971d",
+      "channel_count": 1,
+      "is_used": true,
+      "channel_names": [
+        "Channel: ARTE"
+      ]
+    },
+    {
+      "id": 186,
+      "name": "BR Fernsehen",
+      "url": "https://raw.githubusercontent.com/tv-logo/tv-logos/d32e347bb7c4c640dceec23957802ad9182f58a6/countries/germany/br-fernsehen-de.png",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/186/cache/?v=8b842beb",
+      "channel_count": 1,
+      "is_used": true,
+      "channel_names": [
+        "Channel: BR Fernsehen"
+      ]
+    },
+    {
+      "id": 45,
+      "name": "DE: 13TH STREET HD (720P)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6597.jpg?88318",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/45/cache/?v=2f77e2fd",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 57,
+      "name": "DE: AUTO MOTOR SPORT CHANNEL HD",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/11240.jpg?29914",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/57/cache/?v=f12828b7",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 3,
+      "name": "DE: BESONDERE 1 4K",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/3042.jpg?47264",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/3/cache/?v=97dc504b",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 2,
+      "name": "DE: BOX ACTION 4K",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/11415.jpg?3584",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/2/cache/?v=bd6fc983",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 17,
+      "name": "DE: DAZN 1 ᴴᴰ",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/12983.png?ver=89182",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/17/cache/?v=267144ef",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 61,
+      "name": "DE: DFB.TV HD",
+      "url": "https://photo-tmdb.com/stalker_portal/misc/logos/320/15445.jpg?35681",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/61/cache/?v=7a9f3f46",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 18,
+      "name": "DE: DYN PPV 1 4K",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13695.jpg?ver=35793",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/18/cache/?v=b2609dba",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 9,
+      "name": "DE: EB PEPPA WUTZ 4K",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13367.jpg?ver=62493",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/9/cache/?v=c7b5c3dd",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 58,
+      "name": "DE: EDGE SPORT HD",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/8117.png?70722",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/58/cache/?v=1598c958",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 51,
+      "name": "DE: EUROSPORT 1 HD (720P)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/615.jpg?8114",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/51/cache/?v=84901361",
+      "channel_count": 1,
+      "is_used": true,
+      "channel_names": [
+        "Channel: EUROSPORT 1"
+      ]
+    },
+    {
+      "id": 52,
+      "name": "DE: EUROSPORT 2 HD (720P)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/722.png?35865",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/52/cache/?v=63bd86d9",
+      "channel_count": 1,
+      "is_used": true,
+      "channel_names": [
+        "Channel: EUROSPORT 2"
+      ]
+    },
+    {
+      "id": 56,
+      "name": "DE: EUROSPORT360 HD 1",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/1935.png?79542",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/56/cache/?v=3cdfe540",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 62,
+      "name": "DE: FC BAYERN TV HD",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/9392.png?25284",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/62/cache/?v=e2b0ff9f",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 4,
+      "name": "DE: GUTE FILME 1 4K",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/3266.png?72084",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/4/cache/?v=6edbdc49",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 39,
+      "name": "DE: IMDB TOP 100 4K",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/10575.jpg?65977",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/39/cache/?v=f87f8ad4",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 5,
+      "name": "DE: KINDER FILME 1 4K",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/3238.jpg?52398",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/5/cache/?v=64aa92a9",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 6,
+      "name": "DE: KONIG FILME 1 4K",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6095.jpg?87822",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/6/cache/?v=2c52c34e",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 10,
+      "name": "DE: MAGENTA ACTION 1 4K",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13767.jpg?ver=36807",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/10/cache/?v=c9edcfa0",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 20,
+      "name": "DE: MAGENTATV INFO ᴴᴰ",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13369.png?44818",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/20/cache/?v=75389020",
+      "channel_count": 6,
+      "is_used": true,
+      "channel_names": [
+        "Channel: MAGENTA SPORT 1",
+        "Channel: MAGENTA SPORT 2",
+        "Channel: MAGENTA SPORT 3",
+        "Channel: MAGENTA SPORT 4",
+        "Channel: MAGENTA SPORT 5",
+        "...and 1 more"
+      ]
+    },
+    {
+      "id": 55,
+      "name": "DE: MS GOLF 1 ᴿᴬᵂ",
+      "url": "https://photo-tmdb.com/stalker_portal/misc/logos/320/15248.png?53355",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/55/cache/?v=34994f5e",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 54,
+      "name": "DE: MS SPORT ᴿᴬᵂ",
+      "url": "https://photo-tmdb.com/stalker_portal/misc/logos/320/15247.jpg?86270",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/54/cache/?v=339669f0",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 21,
+      "name": "DE: RTL PPV 0 ᴿᴬᵂ",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13849.jpg?ver=68167",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/21/cache/?v=b849d6d0",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 41,
+      "name": "DE: SKY ATLANTIC HD (720P)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6482.jpg?96581",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/41/cache/?v=7f626754",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 40,
+      "name": "DE: SKY CINEMA ACTION HD (720P)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6473.jpg?ver=90884",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/40/cache/?v=3bb8092a",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 12,
+      "name": "DE: SKY MAX 1 4K",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13731.png?ver=48522",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/12/cache/?v=d2e7b037",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 42,
+      "name": "DE: SKY ONE HD (720P)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/12096.jpg?75177",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/42/cache/?v=4f42e99f",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 8,
+      "name": "DE: SKY PREMIERE SELECT MULTIVISION 1 4K",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/12992.png?ver=14889",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/8/cache/?v=77b38f02",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 44,
+      "name": "DE: SKY REPLAY HD (720P)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/3127.jpg?63240",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/44/cache/?v=66ce8747",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 43,
+      "name": "DE: SKY SHOWCASE HD (720P)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/10141.jpg?93537",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/43/cache/?v=a5ad1df2",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 50,
+      "name": "DE: SKY SPORT 1 HD (720P)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6437.jpg?95351",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/50/cache/?v=8e9dd512",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 63,
+      "name": "DE: SKY SPORT 6 HD (SAT)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/120/6437.jpg?5769",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/63/cache/?v=aad25246",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 15,
+      "name": "DE: SKY SPORT BUNDESLIGA HD (720P)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13751.png?ver=80180",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/15/cache/?v=6baad764",
+      "channel_count": 11,
+      "is_used": true,
+      "channel_names": [
+        "Channel: SKY SPORT BUNDESLIGA 1",
+        "Channel: SKY SPORT BUNDESLIGA 2",
+        "Channel: SKY SPORT BUNDESLIGA 3",
+        "Channel: SKY SPORT BUNDESLIGA 4",
+        "Channel: SKY SPORT BUNDESLIGA 5",
+        "...and 6 more"
+      ]
+    },
+    {
+      "id": 49,
+      "name": "DE: SKY SPORT GOLF HD (720P)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6437.jpg?26670",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/49/cache/?v=af1cad76",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 48,
+      "name": "DE: SKY SPORT NEWS HD (720P)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/6437.jpg?ver=68923",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/48/cache/?v=e8dc20d9",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 53,
+      "name": "DE: SPORT1 HD (720P)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/1883.png?75522",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/53/cache/?v=0072b2d2",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 59,
+      "name": "DE: SPORTDIGITAL HD",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/3845.jpg?40560",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/59/cache/?v=7b7e2cdd",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 7,
+      "name": "DE: STERN FILME 1 4K",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/3861.png?64960",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/7/cache/?v=5a2e2b98",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 11,
+      "name": "DE: Sky Go Filme Hitman 4K",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13484.png?ver=89434",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/11/cache/?v=ae30125a",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 60,
+      "name": "DE: TENNIS CHANNEL",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/12430.jpg?25404",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/60/cache/?v=d67b4eab",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 13,
+      "name": "DE: Vodafone Go Filme 1 4K",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/13574.png?41208",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/13/cache/?v=7789b686",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 46,
+      "name": "DE: WARNER TV COMEDY HD (720P)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/9673.jpg?48003",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/46/cache/?v=ab51b498",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    },
+    {
+      "id": 47,
+      "name": "DE: WARNER TV FILM HD (720P)",
+      "url": "http://photo-tmdb.com/stalker_portal/misc/logos/320/9673.jpg?ver=88730",
+      "cache_url": "http://127.0.0.1:9191/api/channels/logos/47/cache/?v=b2836e5d",
+      "channel_count": 0,
+      "is_used": false,
+      "channel_names": []
+    }
+  ]
+}

@@ -139,7 +139,7 @@ pub const EPG_DATA: Endpoint = Endpoint {
     response: Some(Shape::List("EPGData")),
 };
 
-pub const ENDPOINTS: [Endpoint; 16] = [
+pub const ENDPOINTS: [Endpoint; 18] = [
     TOKEN,
     VERSION,
     STREAM_PROFILES,
@@ -156,6 +156,8 @@ pub const ENDPOINTS: [Endpoint; 16] = [
     CHANNELS,
     CHANNELS_BULK,
     EPG_DATA,
+    LOGOS,
+    LOGO_CREATE,
 ];
 
 /// The components a spec's fields are checked against: an account's and a
@@ -213,6 +215,7 @@ pub fn wire_types() -> Vec<schemars::Schema> {
         schemars::schema_for!(EPGSource),
         schemars::schema_for!(Channel),
         schemars::schema_for!(EPGData),
+        schemars::schema_for!(Logo),
     ]
 }
 
@@ -288,6 +291,7 @@ pub struct Channel {
     pub name: String,
     pub effective_name: Option<String>,
     pub effective_epg_data_id: Option<i64>,
+    pub effective_logo_id: Option<i64>,
 }
 
 /// One channel of one EPG source.
@@ -964,39 +968,113 @@ pub struct EpgTarget {
     pub tvg_id: String,
 }
 
-/// Channels by name (their effective name), each with the guide entry it is
-/// to show (design §34). Written as the channel's OVERRIDE: the channel sync
-/// sets `epg_data` of an auto-created channel from its stream's tvg-id on
-/// every refresh and would undo a plain assignment by the next morning; an
-/// override it leaves alone.
-pub struct ChannelEpg {
-    pub channels: BTreeMap<String, EpgTarget>,
+/// What a channel is to show (design §34, §35): its guide entry, a display
+/// name and a logo by URL, each optional.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChannelLook {
+    pub epg: Option<EpgTarget>,
+    pub name: Option<String>,
+    pub logo_url: Option<String>,
 }
 
-/// A named channel as `wanted` finds it: channel id, the entry it shows now,
-/// the entry it should show, its name.
-type Wanted = (i64, Option<i64>, i64, String);
+/// Channels by their OWN name -- the one the channel sync gives them, not the
+/// displayed one, which this task changes -- each with what it is to show.
+/// Written as the channel's OVERRIDE: the channel sync re-resolves name, logo
+/// and `epg_data` of an auto-created channel on every refresh and would undo
+/// a plain assignment by the next morning; an override it leaves alone.
+pub struct ChannelEpg {
+    pub channels: BTreeMap<String, ChannelLook>,
+}
+
+/// A logo as the list answers it.
+#[derive(Deserialize, JsonSchema)]
+pub struct Logo {
+    pub id: i64,
+    pub name: String,
+    pub url: String,
+}
+
+/// One page of a paginated list.
+#[derive(Deserialize)]
+struct Page<T> {
+    results: Vec<T>,
+    next: Option<String>,
+}
+
+/// The logo list is paginated whatever is asked (recorded: 50 a page, `next`
+/// set); the view allows up to 1000 a page.
+pub const LOGOS: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/channels/logos/",
+    request: None,
+    response: None,
+};
+/// Answers 201 with the new logo. `url` is unique (`Logo.url`), so a second
+/// logo with the same URL is refused rather than made twice.
+pub const LOGO_CREATE: Endpoint = Endpoint {
+    method: "POST",
+    path: "/api/channels/logos/",
+    request: Some(Shape::Document("Logo")),
+    response: None,
+};
+
+fn logos_page(n: usize) -> String {
+    format!("{}?page={n}&page_size=1000", LOGOS.path)
+}
+
+/// Every logo, page by page, until the answer names no next page.
+fn read_logos(t: &dyn Transport) -> Result<Vec<Logo>, Error> {
+    let mut all = Vec::new();
+    for n in 1.. {
+        let path = logos_page(n);
+        let reply = t.get(&path)?;
+        expect_status_at(LOGOS.method, &path, &reply, &[200])?;
+        let page: Page<Logo> = decode(&path, &reply.body)?;
+        all.extend(page.results);
+        if page.next.is_none() {
+            break;
+        }
+    }
+    Ok(all)
+}
+
+/// A named channel as `wanted` finds it.
+struct Wanted {
+    id: i64,
+    name: String,
+    changes: Vec<Change>,
+    /// The override fields to write; a logo that does not exist yet is
+    /// named by URL and created first.
+    epg: Option<i64>,
+    display: Option<String>,
+    logo: Option<Result<i64, String>>,
+}
 
 pub struct ChannelEpgState {
     pub channels: Vec<Channel>,
     pub sources: Vec<EPGSource>,
     pub data: Vec<EPGData>,
+    /// Read only when a channel names a logo.
+    pub logos: Vec<Logo>,
 }
 
 impl ChannelEpg {
-    fn read_state(t: &dyn Transport) -> Result<ChannelEpgState, Error> {
+    fn read_state(&self, t: &dyn Transport) -> Result<ChannelEpgState, Error> {
+        let wants_logos = self.channels.values().any(|l| l.logo_url.is_some());
         Ok(ChannelEpgState {
             channels: get_list(t, &CHANNELS)?,
             sources: get_list(t, &EPG_SOURCES)?,
             data: get_list(t, &EPG_DATA)?,
+            logos: if wants_logos {
+                read_logos(t)?
+            } else {
+                Vec::new()
+            },
         })
     }
 
     fn channel<'a>(state: &'a ChannelEpgState, name: &str) -> Option<&'a Channel> {
-        state
-            .channels
-            .iter()
-            .find(|c| c.effective_name.as_deref().unwrap_or(&c.name) == name)
+        state.channels.iter().find(|c| c.name == name)
     }
 
     /// The guide entry's id, or why it is not there (yet).
@@ -1040,19 +1118,76 @@ impl ChannelEpg {
         format!("{source} {}", e.tvg_id.as_deref().unwrap_or("(no tvg-id)"))
     }
 
-    /// Every named channel with the entry it should show, or what is missing.
+    /// Every named channel with what differs, or what is missing.
     fn wanted(&self, state: &ChannelEpgState) -> Result<Vec<Wanted>, Vec<String>> {
         let mut out = Vec::new();
         let mut absent = Vec::new();
-        for (name, target) in &self.channels {
+        for (name, look) in &self.channels {
             let Some(channel) = Self::channel(state, name) else {
                 absent.push(format!("channel {name} does not exist (yet)"));
                 continue;
             };
-            match Self::entry(state, target) {
-                Ok(id) => out.push((channel.id, channel.effective_epg_data_id, id, name.clone())),
-                Err(why) => absent.push(why),
+            let subject = format!("channel {name}");
+            let mut w = Wanted {
+                id: channel.id,
+                name: name.clone(),
+                changes: Vec::new(),
+                epg: None,
+                display: None,
+                logo: None,
+            };
+            if let Some(target) = &look.epg {
+                match Self::entry(state, target) {
+                    Ok(want) if channel.effective_epg_data_id != Some(want) => {
+                        w.changes.push(Change {
+                            subject: subject.clone(),
+                            field: "epg".to_string(),
+                            current: Self::label(state, channel.effective_epg_data_id),
+                            desired: Self::label(state, Some(want)),
+                        });
+                        w.epg = Some(want);
+                    }
+                    Ok(_) => {}
+                    Err(why) => {
+                        absent.push(why);
+                        continue;
+                    }
+                }
             }
+            if let Some(display) = &look.name {
+                let now = channel.effective_name.as_deref().unwrap_or(&channel.name);
+                if now != display {
+                    w.changes.push(Change {
+                        subject: subject.clone(),
+                        field: "name".to_string(),
+                        current: now.to_string(),
+                        desired: display.clone(),
+                    });
+                    w.display = Some(display.clone());
+                }
+            }
+            if let Some(url) = &look.logo_url {
+                let now = channel
+                    .effective_logo_id
+                    .and_then(|id| state.logos.iter().find(|l| l.id == id));
+                if now.map(|l| l.url.as_str()) != Some(url.as_str()) {
+                    w.changes.push(Change {
+                        subject: subject.clone(),
+                        field: "logo".to_string(),
+                        current: now.map_or_else(|| "(none)".to_string(), |l| l.url.clone()),
+                        desired: url.clone(),
+                    });
+                    w.logo = Some(
+                        state
+                            .logos
+                            .iter()
+                            .find(|l| &l.url == url)
+                            .map(|l| l.id)
+                            .ok_or_else(|| url.clone()),
+                    );
+                }
+            }
+            out.push(w);
         }
         if absent.is_empty() {
             Ok(out)
@@ -1070,42 +1205,61 @@ impl Task for ChannelEpg {
     /// asynchronously.
     fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
         let version = probe(t)?;
-        let state = Self::read_state(t).map_err(|e| Probe::NotYet(e.to_string()))?;
+        let state = self
+            .read_state(t)
+            .map_err(|e| Probe::NotYet(e.to_string()))?;
         self.wanted(&state)
             .map_err(|absent| Probe::NotYet(absent.join("; ")))?;
         Ok(version)
     }
 
     fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
-        Self::read_state(t)
+        self.read_state(t)
     }
 
     fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
         let wanted = self.wanted(current).map_err(Error::NotFound)?;
-        Ok(wanted
-            .into_iter()
-            .filter(|(_, now, want, _)| *now != Some(*want))
-            .map(|(_, now, want, name)| Change {
-                subject: format!("channel {name}"),
-                field: "epg".to_string(),
-                current: Self::label(current, now),
-                desired: Self::label(current, Some(want)),
-            })
-            .collect())
+        Ok(wanted.into_iter().flat_map(|w| w.changes).collect())
     }
 
     fn notes(&self, _current: &Self::Current) -> Vec<String> {
         Vec::new()
     }
 
-    /// One bulk PATCH with an override per channel that differs.
+    /// Missing logos first (one POST each), then one bulk PATCH with an
+    /// override per channel that differs -- only the fields that differ, so
+    /// the rest of an existing override stays.
     fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
         let wanted = self.wanted(current).map_err(Error::NotFound)?;
-        let body: Vec<Value> = wanted
-            .into_iter()
-            .filter(|(_, now, want, _)| *now != Some(*want))
-            .map(|(id, _, want, _)| json!({"id": id, "override": {"epg_data": want}}))
-            .collect();
+        let mut body = Vec::new();
+        for w in wanted.into_iter().filter(|w| !w.changes.is_empty()) {
+            let mut o = Map::new();
+            if let Some(epg) = w.epg {
+                o.insert("epg_data".to_string(), json!(epg));
+            }
+            if let Some(display) = &w.display {
+                o.insert("name".to_string(), json!(display));
+            }
+            match w.logo {
+                Some(Ok(id)) => {
+                    o.insert("logo".to_string(), json!(id));
+                }
+                Some(Err(url)) => {
+                    let name = w.display.clone().unwrap_or_else(|| w.name.clone());
+                    let text = serialize(
+                        LOGO_CREATE.method,
+                        LOGO_CREATE.path,
+                        &json!({"name": name, "url": url}),
+                    )?;
+                    let reply = t.post_json(LOGO_CREATE.path, &text)?;
+                    expect_status_at(LOGO_CREATE.method, LOGO_CREATE.path, &reply, &[201])?;
+                    let logo: Logo = decode(LOGO_CREATE.path, &reply.body)?;
+                    o.insert("logo".to_string(), json!(logo.id));
+                }
+                None => {}
+            }
+            body.push(json!({"id": w.id, "override": o}));
+        }
         if body.is_empty() {
             return Ok(());
         }
@@ -1711,9 +1865,13 @@ mod tests {
                 .map(|(c, s, t)| {
                     (
                         c.to_string(),
-                        EpgTarget {
-                            source: s.to_string(),
-                            tvg_id: t.to_string(),
+                        ChannelLook {
+                            epg: Some(EpgTarget {
+                                source: s.to_string(),
+                                tvg_id: t.to_string(),
+                            }),
+                            name: None,
+                            logo_url: None,
                         },
                     )
                 })
@@ -1771,7 +1929,7 @@ mod tests {
         let channel = current
             .channels
             .iter()
-            .find(|c| c.effective_name.as_deref() == Some("SKY CINEMA ACTION"))
+            .find(|c| c.name == "SKY CINEMA ACTION")
             .unwrap()
             .id;
         assert_eq!(
@@ -1794,6 +1952,115 @@ mod tests {
         }
         let ready = channel_epg(&[("Das Erste", "epgshare01-de", "Das.Erste.de")]);
         assert!(ready.probe(&epg_transport()).is_ok());
+    }
+
+    const LOGOS_PAGE1: &str =
+        include_str!("../../tests/fixtures/dispatcharr-0.31.0/channels-logos-page1.json");
+    const TV_LOGO: &str = "https://raw.githubusercontent.com/tv-logo/tv-logos/d32e347bb7c4c640dceec23957802ad9182f58a6/countries/germany/arte-de.png";
+    const NEW_LOGO: &str = "https://logos.example/sky-sport-news.png";
+
+    /// The recorded first page answers with `next`; the second is constructed
+    /// as the last one.
+    fn look_transport(writes: Vec<Step>) -> FakeTransport {
+        epg_transport()
+            .on_put(writes)
+            .on_get(&logos_page(1), vec![ok(LOGOS_PAGE1)])
+            .on_get(
+                &logos_page(2),
+                vec![ok(r#"{"count":51,"next":null,"previous":null,"results":[{"id":9001,"name":"x","url":"https://logos.example/other.png","cache_url":"","channel_count":0,"is_used":false,"channel_names":[]}]}"#)],
+            )
+    }
+
+    fn created_logo() -> Step {
+        Step::Answer(
+            201,
+            format!(
+                r#"{{"id":777,"name":"Sky Sport News","url":"{NEW_LOGO}","cache_url":"","channel_count":0,"is_used":false,"channel_names":[]}}"#
+            ),
+        )
+    }
+
+    fn look(channel: &str, name: Option<&str>, logo: Option<&str>) -> ChannelEpg {
+        ChannelEpg {
+            channels: BTreeMap::from([(
+                channel.to_string(),
+                ChannelLook {
+                    epg: None,
+                    name: name.map(str::to_string),
+                    logo_url: logo.map(str::to_string),
+                },
+            )]),
+        }
+    }
+
+    #[test]
+    fn a_display_name_and_an_existing_logo_go_into_the_override() {
+        let task = look(
+            "SKY CINEMA ACTION",
+            Some("Sky Cinema Action"),
+            Some(TV_LOGO),
+        );
+        let t = look_transport(vec![Step::Answer(200, "{}".to_string())]);
+        let current = task.read(&t).unwrap();
+        let lines: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(
+            lines[0].contains("name SKY CINEMA ACTION -> Sky Cinema Action"),
+            "{lines:?}"
+        );
+        assert!(
+            lines[1].contains("logo") && lines[1].ends_with(TV_LOGO),
+            "{lines:?}"
+        );
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1, "no logo to create");
+        let logo_id = current.logos.iter().find(|l| l.url == TV_LOGO).unwrap().id;
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(
+            sent[0]["override"],
+            json!({"name": "Sky Cinema Action", "logo": logo_id})
+        );
+    }
+
+    #[test]
+    fn a_missing_logo_is_created_first_and_then_named_in_the_override() {
+        let task = look("SKY CINEMA ACTION", None, Some(NEW_LOGO));
+        let t = look_transport(vec![created_logo(), Step::Answer(200, "{}".to_string())]);
+        let current = task.read(&t).unwrap();
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written[0].0, "/api/channels/logos/");
+        let created: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(
+            created,
+            json!({"name": "SKY CINEMA ACTION", "url": NEW_LOGO})
+        );
+        assert_eq!(written[1].0, "/api/channels/channels/edit/bulk/");
+        let sent: Value = serde_json::from_str(&written[1].1).unwrap();
+        assert_eq!(sent[0]["override"], json!({"logo": 777}));
+    }
+
+    #[test]
+    fn a_renamed_channel_is_still_found_by_its_own_name() {
+        let renamed = with(CHANNELS_JSON, |v| {
+            for c in v.as_array_mut().unwrap() {
+                if c["name"] == "SKY CINEMA ACTION" {
+                    c["effective_name"] = json!("Sky Cinema Action");
+                }
+            }
+        });
+        let task = look("SKY CINEMA ACTION", Some("Sky Cinema Action"), None);
+        let t = FakeTransport::default()
+            .on_get(CHANNELS.path, vec![ok(&renamed)])
+            .on_get(EPG_SOURCES.path, vec![ok(&sources_with_provider())])
+            .on_get(EPG_DATA.path, vec![ok(EPGDATA_JSON)]);
+        assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
     }
 
     #[test]
