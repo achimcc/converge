@@ -1817,7 +1817,7 @@ fn dispatcharr_desired(
     task: TaskName,
     desired: serde_json::Value,
 ) -> Result<DispatcharrDesired, String> {
-    use crate::services::dispatcharr::{EntryKind, GROUP_FIELDS};
+    use crate::services::dispatcharr::{EntryKind, GROUP_FIELDS, GROUP_STREAM_PROFILE};
     type Fields = BTreeMap<String, serde_json::Value>;
 
     fn fields_ok(at: &str, fields: &Fields, allowed: Option<&[&str]>) -> Result<(), String> {
@@ -1949,12 +1949,21 @@ fn dispatcharr_desired(
                 if groups.is_empty() {
                     return Err(format!("desired.accounts.{account} names no group"));
                 }
+                let allowed: Vec<&str> = GROUP_FIELDS
+                    .iter()
+                    .copied()
+                    .chain([GROUP_STREAM_PROFILE])
+                    .collect();
                 for (group, fields) in groups {
-                    fields_ok(
-                        &format!("desired.accounts.{account}.{group}"),
-                        fields,
-                        Some(&GROUP_FIELDS),
-                    )?;
+                    let at = format!("desired.accounts.{account}.{group}");
+                    fields_ok(&at, fields, Some(&allowed))?;
+                    if let Some(profile) = fields.get(GROUP_STREAM_PROFILE) {
+                        if profile.as_str().is_none_or(str::is_empty) {
+                            return Err(format!(
+                                "{at}.{GROUP_STREAM_PROFILE}: a stream profile is named, not numbered"
+                            ));
+                        }
+                    }
                 }
             }
             (d.username, DispatcharrTask::Groups(d.accounts))
@@ -3074,6 +3083,18 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(group.contains("not a group setting"), "{group}");
+        let profile = dispatcharr(
+            "m3u-groups",
+            r#"{"username":"c","accounts":{"A":{"G":{"stream_profile":"Proxy"}}}}"#,
+        );
+        assert!(profile.is_ok(), "stream_profile by name");
+        let unnamed = dispatcharr(
+            "m3u-groups",
+            r#"{"username":"c","accounts":{"A":{"G":{"stream_profile":3}}}}"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(unnamed.contains("stream_profile"), "{unnamed}");
         let empty = dispatcharr("epg-sources", r#"{"username":"c","sources":{}}"#);
         assert!(empty.is_err(), "no source");
         let other = parse(

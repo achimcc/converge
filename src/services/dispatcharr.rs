@@ -146,6 +146,20 @@ pub const GROUP_FIELDS: [&str; 4] = [
     "auto_sync_channel_start",
     "auto_sync_channel_end",
 ];
+/// What the view writes of a membership. It REPLACES the row, so every one of
+/// these travels in each write, the current value where the spec names none.
+const GROUP_WRITTEN: [&str; 5] = [
+    "enabled",
+    "auto_channel_sync",
+    "auto_sync_channel_start",
+    "auto_sync_channel_end",
+    "custom_properties",
+];
+/// A group setting that is not a field of the view: the stream profile, by
+/// name, which the sync gives every channel of the group
+/// (`custom_properties.stream_profile_id`, design §32).
+pub const GROUP_STREAM_PROFILE: &str = "stream_profile";
+const STREAM_PROFILE_ID: &str = "stream_profile_id";
 
 /// The core setting that holds the default stream profile, and its field.
 const STREAM_SETTINGS_KEY: &str = "stream_settings";
@@ -662,6 +676,8 @@ pub struct Groups {
 pub struct GroupsState {
     pub accounts: Vec<M3UAccount>,
     pub groups: Vec<ChannelGroup>,
+    /// Read only when a group names a stream profile.
+    pub profiles: Vec<StreamProfile>,
 }
 
 impl Groups {
@@ -684,11 +700,47 @@ impl Groups {
             .ok_or_else(|| format!("group {group} is not part of M3U account {account} yet"))
     }
 
-    fn read_state(t: &dyn Transport) -> Result<GroupsState, Error> {
+    fn read_state(&self, t: &dyn Transport) -> Result<GroupsState, Error> {
+        let wants_profiles = self
+            .accounts
+            .values()
+            .flat_map(|g| g.values())
+            .any(|set| set.contains_key(GROUP_STREAM_PROFILE));
         Ok(GroupsState {
             accounts: get_list(t, &M3U_ACCOUNTS)?,
             groups: get_list(t, &CHANNEL_GROUPS)?,
+            profiles: if wants_profiles {
+                get_list(t, &STREAM_PROFILES)?
+            } else {
+                Vec::new()
+            },
         })
+    }
+
+    /// The id of the named profile, or an error that lists the names.
+    fn profile_id(state: &GroupsState, name: &str) -> Result<i64, Error> {
+        state
+            .profiles
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.id)
+            .ok_or_else(|| {
+                let names: Vec<&str> = state.profiles.iter().map(|p| p.name.as_str()).collect();
+                Error::NotFound(vec![format!(
+                    "stream profile {name} (there are: {})",
+                    names.join(", ")
+                )])
+            })
+    }
+
+    /// The profile a membership holds: the web UI stores its id as a string,
+    /// the sync reads `int(...)`, so both forms are the same id.
+    fn stored_profile(membership: &GroupMembership) -> Option<i64> {
+        let v = membership
+            .rest
+            .get("custom_properties")?
+            .get(STREAM_PROFILE_ID)?;
+        v.as_i64().or_else(|| v.as_str()?.trim().parse().ok())
     }
 
     fn subject(account: &str, group: &str) -> String {
@@ -703,7 +755,9 @@ impl Task for Groups {
     /// been loaded into its account.
     fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
         let version = probe(t)?;
-        let state = Self::read_state(t).map_err(|e| Probe::NotYet(e.to_string()))?;
+        let state = self
+            .read_state(t)
+            .map_err(|e| Probe::NotYet(e.to_string()))?;
         for (account, groups) in &self.accounts {
             for group in groups.keys() {
                 Self::locate(&state, account, group).map_err(Probe::NotYet)?;
@@ -713,7 +767,7 @@ impl Task for Groups {
     }
 
     fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
-        Self::read_state(t)
+        self.read_state(t)
     }
 
     fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
@@ -723,12 +777,32 @@ impl Task for Groups {
         for (account, groups) in &self.accounts {
             for (group, set) in groups {
                 match Self::locate(current, account, group) {
-                    Ok((_, membership)) => changes.extend(compare(
-                        &Self::subject(account, group),
-                        &membership.rest,
-                        set,
-                        &mut missing,
-                    )),
+                    Ok((_, membership)) => {
+                        let subject = Self::subject(account, group);
+                        let mut plain = set.clone();
+                        if let Some(name) = plain.remove(GROUP_STREAM_PROFILE) {
+                            let name = name.as_str().unwrap_or_default();
+                            let wanted = Self::profile_id(current, name)?;
+                            let stored = Self::stored_profile(membership);
+                            if stored != Some(wanted) {
+                                let now = match stored {
+                                    None => "(the default)".to_string(),
+                                    Some(id) => current
+                                        .profiles
+                                        .iter()
+                                        .find(|p| p.id == id)
+                                        .map_or_else(|| format!("(id {id})"), |p| p.name.clone()),
+                                };
+                                changes.push(Change {
+                                    subject: subject.clone(),
+                                    field: GROUP_STREAM_PROFILE.to_string(),
+                                    current: now,
+                                    desired: name.to_string(),
+                                });
+                            }
+                        }
+                        changes.extend(compare(&subject, &membership.rest, &plain, &mut missing));
+                    }
                     Err(why) => absent.push(why),
                 }
             }
@@ -748,7 +822,9 @@ impl Task for Groups {
     }
 
     /// One PATCH per account, naming only the groups the spec names; the
-    /// view leaves every other group of the account as it is.
+    /// view leaves every other group of the account as it is. Each named
+    /// group goes out WHOLE (`GROUP_WRITTEN`): the view replaces the row, and
+    /// until v0.28.0 a write set `custom_properties` back to `{}`.
     fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
         for (account, groups) in &self.accounts {
             let mut settings = Vec::new();
@@ -757,7 +833,22 @@ impl Task for Groups {
                 let (a, membership) = Self::locate(current, account, group)
                     .map_err(|why| Error::NotFound(vec![why]))?;
                 account_id = Some(a.id);
-                let mut entry: Map<String, Value> = set.clone().into_iter().collect();
+                let mut entry: Map<String, Value> = GROUP_WRITTEN
+                    .iter()
+                    .filter_map(|f| membership.rest.get(*f).map(|v| (f.to_string(), v.clone())))
+                    .collect();
+                let mut plain = set.clone();
+                if let Some(name) = plain.remove(GROUP_STREAM_PROFILE) {
+                    let id = Self::profile_id(current, name.as_str().unwrap_or_default())?;
+                    let custom = entry
+                        .entry("custom_properties".to_string())
+                        .or_insert_with(|| json!({}));
+                    if !custom.is_object() {
+                        *custom = json!({});
+                    }
+                    custom[STREAM_PROFILE_ID] = json!(id);
+                }
+                entry.extend(plain);
                 entry.insert("channel_group".to_string(), json!(membership.channel_group));
                 settings.push(Value::Object(entry));
             }
@@ -1199,11 +1290,30 @@ mod tests {
         assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
     }
 
+    /// The recorded account with a custom property on its group, as the
+    /// web UI leaves one (a name filter).
+    fn accounts_with_custom(custom: Value) -> String {
+        with(ACCOUNTS_JSON, |v| {
+            // The membership of `Öffentlich-rechtlich`, channel group 2.
+            for m in v[1]["channel_groups"].as_array_mut().unwrap() {
+                if m["channel_group"] == 2 {
+                    m["custom_properties"] = custom.clone();
+                }
+            }
+        })
+    }
+
     #[test]
-    fn group_settings_go_out_as_the_list_the_view_reads() {
+    fn group_settings_go_out_whole_so_the_view_keeps_what_the_spec_does_not_name() {
+        // The view REPLACES a membership (`bulk_create` with
+        // `update_conflicts`): a field left out falls back to its default,
+        // `custom_properties` to `{}`. So the current values travel along.
         let task = group_task(&[("auto_sync_channel_end", json!(50))]);
         let t = FakeTransport::default()
-            .on_get(M3U_ACCOUNTS.path, vec![ok(ACCOUNTS_JSON)])
+            .on_get(
+                M3U_ACCOUNTS.path,
+                vec![ok(&accounts_with_custom(json!({"name_regex": "^DE"})))],
+            )
             .on_get(CHANNEL_GROUPS.path, vec![ok(GROUPS_JSON)])
             .on_put(vec![Step::Answer(200, "{}".to_string())]);
         let current = task.read(&t).unwrap();
@@ -1213,8 +1323,89 @@ mod tests {
         let sent: Value = serde_json::from_str(&written[0].1).unwrap();
         assert_eq!(
             sent,
-            json!({"group_settings": [{"channel_group": 2, "auto_sync_channel_end": 50}]})
+            json!({"group_settings": [{
+                "channel_group": 2,
+                "enabled": true,
+                "auto_channel_sync": true,
+                "auto_sync_channel_start": 1.0,
+                "auto_sync_channel_end": 50,
+                "custom_properties": {"name_regex": "^DE"},
+            }]})
         );
+    }
+
+    fn profile_task(profile: &str) -> Groups {
+        group_task(&[("stream_profile", json!(profile))])
+    }
+
+    fn profile_transport(custom: Value) -> FakeTransport {
+        FakeTransport::default()
+            .on_get(M3U_ACCOUNTS.path, vec![ok(&accounts_with_custom(custom))])
+            .on_get(CHANNEL_GROUPS.path, vec![ok(GROUPS_JSON)])
+            .on_get(STREAM_PROFILES.path, vec![ok(PROFILES_JSON)])
+            .on_put(vec![Step::Answer(200, "{}".to_string())])
+    }
+
+    #[test]
+    fn a_group_stream_profile_is_named_and_set_in_its_custom_properties() {
+        let task = profile_task("Proxy");
+        let t = profile_transport(json!({"name_regex": "^DE"}));
+        let current = task.read(&t).unwrap();
+        let lines: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(
+            lines,
+            ["group Öffentlich-rechtlich of M3U account Oeffentlich-rechtlich: stream_profile (the default) -> Proxy"]
+        );
+        task.write(&t, &current).unwrap();
+        let sent: Value = serde_json::from_str(&t.written.borrow()[0].1).unwrap();
+        let entry = &sent["group_settings"][0];
+        assert_eq!(
+            entry["custom_properties"],
+            json!({"name_regex": "^DE", "stream_profile_id": 3})
+        );
+        assert!(
+            entry.get("stream_profile").is_none(),
+            "not a field of the view"
+        );
+    }
+
+    #[test]
+    fn a_stored_profile_id_is_the_same_as_a_string_or_a_number() {
+        // The web UI stores the id as a string; the sync reads `int(...)`.
+        let task = profile_task("Proxy");
+        for stored in [json!("3"), json!(3)] {
+            let t = profile_transport(json!({ "stream_profile_id": stored }));
+            assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
+        }
+        let t = profile_transport(json!({"stream_profile_id": "2"}));
+        assert_eq!(
+            task.diff(&task.read(&t).unwrap()).unwrap()[0].to_string(),
+            "group Öffentlich-rechtlich of M3U account Oeffentlich-rechtlich: stream_profile streamlink -> Proxy"
+        );
+    }
+
+    #[test]
+    fn an_unknown_profile_names_the_profiles_there_are() {
+        let task = profile_task("Direkt");
+        let t = profile_transport(json!({}));
+        let e = task.diff(&task.read(&t).unwrap()).unwrap_err().to_string();
+        assert!(e.contains("Direkt"), "{e}");
+        assert!(e.contains("Proxy"), "{e}");
+    }
+
+    #[test]
+    fn groups_without_a_profile_do_not_read_the_profiles() {
+        // The recorded transport has no answer for the profile list.
+        let task = group_task(&[("enabled", json!(true))]);
+        let t = FakeTransport::default()
+            .on_get(M3U_ACCOUNTS.path, vec![ok(ACCOUNTS_JSON)])
+            .on_get(CHANNEL_GROUPS.path, vec![ok(GROUPS_JSON)]);
+        assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
     }
 
     #[test]

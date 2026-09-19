@@ -867,7 +867,13 @@ fn schema_check(args: &[String]) -> ExitCode {
                                 schema::check_paths(
                                     &document,
                                     dispatcharr::GROUP_COMPONENT,
-                                    fields,
+                                    &fields
+                                        .iter()
+                                        .filter(|(k, _)| {
+                                            k.as_str() != dispatcharr::GROUP_STREAM_PROFILE
+                                        })
+                                        .map(|(k, v)| (k.clone(), v.clone()))
+                                        .collect(),
                                 )
                                 .into_iter()
                                 .map(|f| format!("{account}/{group}: {f}")),

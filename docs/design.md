@@ -1687,6 +1687,30 @@ compared without being shown, like an account's `server_url`; nothing is
 handed over. The caller composes the credential -- on the host a sops
 template joins the three values of the account.
 
+## 32. Dispatcharr: a group's stream profile, and a write that kept nothing (v0.28.0, 2026-09-19)
+
+The host's default stream profile is `streamlink` (§29): it asks the public
+broadcasters' HLS playlists for `best` and muxes the audio rendition in. An
+Xtream Codes stream is a bare MPEG-TS URL that no streamlink plugin claims --
+measured on the host: `No plugin can handle URL`, 188 bytes in fifteen
+seconds. Those channels need the `Proxy` profile.
+
+Dispatcharr keeps a profile per channel, and the channel sync assigns a
+group's `custom_properties.stream_profile_id` to every channel of the group,
+existing ones included (`apps/m3u/tasks.py`). A group setting therefore takes
+`stream_profile` **by name**, like the default profile in §29; converge looks
+the id up (reading the profile list only when a spec names one) and sets it
+in `custom_properties`. The web UI stores the id as a string, the sync reads
+`int(...)`: `"3"` and `3` are the same profile.
+
+Reading the view for this showed a fault in v0.25.0 to v0.27.0: the
+group-settings view **replaces** each membership it is sent
+(`bulk_create` with `update_conflicts`), and a field left out falls back to
+its default -- `custom_properties` to `{}`. converge sent only the spec's
+fields, so every write took away what the web UI had set on the group. A
+group now goes out whole: the five fields the view writes, current values
+first, the spec's on top.
+
 ## 20. Not in the pilot
 
 
