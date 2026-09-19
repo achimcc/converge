@@ -159,6 +159,15 @@ const GROUP_WRITTEN: [&str; 5] = [
 /// name, which the sync gives every channel of the group
 /// (`custom_properties.stream_profile_id`, design §32).
 pub const GROUP_STREAM_PROFILE: &str = "stream_profile";
+/// Group settings the view keeps in `custom_properties` and the channel sync
+/// reads by these names (`apps/m3u/tasks.py`): which streams become channels
+/// and how they are renamed (design §33). Compared and written as text.
+pub const GROUP_CUSTOM_FIELDS: [&str; 4] = [
+    "name_match_regex",
+    "name_match_exclude_regex",
+    "name_regex_pattern",
+    "name_replace_pattern",
+];
 const STREAM_PROFILE_ID: &str = "stream_profile_id";
 
 /// The core setting that holds the default stream profile, and its field.
@@ -801,6 +810,24 @@ impl Task for Groups {
                                 });
                             }
                         }
+                        let custom = membership.rest.get("custom_properties");
+                        for key in GROUP_CUSTOM_FIELDS {
+                            let Some(desired) = plain.remove(key) else {
+                                continue;
+                            };
+                            let now = custom
+                                .and_then(|c| c.get(key))
+                                .cloned()
+                                .unwrap_or(Value::Null);
+                            if !same(&now, &desired) {
+                                changes.push(Change {
+                                    subject: subject.clone(),
+                                    field: key.to_string(),
+                                    current: shortened(&now),
+                                    desired: shortened(&desired),
+                                });
+                            }
+                        }
                         changes.extend(compare(&subject, &membership.rest, &plain, &mut missing));
                     }
                     Err(why) => absent.push(why),
@@ -847,6 +874,17 @@ impl Task for Groups {
                         *custom = json!({});
                     }
                     custom[STREAM_PROFILE_ID] = json!(id);
+                }
+                for key in GROUP_CUSTOM_FIELDS {
+                    if let Some(value) = plain.remove(key) {
+                        let custom = entry
+                            .entry("custom_properties".to_string())
+                            .or_insert_with(|| json!({}));
+                        if !custom.is_object() {
+                            *custom = json!({});
+                        }
+                        custom[key] = value;
+                    }
                 }
                 entry.extend(plain);
                 entry.insert("channel_group".to_string(), json!(membership.channel_group));
@@ -1396,6 +1434,46 @@ mod tests {
         let e = task.diff(&task.read(&t).unwrap()).unwrap_err().to_string();
         assert!(e.contains("Direkt"), "{e}");
         assert!(e.contains("Proxy"), "{e}");
+    }
+
+    #[test]
+    fn name_filters_live_in_custom_properties_next_to_the_profile() {
+        let task = group_task(&[
+            ("stream_profile", json!("Proxy")),
+            ("name_match_regex", json!(" 4K$")),
+            ("name_regex_pattern", json!("^SKYGO: | 4K$")),
+        ]);
+        let t =
+            profile_transport(json!({"stream_profile_id": "3", "name_regex_pattern": "^SKYGO: "}));
+        let current = task.read(&t).unwrap();
+        let lines: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                "group Öffentlich-rechtlich of M3U account Oeffentlich-rechtlich: name_match_regex null -> \" 4K$\"",
+                "group Öffentlich-rechtlich of M3U account Oeffentlich-rechtlich: name_regex_pattern \"^SKYGO: \" -> \"^SKYGO: | 4K$\"",
+            ]
+        );
+        task.write(&t, &current).unwrap();
+        let sent: Value = serde_json::from_str(&t.written.borrow()[0].1).unwrap();
+        let entry = &sent["group_settings"][0];
+        assert_eq!(
+            entry["custom_properties"],
+            json!({"stream_profile_id": 3, "name_match_regex": " 4K$", "name_regex_pattern": "^SKYGO: | 4K$"})
+        );
+        for key in ["name_match_regex", "name_regex_pattern", "stream_profile"] {
+            assert!(entry.get(key).is_none(), "{key} is not a field of the view");
+        }
+        // Set as asked, the group is unchanged.
+        let done = profile_transport(
+            json!({"stream_profile_id": 3, "name_match_regex": " 4K$", "name_regex_pattern": "^SKYGO: | 4K$"}),
+        );
+        assert_eq!(task.diff(&task.read(&done).unwrap()).unwrap(), vec![]);
     }
 
     #[test]

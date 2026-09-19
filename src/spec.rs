@@ -1817,7 +1817,9 @@ fn dispatcharr_desired(
     task: TaskName,
     desired: serde_json::Value,
 ) -> Result<DispatcharrDesired, String> {
-    use crate::services::dispatcharr::{EntryKind, GROUP_FIELDS, GROUP_STREAM_PROFILE};
+    use crate::services::dispatcharr::{
+        EntryKind, GROUP_CUSTOM_FIELDS, GROUP_FIELDS, GROUP_STREAM_PROFILE,
+    };
     type Fields = BTreeMap<String, serde_json::Value>;
 
     fn fields_ok(at: &str, fields: &Fields, allowed: Option<&[&str]>) -> Result<(), String> {
@@ -1953,6 +1955,7 @@ fn dispatcharr_desired(
                     .iter()
                     .copied()
                     .chain([GROUP_STREAM_PROFILE])
+                    .chain(GROUP_CUSTOM_FIELDS)
                     .collect();
                 for (group, fields) in groups {
                     let at = format!("desired.accounts.{account}.{group}");
@@ -1962,6 +1965,11 @@ fn dispatcharr_desired(
                             return Err(format!(
                                 "{at}.{GROUP_STREAM_PROFILE}: a stream profile is named, not numbered"
                             ));
+                        }
+                    }
+                    for key in GROUP_CUSTOM_FIELDS {
+                        if fields.get(key).is_some_and(|v| !v.is_string()) {
+                            return Err(format!("{at}.{key}: a pattern is text"));
                         }
                     }
                 }
@@ -3088,6 +3096,18 @@ mod tests {
             r#"{"username":"c","accounts":{"A":{"G":{"stream_profile":"Proxy"}}}}"#,
         );
         assert!(profile.is_ok(), "stream_profile by name");
+        let filter = dispatcharr(
+            "m3u-groups",
+            r#"{"username":"c","accounts":{"A":{"G":{"name_match_regex":" 4K$","name_regex_pattern":"^X: ","name_replace_pattern":"","name_match_exclude_regex":"MOBIL"}}}}"#,
+        );
+        assert!(filter.is_ok(), "name filters: {filter:?}");
+        let not_text = dispatcharr(
+            "m3u-groups",
+            r#"{"username":"c","accounts":{"A":{"G":{"name_match_regex":1}}}}"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(not_text.contains("name_match_regex"), "{not_text}");
         let unnamed = dispatcharr(
             "m3u-groups",
             r#"{"username":"c","accounts":{"A":{"G":{"stream_profile":3}}}}"#,

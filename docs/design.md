@@ -1711,6 +1711,24 @@ fields, so every write took away what the web UI had set on the group. A
 group now goes out whole: the five fields the view writes, current values
 first, the spec's on top.
 
+## 33. Dispatcharr: which streams of a group become channels (v0.29.0, 2026-09-19)
+
+An Xtream provider's group is not a channel list. The host's provider keeps
+every channel in four to six variants -- `(720P)`, `(SAT)`, `(MOBIL)`, `SKYGO
+… HD`, `SKYGO … 4K`, `NOW … ᴿᴬᵂ` -- next to event and 24/7 channels, and the
+28 groups the host first enabled made 1143 channels. Measured with ffprobe,
+the variants differ: `SKYGO … 4K` and `NOW … ᴿᴬᵂ` are 1080p at 50 fps,
+`(720P)` and `SKYGO … HD` 720p, `(SAT)` 1080i.
+
+The channel sync filters and renames per group from `custom_properties`:
+`name_match_regex` (keep what matches), `name_match_exclude_regex`,
+`name_regex_pattern` and `name_replace_pattern` (JavaScript-style `$1`; an
+empty replacement removes the match). A group setting takes these four by
+name, as text; converge compares them with the group's `custom_properties` and
+writes them there, next to the stream profile (§32) and whatever else the web
+UI set. A channel whose stream no longer passes the filter is removed by the
+sync itself (orphaned auto channels, default `always`).
+
 ## 20. Not in the pilot
 
 

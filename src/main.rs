@@ -870,7 +870,12 @@ fn schema_check(args: &[String]) -> ExitCode {
                                     &fields
                                         .iter()
                                         .filter(|(k, _)| {
+                                            // Not fields of the view: the
+                                            // profile by name and the name
+                                            // filters live in custom_properties.
                                             k.as_str() != dispatcharr::GROUP_STREAM_PROFILE
+                                                && !dispatcharr::GROUP_CUSTOM_FIELDS
+                                                    .contains(&k.as_str())
                                         })
                                         .map(|(k, v)| (k.clone(), v.clone()))
                                         .collect(),
