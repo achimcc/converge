@@ -257,7 +257,7 @@ pub fn probe_status(t: &dyn Transport, ep: Endpoint) -> Result<String, Probe> {
         other => return Err(Probe::NotYet(format!("HTTP {other}"))),
     }
     let status: crate::services::arr::SystemResource = serde_json::from_str(&reply.body)
-        .map_err(|e| Probe::NotYet(format!("unexpected answer: {e}")))?;
+        .map_err(|e| Probe::NotYet(format!("unexpected answer: {}", crate::error::shape(&e))))?;
     status
         .version
         .filter(|v| !v.is_empty())
@@ -267,7 +267,7 @@ pub fn probe_status(t: &dyn Transport, ep: Endpoint) -> Result<String, Probe> {
 fn decode<T: for<'de> Deserialize<'de>>(path: &str, body: &str) -> Result<T, Error> {
     serde_json::from_str(body).map_err(|e| Error::Decode {
         path: path.to_string(),
-        reason: e.to_string(),
+        reason: crate::error::shape(&e),
     })
 }
 
@@ -417,7 +417,7 @@ impl Task for DelayProfiles {
         let entries: Vec<Map<String, Value>> = serde_json::from_value(decode(path, &reply.body)?)
             .map_err(|e| Error::Decode {
             path: path.to_string(),
-            reason: e.to_string(),
+            reason: crate::error::shape(&e),
         })?;
         if entries.is_empty() {
             return Err(Error::EmptyList {

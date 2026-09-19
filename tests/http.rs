@@ -150,3 +150,86 @@ fn the_anonymous_transport_sends_no_key_and_a_login_answers_a_token() {
     assert!(seen.body.contains("pa55word"), "{}", seen.body);
     assert!(!seen.path.contains("pa55word"), "{}", seen.path);
 }
+
+// --- Redirects (audit B39) -------------------------------------------------
+//
+// Two listeners, as in the audit's measurement: A is the service, B is
+// somewhere else. Before the fix ureq followed A's 302 to B with the
+// `X-Api-Key` header still attached.
+
+fn saw_key(server: &Server) -> bool {
+    server
+        .requests()
+        .iter()
+        .any(|r| r.headers.contains("s3cret-key-value"))
+}
+
+#[test]
+fn a_redirect_to_another_host_is_refused_and_the_key_never_leaves() {
+    let elsewhere = Server::start(vec![("GET", "/leak", 200, "{}".into())]);
+    for location in [
+        format!("{}/leak", elsewhere.base_url()),
+        // protocol-relative: the same host part, no scheme
+        format!(
+            "//{}/leak",
+            elsewhere.base_url().trim_start_matches("http://")
+        ),
+    ] {
+        let target: &'static str = Box::leak(location.into_boxed_str());
+        let service = Server::start(vec![("GET", "/api/v3/system/status", 302, target.into())]);
+        let err = transport(&service.base_url())
+            .get("/api/v3/system/status")
+            .err()
+            .expect("a redirect off the origin is an error")
+            .to_string();
+        assert!(err.contains("not followed"), "{err}");
+        assert!(!err.contains("s3cret"), "{err}");
+    }
+    assert!(elsewhere.requests().is_empty(), "B was contacted");
+    assert!(!saw_key(&elsewhere));
+}
+
+#[test]
+fn a_redirect_on_the_same_origin_is_followed() {
+    // Flask and Django send a trailing-slash redirect.
+    let server = Server::start(vec![
+        ("GET", "/api/users", 308, "/api/users/".into()),
+        ("GET", "/api/users/", 200, "[]".into()),
+    ]);
+    let reply = transport(&server.base_url()).get("/api/users").unwrap();
+    assert_eq!(reply.status, 200);
+    assert_eq!(reply.body, "[]");
+    assert_eq!(server.requests().len(), 2);
+}
+
+#[test]
+fn a_redirect_to_another_port_is_refused() {
+    let server = Server::start(vec![("GET", "/b", 200, "{}".into())]);
+    let own = format!("{}/b", server.base_url());
+    let target: &'static str = Box::leak(own.into_boxed_str());
+    let front = Server::start(vec![("GET", "/a", 302, target.into())]);
+    // `front` redirects to `server` -- another port is another origin.
+    assert!(transport(&front.base_url()).get("/a").is_err());
+    assert!(server.requests().is_empty());
+}
+
+#[test]
+fn a_write_does_not_follow_a_redirect() {
+    let elsewhere = Server::start(vec![("GET", "/leak", 200, "{}".into())]);
+    let target: &'static str = Box::leak(format!("{}/leak", elsewhere.base_url()).into_boxed_str());
+    let service = Server::start(vec![("PUT", "/a", 302, target.into())]);
+    let reply = transport(&service.base_url()).put_json("/a", "{}").unwrap();
+    assert_eq!(reply.status, 302);
+    assert!(elsewhere.requests().is_empty());
+}
+
+#[test]
+fn a_redirect_loop_ends() {
+    let server = Server::start(vec![("GET", "/a", 302, "/a".into())]);
+    let err = transport(&server.base_url())
+        .get("/a")
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(err.contains("redirects"), "{err}");
+}

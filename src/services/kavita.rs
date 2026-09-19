@@ -143,7 +143,7 @@ pub fn probe(t: &dyn Transport) -> Result<String, Probe> {
         other => return Err(Probe::NotYet(format!("HTTP {other}"))),
     }
     let info: ServerInfoSlimDto = serde_json::from_str(&reply.body)
-        .map_err(|e| Probe::NotYet(format!("unexpected answer: {e}")))?;
+        .map_err(|e| Probe::NotYet(format!("unexpected answer: {}", crate::error::shape(&e))))?;
     info.kavita_version
         .filter(|v| !v.is_empty())
         .ok_or_else(|| Probe::NotYet("the answer has no version".to_string()))

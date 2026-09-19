@@ -108,7 +108,7 @@ impl Task for QualityProfiles {
         let list: Vec<QualityProfileResource> =
             serde_json::from_str(&reply.body).map_err(|e| Error::Decode {
                 path: path.clone(),
-                reason: e.to_string(),
+                reason: crate::error::shape(&e),
             })?;
         if list.is_empty() {
             return Err(Error::EmptyList { path });

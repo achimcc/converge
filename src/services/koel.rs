@@ -85,7 +85,8 @@ pub fn decode_stations(path: &str, body: &str) -> Result<Vec<RadioStationResourc
     };
     let value: Value = serde_json::from_str(body).map_err(|e| {
         decode(format!(
-            "not JSON ({e}) -- a web page instead of the API? Koel needs Accept: application/json"
+            "not JSON ({}) -- a web page instead of the API? Koel needs Accept: application/json",
+            crate::error::shape(&e)
         ))
     })?;
     let Value::Array(entries) = value else {
@@ -105,7 +106,8 @@ pub fn decode_stations(path: &str, body: &str) -> Result<Vec<RadioStationResourc
                     index,
                 });
             };
-            serde_json::from_value(entry).map_err(|e| decode(format!("station {name}: {e}")))
+            serde_json::from_value(entry)
+                .map_err(|e| decode(format!("station {name}: {}", crate::error::shape(&e))))
         })
         .collect()
 }
@@ -129,7 +131,7 @@ fn check_only_own_stations_listed(t: &dyn Transport) -> Result<(), Error> {
     // A syntax error from serde_json names a line and a column, never text.
     let account: Value = serde_json::from_str(&reply.body).map_err(|e| Error::Decode {
         path: ME.to_string(),
-        reason: format!("not JSON ({e})"),
+        reason: format!("not JSON ({})", crate::error::shape(&e)),
     })?;
     match account
         .pointer("/preferences/include_public_media")

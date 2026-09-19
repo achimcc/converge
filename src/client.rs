@@ -38,6 +38,11 @@ impl HttpTransport {
             .timeout_global(Some(request_timeout))
             // A status is an answer, not a transport failure; the caller decides.
             .http_status_as_error(false)
+            // ureq drops `Authorization` and `Cookie` on a redirect, but not
+            // `X-Api-Key` or `X-Emby-Token`: a 302 to another host carried the
+            // key there (audit B39, measured with two listeners). converge
+            // follows redirects itself -- see `get`.
+            .max_redirects(0)
             .build()
             .into();
         Self {
@@ -99,12 +104,69 @@ impl HttpTransport {
     }
 }
 
+/// How many redirects a GET follows. A trailing-slash redirect (Flask,
+/// Django) takes one.
+const MAX_REDIRECTS: usize = 5;
+
+/// `scheme://host:port` of a URL, lower-cased; `None` if it is not absolute.
+fn origin(url: &str) -> Option<String> {
+    let (scheme, rest) = url.split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    if authority.is_empty() {
+        return None;
+    }
+    Some(format!("{scheme}://{authority}").to_ascii_lowercase())
+}
+
+/// Where a redirect from `base_url` leads, if it stays on the same origin:
+/// an absolute path (`/x`), or an absolute URL with the same scheme, host
+/// and port. Anything else -- another host, a scheme change, a
+/// protocol-relative `//host` -- is `None`: the key would travel with it.
+fn same_origin_target(base_url: &str, location: &str) -> Option<String> {
+    let own = origin(base_url)?;
+    if location.starts_with('/') && !location.starts_with("//") {
+        return Some(format!("{own}{location}"));
+    }
+    (origin(location)? == own).then(|| location.to_string())
+}
+
 impl Transport for HttpTransport {
+    /// Follows a redirect only on the service's own origin. The key header
+    /// goes with every request, so a redirect elsewhere is refused before it
+    /// is sent (audit B39). Writes do not follow at all: a 3xx comes back
+    /// as a status, which the caller refuses.
     fn get(&self, path: &str) -> Result<Reply, Error> {
-        let result = self
-            .headers(self.agent.get(format!("{}{path}", self.base_url)))
-            .call();
-        Self::finish("GET", path, result)
+        let mut url = format!("{}{path}", self.base_url);
+        for _ in 0..=MAX_REDIRECTS {
+            let result = self.headers(self.agent.get(&url)).call();
+            let response = match result {
+                Ok(r) if r.status().is_redirection() => r,
+                other => return Self::finish("GET", path, other),
+            };
+            let status = response.status().as_u16();
+            let location = response
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok());
+            url = match location.and_then(|l| same_origin_target(&self.base_url, l)) {
+                Some(next) => next,
+                None => {
+                    return Err(Error::Request {
+                        method: "GET",
+                        path: path.to_string(),
+                        reason: format!(
+                            "HTTP {status} redirects off the service's own origin; \
+                             not followed, the key stays here"
+                        ),
+                    });
+                }
+            };
+        }
+        Err(Error::Request {
+            method: "GET",
+            path: path.to_string(),
+            reason: format!("more than {MAX_REDIRECTS} redirects"),
+        })
     }
 
     fn put_json(&self, path: &str, body: &str) -> Result<Reply, Error> {

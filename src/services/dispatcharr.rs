@@ -304,7 +304,7 @@ pub fn probe(t: &dyn Transport) -> Result<String, Probe> {
         other => return Err(Probe::NotYet(format!("HTTP {other}"))),
     }
     let answer: VersionAnswer = serde_json::from_str(&reply.body)
-        .map_err(|e| Probe::NotYet(format!("unexpected answer: {e}")))?;
+        .map_err(|e| Probe::NotYet(format!("unexpected answer: {}", crate::error::shape(&e))))?;
     answer
         .version
         .filter(|v| !v.is_empty())
@@ -314,7 +314,7 @@ pub fn probe(t: &dyn Transport) -> Result<String, Probe> {
 fn decode<T: for<'de> Deserialize<'de>>(path: &str, body: &str) -> Result<T, Error> {
     serde_json::from_str(body).map_err(|e| Error::Decode {
         path: path.to_string(),
-        reason: e.to_string(),
+        reason: crate::error::shape(&e),
     })
 }
 

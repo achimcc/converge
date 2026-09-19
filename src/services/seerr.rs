@@ -45,7 +45,7 @@ pub fn probe(t: &dyn Transport) -> Result<String, Probe> {
         return Err(Probe::NotYet(format!("HTTP {}", reply.status)));
     }
     let body: Value = serde_json::from_str(&reply.body)
-        .map_err(|e| Probe::NotYet(format!("unexpected answer: {e}")))?;
+        .map_err(|e| Probe::NotYet(format!("unexpected answer: {}", crate::error::shape(&e))))?;
     let version = body
         .get("version")
         .and_then(Value::as_str)
@@ -74,7 +74,7 @@ pub fn probe(t: &dyn Transport) -> Result<String, Probe> {
 fn decode_object(path: &str, body: &str) -> Result<Value, Error> {
     let value: Value = serde_json::from_str(body).map_err(|e| Error::Decode {
         path: path.to_string(),
-        reason: e.to_string(),
+        reason: crate::error::shape(&e),
     })?;
     if value.is_object() {
         Ok(value)
@@ -89,7 +89,7 @@ fn decode_object(path: &str, body: &str) -> Result<Value, Error> {
 fn decode_list(path: &str, body: &str) -> Result<Vec<Map<String, Value>>, Error> {
     let value: Value = serde_json::from_str(body).map_err(|e| Error::Decode {
         path: path.to_string(),
-        reason: e.to_string(),
+        reason: crate::error::shape(&e),
     })?;
     serde_json::from_value(value).map_err(|_| Error::Decode {
         path: path.to_string(),
@@ -382,7 +382,7 @@ impl Task for Jellyfin {
                 &path,
                 &serde_json::from_str(&reply.body).map_err(|e| Error::Decode {
                     path: path.clone(),
-                    reason: e.to_string(),
+                    reason: crate::error::shape(&e),
                 })?,
             )?;
             let (known, still_unknown) = self.ids_of(&libraries);

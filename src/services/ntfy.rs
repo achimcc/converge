@@ -110,7 +110,7 @@ pub fn probe(t: &dyn Transport) -> Result<String, Probe> {
         return Err(Probe::NotYet(format!("HTTP {}", reply.status)));
     }
     let health: Health = serde_json::from_str(&reply.body)
-        .map_err(|e| Probe::NotYet(format!("unexpected answer: {e}")))?;
+        .map_err(|e| Probe::NotYet(format!("unexpected answer: {}", crate::error::shape(&e))))?;
     match health.healthy {
         Some(true) => Ok(VERSION_NOT_REPORTED.to_string()),
         _ => Err(Probe::NotYet("not healthy yet".to_string())),

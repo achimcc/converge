@@ -95,7 +95,7 @@ pub fn probe(t: &dyn Transport) -> Result<String, Probe> {
         other => return Err(Probe::NotYet(format!("HTTP {other}"))),
     }
     let body: Value = serde_json::from_str(&reply.body)
-        .map_err(|e| Probe::NotYet(format!("unexpected answer: {e}")))?;
+        .map_err(|e| Probe::NotYet(format!("unexpected answer: {}", crate::error::shape(&e))))?;
     if body.get("status").and_then(Value::as_str) != Some("ok") {
         return Err(Probe::NotYet("health is not ok yet".to_string()));
     }
@@ -109,7 +109,7 @@ pub fn probe(t: &dyn Transport) -> Result<String, Probe> {
 fn decode(path: &str, body: &str) -> Result<Value, Error> {
     serde_json::from_str(body).map_err(|e| Error::Decode {
         path: path.to_string(),
-        reason: e.to_string(),
+        reason: crate::error::shape(&e),
     })
 }
 
@@ -269,7 +269,7 @@ impl Task for Resources {
             serde_json::from_value(decode(self.api.list, &reply.body)?).map_err(|e| {
                 Error::Decode {
                     path: self.api.list.to_string(),
-                    reason: e.to_string(),
+                    reason: crate::error::shape(&e),
                 }
             })?;
         if let Some(index) = entries.iter().position(|e| self.key_of(e).is_none()) {
@@ -501,7 +501,7 @@ impl Task for OidcProviders {
         let entries: Vec<Map<String, Value>> = serde_json::from_value(decode(path, &reply.body)?)
             .map_err(|e| Error::Decode {
             path: path.to_string(),
-            reason: e.to_string(),
+            reason: crate::error::shape(&e),
         })?;
         if let Some(index) = entries
             .iter()
@@ -653,7 +653,7 @@ impl Task for Indexers {
         let entries: Vec<Map<String, Value>> = serde_json::from_value(decode(path, &reply.body)?)
             .map_err(|e| Error::Decode {
             path: path.to_string(),
-            reason: e.to_string(),
+            reason: crate::error::shape(&e),
         })?;
         if let Some(index) = entries.iter().position(|e| Self::name_of(e).is_none()) {
             return Err(Error::MissingName {

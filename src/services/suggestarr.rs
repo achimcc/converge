@@ -169,7 +169,7 @@ pub fn login(t: &dyn Transport, username: &str, password: &Secret) -> Result<Sec
     expect_status_at(LOGIN.method, LOGIN.path, &reply, &[200])?;
     let answer: LoginAnswer = serde_json::from_str(&reply.body).map_err(|e| Error::Decode {
         path: LOGIN.path.to_string(),
-        reason: e.to_string(),
+        reason: crate::error::shape(&e),
     })?;
     Ok(answer.access_token)
 }
@@ -240,7 +240,7 @@ impl Configuration {
 fn decode_config(body: &str) -> Result<Value, Error> {
     let document: Value = serde_json::from_str(body).map_err(|e| Error::Decode {
         path: FETCH.path.to_string(),
-        reason: e.to_string(),
+        reason: crate::error::shape(&e),
     })?;
     if !document.is_object() {
         return Err(Error::Decode {
@@ -325,7 +325,7 @@ impl Task for Configuration {
                 let answer: LibraryAnswer =
                     serde_json::from_str(&reply.body).map_err(|e| Error::Decode {
                         path: LIBRARIES.path.to_string(),
-                        reason: e.to_string(),
+                        reason: crate::error::shape(&e),
                     })?;
                 if answer.items.is_empty() {
                     return Err(Error::EmptyList {

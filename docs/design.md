@@ -1729,6 +1729,31 @@ writes them there, next to the stream profile (§32) and whatever else the web
 UI set. A channel whose stream no longer passes the filter is removed by the
 sync itself (orphaned auto channels, default `always`).
 
+## 34. Redirects keep the key home, and decode errors quote no value (v0.30.0, 2026-09-19)
+
+Two findings of the host's security audit (B39, B40), both measured.
+
+**A redirect carried the key to another host.** ureq drops `Authorization`
+and `Cookie` when it follows a redirect, but not a custom header: a service
+answering `302 Location: http://elsewhere/…` had converge send its
+`X-Api-Key` or `X-Emby-Token` there (two listeners, the second one saw the
+key). The agent now follows nothing (`max_redirects(0)`); `get` follows a
+redirect itself, and only on the service's own origin -- an absolute path, or
+a URL with the same scheme, host and port. Another host, another port, a
+scheme change or a protocol-relative `//host` is an error that names the
+status and not the target. A trailing-slash redirect (Flask, Django) still
+works. Writes follow nothing: a 3xx comes back as a status the caller
+refuses -- ureq used to turn a redirected `PUT` into a `GET` without its body,
+which was never right.
+
+**A decode error quoted the value it could not read.** serde_json says
+`invalid type: string "…", expected f64`, and the string is whatever the
+service answered -- in a settings document, possibly a key. The message went
+to the journal and on to Loki. `error::shape` keeps what is converge's own --
+the kind of error, where it broke, `missing field` names and what the types
+expected -- and drops what came from the answer. Every decode of a service's
+answer goes through it; the spec's own file does not need to.
+
 ## 20. Not in the pilot
 
 

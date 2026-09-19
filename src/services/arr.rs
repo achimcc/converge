@@ -71,7 +71,7 @@ pub fn probe(t: &dyn Transport) -> Result<String, Probe> {
         other => return Err(Probe::NotYet(format!("HTTP {other}"))),
     }
     let status: SystemResource = serde_json::from_str(&reply.body)
-        .map_err(|e| Probe::NotYet(format!("unexpected answer: {e}")))?;
+        .map_err(|e| Probe::NotYet(format!("unexpected answer: {}", crate::error::shape(&e))))?;
     status
         .version
         .filter(|v| !v.is_empty())
@@ -130,7 +130,7 @@ impl Task for QualityDefinitions {
         let list: Vec<QualityDefinitionResource> =
             serde_json::from_str(&reply.body).map_err(|e| Error::Decode {
                 path: path.clone(),
-                reason: e.to_string(),
+                reason: crate::error::shape(&e),
             })?;
         if list.is_empty() {
             return Err(Error::EmptyList { path });

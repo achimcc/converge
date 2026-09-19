@@ -89,7 +89,7 @@ pub fn probe(t: &dyn Transport) -> Result<String, Probe> {
         return Err(Probe::NotYet(format!("HTTP {}", reply.status)));
     }
     let status: Status = serde_json::from_str(&reply.body)
-        .map_err(|e| Probe::NotYet(format!("unexpected answer: {e}")))?;
+        .map_err(|e| Probe::NotYet(format!("unexpected answer: {}", crate::error::shape(&e))))?;
     if status.is_init != Some(true) {
         return Err(Probe::NotYet("no root account yet".to_string()));
     }

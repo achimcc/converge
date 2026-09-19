@@ -548,7 +548,7 @@ impl Task for Providers {
             expect_status_at(ep.method, ep.path, &reply, &[200])?;
             serde_json::from_str(&reply.body).map_err(|e| Error::Decode {
                 path: ep.path.to_string(),
-                reason: e.to_string(),
+                reason: crate::error::shape(&e),
             })
         };
         let entries = read_list(self.api.list)?;

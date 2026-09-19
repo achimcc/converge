@@ -68,11 +68,19 @@ impl Server {
                     .find(|(m, p, _, _)| *m == method && *p == path)
                     .map(|(_, _, s, b)| (*s, b.clone()))
                     .unwrap_or((404, String::new()));
-                let _ = write!(
-                    stream,
-                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
-                    answer.len()
-                );
+                // A 3xx route's answer is its `Location`.
+                let _ = if (300..400).contains(&status) {
+                    write!(
+                        stream,
+                        "HTTP/1.1 {status} X\r\nLocation: {answer}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                } else {
+                    write!(
+                        stream,
+                        "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                        answer.len()
+                    )
+                };
             }
         });
         Server { port, seen }
