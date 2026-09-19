@@ -1584,6 +1584,57 @@ on a fresh instance nobody has logged in.
 username, the permission and two booleans, and no error carries anything from
 a body.
 
+## 29. Dispatcharr: Live TV through an IPTV proxy (v0.25.0, 2026-09-19)
+
+The host offers the public broadcasters' streams as Live TV in Jellyfin.
+Jellyfin alone picked the first video stream ffmpeg listed in each HLS master
+playlist -- 270p for the ARD channels -- and hung on ARTE. The broadcasters
+deliver audio as separate renditions, so pointing Jellyfin at a single variant
+loses the sound. Dispatcharr sits in between: its `streamlink` stream profile
+asks for `best`, which muxes the best variant with its audio (1080p or 720p
+with sound for all eighteen channels, measured on the host), and Jellyfin
+reads plain MPEG-TS from it.
+
+| task | read | write |
+|---|---|---|
+| `stream-settings` | `GET /api/core/streamprofiles/`, `GET /api/core/settings/` | `PATCH /api/core/settings/{id}/` with the whole `value` |
+| `m3u-accounts` | `GET /api/m3u/accounts/` | `POST` a missing account, `PATCH /api/m3u/accounts/{id}/` with the spec's fields |
+| `m3u-groups` | the accounts and `GET /api/channels/groups/` | `PATCH /api/m3u/accounts/{id}/group-settings/` with `{"group_settings": [...]}` |
+| `epg-sources` | `GET /api/epg/sources/` | `POST` a missing source, `PATCH /api/epg/sources/{id}/` |
+
+**The profile is named, not numbered.** The core setting `stream_settings`
+stores the default profile's id; ids depend on the order an instance created
+its profiles in. A spec names the profile, converge looks the id up, and an
+unknown name is an error that lists the names there are.
+
+**Groups wait for the playlist.** A new M3U account loads its groups
+asynchronously (a Celery task, `refresh_account_on_save`); until then the
+account has none, and the engine reads back without writing again. So the
+groups are a task of their own whose readiness is "every group the spec names
+is part of its account": on a fresh instance one run adds the account, then
+waits for the groups, then sets them. Changing a group or an account's file
+does not re-read the playlist -- that is an action (`POST
+/api/m3u/refresh/{id}/`) and stays with the caller.
+
+**The description is wrong once.** drf-spectacular declares the
+group-settings body as `PatchedM3UAccount`; the view reads `group_settings`
+from the request. The endpoint is listed without a shape, and a spec's group
+fields are checked against `ChannelGroupM3UAccount`, the membership the
+account answers with -- and at parse time against the four fields the view
+reads. Channel numbers come back as floats (`1.0`); a spec's `1` is the same
+number.
+
+**Logins are rationed.** There is no API key a spec could hold (Dispatcharr
+generates keys itself), so a task logs in as a service account, as for
+SuggestArr (§19). Dispatcharr allows three logins a minute per client address:
+a unit with four specs was refused on the fourth. converge now logs in once
+per base URL and account and reuses the access token (thirty minutes) for
+every spec of the run.
+
+`refresh_interval` 0 means *never* for both accounts and sources
+(`core/scheduling.py`: disabled unless a cron or a positive interval is set).
+A spec that wants a guide that stays current says so.
+
 ## 20. Not in the pilot
 
 

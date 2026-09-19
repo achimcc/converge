@@ -1376,3 +1376,67 @@ fn schema_check_for_suggestarr_validates_specs_without_an_openapi_file() {
     assert!(String::from_utf8_lossy(&out.stderr)
         .contains("suggestarr publishes no OpenAPI description"));
 }
+
+#[test]
+fn schema_check_checks_dispatcharr_entries_against_create_and_update() {
+    let openapi = format!(
+        "{}/openapi/dispatcharr-0.31.0.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let spec = |name: &str, task: &str, desired: &str| {
+        let path = dir.path().join(name);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"service":"dispatcharr","base_url":"http://localhost:9191","api_key_credential":"k","task":"{task}","desired":{desired}}}"#
+            ),
+        )
+        .unwrap();
+        path
+    };
+    let check = |paths: &[&std::path::Path]| {
+        let mut cmd = converge();
+        cmd.args([
+            "schema-check",
+            "--service",
+            "dispatcharr",
+            "--openapi",
+            &openapi,
+        ]);
+        for p in paths {
+            cmd.arg("--spec").arg(p);
+        }
+        cmd.output().unwrap()
+    };
+
+    let accounts = spec(
+        "accounts.json",
+        "m3u-accounts",
+        r#"{"username":"c","accounts":{"A":{"file_path":"/m3u/a.m3u","refresh_interval":24}}}"#,
+    );
+    let groups = spec(
+        "groups.json",
+        "m3u-groups",
+        r#"{"username":"c","accounts":{"A":{"G":{"auto_channel_sync":true,"auto_sync_channel_end":99}}}}"#,
+    );
+    let out = check(&[&accounts, &groups]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("13 endpoints"), "{stdout}");
+
+    // A misspelt field is found in both bodies it would travel in.
+    let typo = spec(
+        "typo.json",
+        "epg-sources",
+        r#"{"username":"c","sources":{"E":{"sourcetype":"xmltv"}}}"#,
+    );
+    let out = check(&[&typo]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("EPGSource.sourcetype: EPGSource has no property sourcetype"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("PatchedEPGSource.sourcetype"), "{stderr}");
+}

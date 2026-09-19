@@ -24,6 +24,7 @@ pub enum Service {
     SuggestArr,
     Kavita,
     Audiobookshelf,
+    Dispatcharr,
 }
 
 impl Service {
@@ -42,6 +43,7 @@ impl Service {
             Service::SuggestArr => "suggestarr",
             Service::Kavita => "kavita",
             Service::Audiobookshelf => "audiobookshelf",
+            Service::Dispatcharr => "dispatcharr",
         }
     }
 
@@ -57,20 +59,25 @@ impl Service {
             | Service::Kavita => "X-Api-Key",
             Service::Jellyfin => "X-Emby-Token",
             Service::Trailarr => "X-API-KEY",
-            Service::Ntfy | Service::Koel | Service::SuggestArr | Service::Audiobookshelf => {
-                "Authorization"
-            }
+            Service::Ntfy
+            | Service::Koel
+            | Service::SuggestArr
+            | Service::Audiobookshelf
+            | Service::Dispatcharr => "Authorization",
         }
     }
 
     /// The header's value. The credential holds the bare key; ntfy and Koel
-    /// want it as a bearer token, and for SuggestArr the value is the JWT a
-    /// login returned (the credential there holds a password, never a key).
+    /// want it as a bearer token, and for SuggestArr and Dispatcharr the value
+    /// is the JWT a login returned (the credential there holds a password,
+    /// never a key).
     pub fn key_value(self, key: Secret) -> Secret {
         match self {
-            Service::Ntfy | Service::Koel | Service::SuggestArr | Service::Audiobookshelf => {
-                Secret::new(format!("Bearer {}", key.expose()))
-            }
+            Service::Ntfy
+            | Service::Koel
+            | Service::SuggestArr
+            | Service::Audiobookshelf
+            | Service::Dispatcharr => Secret::new(format!("Bearer {}", key.expose())),
             _ => key,
         }
     }
@@ -131,6 +138,10 @@ enum TaskName {
     Libraries,
     AuthSettings,
     AdminPermissions,
+    StreamSettings,
+    M3uAccounts,
+    M3uGroups,
+    EpgSources,
 }
 
 impl TaskName {
@@ -173,6 +184,10 @@ impl TaskName {
             TaskName::AuthSettings | TaskName::AdminPermissions => {
                 service == Service::Audiobookshelf
             }
+            TaskName::StreamSettings
+            | TaskName::M3uAccounts
+            | TaskName::M3uGroups
+            | TaskName::EpgSources => service == Service::Dispatcharr,
         }
     }
 }
@@ -605,7 +620,35 @@ pub enum Desired {
     KavitaLibraries(BTreeMap<String, BTreeMap<String, serde_json::Value>>),
     AudiobookshelfAuthSettings(AudiobookshelfAuth),
     AudiobookshelfAdminPermissions(AbsPermissions),
+    Dispatcharr(DispatcharrDesired),
 }
+
+/// A Dispatcharr task (design §29). Every task logs in as `username`, a
+/// service account whose password is `api_key_credential`; the account is
+/// not a secret and belongs in the spec, so a wrong one shows in a plan.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DispatcharrDesired {
+    pub username: String,
+    pub task: DispatcharrTask,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DispatcharrTask {
+    /// The default stream profile, by name.
+    StreamSettings { default_stream_profile: String },
+    /// M3U accounts or EPG sources by name, their fields by name.
+    Entries(
+        crate::services::dispatcharr::EntryKind,
+        BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+    ),
+    /// account name -> group name -> fields.
+    Groups(BTreeMap<String, BTreeMap<String, BTreeMap<String, serde_json::Value>>>),
+}
+
+/// Fields a Dispatcharr spec may not name: the entry's identity, and the
+/// credentials an M3U account or EPG source can carry -- a spec has no way to
+/// keep them out of a plan's output.
+const DISPATCHARR_FORBIDDEN: [&str; 4] = ["id", "name", "username", "password"];
 
 /// Permissions every account of the named types must hold (design §28).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -1291,6 +1334,12 @@ impl Spec {
                 kavita_paths(&map).map_err(invalid)?;
                 Desired::KavitaServerSettings(map)
             }
+            TaskName::StreamSettings
+            | TaskName::M3uAccounts
+            | TaskName::M3uGroups
+            | TaskName::EpgSources => {
+                Desired::Dispatcharr(dispatcharr_desired(raw.task, raw.desired).map_err(invalid)?)
+            }
             TaskName::AdminPermissions => {
                 let desired: AbsPermissions = serde_json::from_value(raw.desired)
                     .map_err(|e| invalid(format!("desired: {e}")))?;
@@ -1742,8 +1791,147 @@ impl Spec {
             Desired::KavitaLibraries(_) => "libraries",
             Desired::AudiobookshelfAuthSettings(_) => "auth-settings",
             Desired::AudiobookshelfAdminPermissions(_) => "admin-permissions",
+            Desired::Dispatcharr(ref d) => match &d.task {
+                DispatcharrTask::StreamSettings { .. } => "stream-settings",
+                DispatcharrTask::Entries(
+                    crate::services::dispatcharr::EntryKind::M3uAccount,
+                    _,
+                ) => "m3u-accounts",
+                DispatcharrTask::Entries(crate::services::dispatcharr::EntryKind::EpgSource, _) => {
+                    "epg-sources"
+                }
+                DispatcharrTask::Groups(_) => "m3u-groups",
+            },
         }
     }
+}
+
+/// A Dispatcharr spec's `desired`, checked. The errors are the reason only;
+/// the caller names the spec.
+fn dispatcharr_desired(
+    task: TaskName,
+    desired: serde_json::Value,
+) -> Result<DispatcharrDesired, String> {
+    use crate::services::dispatcharr::{EntryKind, GROUP_FIELDS};
+    type Fields = BTreeMap<String, serde_json::Value>;
+
+    fn fields_ok(at: &str, fields: &Fields, allowed: Option<&[&str]>) -> Result<(), String> {
+        if fields.is_empty() {
+            return Err(format!("{at} names no field"));
+        }
+        for name in fields.keys() {
+            if name.is_empty() || name.contains('.') {
+                return Err(format!("{at}: {name:?} is not a plain field name"));
+            }
+            if DISPATCHARR_FORBIDDEN.contains(&name.as_str()) {
+                return Err(format!(
+                    "{at}: {name} is not something a spec sets (the entry's identity, or a credential a plan would print)"
+                ));
+            }
+            if let Some(allowed) = allowed {
+                if !allowed.contains(&name.as_str()) {
+                    return Err(format!(
+                        "{at}: {name} is not a group setting ({})",
+                        allowed.join(", ")
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Stream {
+        username: String,
+        default_stream_profile: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Accounts {
+        username: String,
+        accounts: BTreeMap<String, Fields>,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Sources {
+        username: String,
+        sources: BTreeMap<String, Fields>,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Groups {
+        username: String,
+        accounts: BTreeMap<String, BTreeMap<String, Fields>>,
+    }
+    let parse_err = |e: serde_json::Error| format!("desired: {e}");
+    let (username, task) = match task {
+        TaskName::StreamSettings => {
+            let d: Stream = serde_json::from_value(desired).map_err(parse_err)?;
+            if d.default_stream_profile.is_empty() {
+                return Err("desired.default_stream_profile is empty".to_string());
+            }
+            (
+                d.username,
+                DispatcharrTask::StreamSettings {
+                    default_stream_profile: d.default_stream_profile,
+                },
+            )
+        }
+        TaskName::M3uAccounts | TaskName::EpgSources => {
+            let (username, entries, kind, at) = if matches!(task, TaskName::M3uAccounts) {
+                let d: Accounts = serde_json::from_value(desired).map_err(parse_err)?;
+                (
+                    d.username,
+                    d.accounts,
+                    EntryKind::M3uAccount,
+                    "desired.accounts",
+                )
+            } else {
+                let d: Sources = serde_json::from_value(desired).map_err(parse_err)?;
+                (
+                    d.username,
+                    d.sources,
+                    EntryKind::EpgSource,
+                    "desired.sources",
+                )
+            };
+            if entries.is_empty() {
+                return Err(format!("{at} names no entry"));
+            }
+            for (name, fields) in &entries {
+                if name.is_empty() {
+                    return Err(format!("{at}: an entry name is empty"));
+                }
+                fields_ok(&format!("{at}.{name}"), fields, None)?;
+            }
+            (username, DispatcharrTask::Entries(kind, entries))
+        }
+        TaskName::M3uGroups => {
+            let d: Groups = serde_json::from_value(desired).map_err(parse_err)?;
+            if d.accounts.is_empty() {
+                return Err("desired.accounts names no account".to_string());
+            }
+            for (account, groups) in &d.accounts {
+                if groups.is_empty() {
+                    return Err(format!("desired.accounts.{account} names no group"));
+                }
+                for (group, fields) in groups {
+                    fields_ok(
+                        &format!("desired.accounts.{account}.{group}"),
+                        fields,
+                        Some(&GROUP_FIELDS),
+                    )?;
+                }
+            }
+            (d.username, DispatcharrTask::Groups(d.accounts))
+        }
+        _ => unreachable!("only Dispatcharr's tasks come here"),
+    };
+    if username.is_empty() {
+        return Err("desired.username is empty".to_string());
+    }
+    Ok(DispatcharrDesired { username, task })
 }
 
 #[cfg(test)]
@@ -2792,5 +2980,72 @@ mod tests {
         let empty = r#"{"service":"sonarr","base_url":"http://x","api_key_credential":"k","task":"quality-definitions","desired":{}}"#;
         assert!(parse(empty).is_err());
         assert!(parse(&GOOD.replace("http://", "https://")).is_err());
+    }
+
+    fn dispatcharr(task: &str, desired: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"dispatcharr","base_url":"http://localhost:9191","api_key_credential":"dispatcharr-converge-passwort","task":"{task}","desired":{desired}}}"#
+        ))
+    }
+
+    #[test]
+    fn dispatcharr_tasks_parse_with_their_account() {
+        let spec = dispatcharr(
+            "stream-settings",
+            r#"{"username":"converge","default_stream_profile":"streamlink"}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "stream-settings");
+        let spec = dispatcharr(
+            "m3u-accounts",
+            r#"{"username":"converge","accounts":{"A":{"file_path":"/m3u/a.m3u"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "m3u-accounts");
+        let spec = dispatcharr(
+            "epg-sources",
+            r#"{"username":"converge","sources":{"E":{"url":"https://x/e.xml"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "epg-sources");
+        let spec = dispatcharr(
+            "m3u-groups",
+            r#"{"username":"converge","accounts":{"A":{"G":{"auto_channel_sync":true}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "m3u-groups");
+        let Desired::Dispatcharr(d) = &spec.desired else {
+            panic!("not a Dispatcharr spec")
+        };
+        assert_eq!(d.username, "converge");
+    }
+
+    #[test]
+    fn dispatcharr_specs_are_strict() {
+        let no_user = dispatcharr(
+            "stream-settings",
+            r#"{"username":"","default_stream_profile":"streamlink"}"#,
+        );
+        assert!(no_user.is_err(), "empty username");
+        let password = dispatcharr(
+            "m3u-accounts",
+            r#"{"username":"c","accounts":{"A":{"password":"x"}}}"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(password.contains("credential"), "{password}");
+        let group = dispatcharr(
+            "m3u-groups",
+            r#"{"username":"c","accounts":{"A":{"G":{"stream_count":1}}}}"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(group.contains("not a group setting"), "{group}");
+        let empty = dispatcharr("epg-sources", r#"{"username":"c","sources":{}}"#);
+        assert!(empty.is_err(), "no source");
+        let other = parse(
+            r#"{"service":"jellyfin","base_url":"http://x","api_key_credential":"k","task":"m3u-accounts","desired":{"username":"c","accounts":{"A":{"file_path":"/a"}}}}"#,
+        );
+        assert!(other.is_err(), "Dispatcharr only");
     }
 }

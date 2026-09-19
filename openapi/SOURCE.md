@@ -35,6 +35,17 @@ is the version a consumer passes in.
 |---|---|---|
 | `kavita-0.9.1.4.json` | `openapi.json` at the top of that tree | `e7ced995b077a067d4b9fc741e8fe24fee9f11346b123f2f53887379cb9e45df` |
 
+`dispatcharr-0.31.0.json` is not from a release tag either: Dispatcharr
+generates its description at runtime (drf-spectacular). It was fetched
+2026-09-19 around 05:50 CEST with `GET /api/schema/?format=json` from a
+throwaway container of
+`ghcr.io/dispatcharr/dispatcharr:0.31.0@sha256:f81924fa3dbfeb463b3908be7e086bf58aacbd2ba56062bfb555ee3a471acf8f`,
+written as answered. It is wrong about one body (design §29).
+
+| file | source | sha256 |
+|---|---|---|
+| `dispatcharr-0.31.0.json` | `GET /api/schema/?format=json` of that container | `70ab1dd8950f9ec889fdabe33292a58c0a967de971e885bae3d833bcecbbea99` |
+
 ntfy publishes no OpenAPI description at all; its fields are checked by
 recorded answers and at runtime only (`docs/design.md` §10).
 

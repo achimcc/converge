@@ -11,16 +11,16 @@ use converge::{
     error::Error,
     schema,
     services::{
-        arr, audiobookshelf, bindery, jellyfin, kavita, koel, ntfy, providers, seerr, servarr,
-        suggestarr, trailarr,
+        arr, audiobookshelf, bindery, dispatcharr, jellyfin, kavita, koel, ntfy, providers, seerr,
+        servarr, suggestarr, trailarr,
     },
-    spec::{Desired, Service, Spec},
+    spec::{Desired, DispatcharrTask, Service, Spec},
 };
 
 const USAGE: &str = "usage:
   converge apply [--deadline <seconds>] <spec.json>...
   converge plan [--deadline <seconds>] <spec.json>...
-  converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr|kavita> --openapi <file> [--spec <spec.json>]...
+  converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr|kavita|dispatcharr> --openapi <file> [--spec <spec.json>]...
   converge schema-check --service ntfy|bindery|seerr|koel|suggestarr|audiobookshelf [--spec <spec.json>]...";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -75,9 +75,10 @@ fn reconcile(mode: Mode, args: &[String]) -> ExitCode {
     }
     let credentials = std::env::var_os("CREDENTIALS_DIRECTORY").map(PathBuf::from);
     let (mut failed, mut differs) = (false, false);
+    let mut tokens = Tokens::new();
     // A failing spec does not skip the next one; it only decides the exit code.
     for path in &paths {
-        match reconcile_one(mode, path, credentials.as_deref(), timing) {
+        match reconcile_one(mode, path, credentials.as_deref(), timing, &mut tokens) {
             Ok(d) => differs |= d,
             Err(()) => failed = true,
         }
@@ -91,12 +92,20 @@ fn reconcile(mode: Mode, args: &[String]) -> ExitCode {
     }
 }
 
+/// Access tokens a login returned, by base URL and account, for the rest of
+/// this run. Dispatcharr allows three logins a minute per client address
+/// (`REST_FRAMEWORK` rate `login`); a unit that runs four specs against it
+/// would be refused on the fourth (design §29). A token lives thirty minutes
+/// there, longer than any run.
+type Tokens = std::collections::HashMap<(String, String), String>;
+
 /// Prints its own lines. `Ok(true)` means a plan found a difference.
 fn reconcile_one(
     mode: Mode,
     path: &Path,
     credentials: Option<&Path>,
     timing: Timing,
+    tokens: &mut Tokens,
 ) -> Result<bool, ()> {
     let spec = Spec::load(path).map_err(|e| eprintln!("{}: error: {e}", path.display()))?;
     let label = format!("{} {}", spec.service.name(), spec.task_name());
@@ -110,6 +119,21 @@ fn reconcile_one(
         Desired::SuggestArrConfiguration(desired) => {
             let anonymous = HttpTransport::anonymous(&spec.base_url, REQUEST_TIMEOUT);
             suggestarr::login(&anonymous, &desired.username, &key).map_err(fail)?
+        }
+        // The same for Dispatcharr (design §29): a service account's
+        // password in, a short-lived access token out.
+        Desired::Dispatcharr(desired) => {
+            let at = (spec.base_url.clone(), desired.username.clone());
+            match tokens.get(&at) {
+                Some(token) => converge::secret::Secret::new(token.clone()),
+                None => {
+                    let anonymous = HttpTransport::anonymous(&spec.base_url, REQUEST_TIMEOUT);
+                    let token =
+                        dispatcharr::login(&anonymous, &desired.username, &key).map_err(fail)?;
+                    tokens.insert(at, token.expose().to_string());
+                    token
+                }
+            }
         }
         _ => key,
     };
@@ -151,6 +175,29 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::Dispatcharr(desired) => match &desired.task {
+            DispatcharrTask::StreamSettings {
+                default_stream_profile,
+            } => {
+                let task = dispatcharr::StreamSettings {
+                    default_stream_profile: default_stream_profile.clone(),
+                };
+                run(mode, &task, &transport, &SystemClock, timing)
+            }
+            DispatcharrTask::Entries(kind, entries) => {
+                let task = dispatcharr::Entries {
+                    kind: *kind,
+                    entries: entries.clone(),
+                };
+                run(mode, &task, &transport, &SystemClock, timing)
+            }
+            DispatcharrTask::Groups(accounts) => {
+                let task = dispatcharr::Groups {
+                    accounts: accounts.clone(),
+                };
+                run(mode, &task, &transport, &SystemClock, timing)
+            }
+        },
         Desired::AudiobookshelfAdminPermissions(desired) => {
             let task = audiobookshelf::AdminPermissions {
                 types: desired.types.clone(),
@@ -598,6 +645,7 @@ fn schema_check(args: &[String]) -> ExitCode {
         "jellyfin" => (jellyfin::ENDPOINTS.to_vec(), jellyfin::wire_types()),
         "trailarr" => (trailarr::ENDPOINTS.to_vec(), trailarr::wire_types()),
         "kavita" => (kavita::ENDPOINTS.to_vec(), kavita::wire_types()),
+        "dispatcharr" => (dispatcharr::ENDPOINTS.to_vec(), dispatcharr::wire_types()),
         _ => return usage(Some(&format!("unknown service {service:?}"))),
     };
     let document = std::fs::read_to_string(&openapi)
@@ -759,6 +807,55 @@ fn schema_check(args: &[String]) -> ExitCode {
                     None => (vec![format!("{} has no such providers", service)], 0),
                 }
             }
+            // An account's and a source's fields are sent when they are added
+            // and when they are updated, so each must be a property of both;
+            // a group's fields are those of the membership the account answers
+            // with (the endpoint's declared body is wrong, design §29).
+            Desired::Dispatcharr(desired) => match &desired.task {
+                DispatcharrTask::StreamSettings { .. } => (Vec::new(), 0),
+                DispatcharrTask::Entries(kind, entries) => {
+                    let components = match kind {
+                        dispatcharr::EntryKind::M3uAccount => [
+                            dispatcharr::M3U_ACCOUNT_CREATE_COMPONENT,
+                            dispatcharr::M3U_ACCOUNT_UPDATE_COMPONENT,
+                        ],
+                        dispatcharr::EntryKind::EpgSource => [
+                            dispatcharr::EPG_SOURCE_CREATE_COMPONENT,
+                            dispatcharr::EPG_SOURCE_UPDATE_COMPONENT,
+                        ],
+                    };
+                    let mut found = Vec::new();
+                    for (name, fields) in entries {
+                        for component in components {
+                            found.extend(
+                                schema::check_paths(&document, component, fields)
+                                    .into_iter()
+                                    .map(|f| format!("{name}: {f}")),
+                            );
+                        }
+                    }
+                    (found, entries.values().map(|f| f.len()).sum())
+                }
+                DispatcharrTask::Groups(accounts) => {
+                    let mut found = Vec::new();
+                    let mut count = 0;
+                    for (account, groups) in accounts {
+                        for (group, fields) in groups {
+                            count += fields.len();
+                            found.extend(
+                                schema::check_paths(
+                                    &document,
+                                    dispatcharr::GROUP_COMPONENT,
+                                    fields,
+                                )
+                                .into_iter()
+                                .map(|f| format!("{account}/{group}: {f}")),
+                            );
+                        }
+                    }
+                    (found, count)
+                }
+            },
             Desired::MediaManagement(set) => (
                 schema::check_paths(&document, servarr::MEDIA_MANAGEMENT, set),
                 set.len(),
