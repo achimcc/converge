@@ -1805,6 +1805,14 @@ compares the URL behind `effective_logo_id`, and creates a missing logo with
 override carries only the fields that differ, so the rest of an existing
 override stays.
 
+**One POST per URL, not per channel (v0.33.1, 2026-09-21).** `Logo.url` is
+unique, and the write created a missing logo once for every channel that
+named it: the second POST of the same URL answered 400 and the bulk override
+was never sent. It went unnoticed while every channel had a picture of its
+own; thirty channels sharing one (twenty event slots and ten round-the-clock
+channels of one provider) hit it on the first run. The write now remembers
+the logos it created, by URL, and names their id for every further channel.
+
 ## 36. Dispatcharr: fallback streams, from the channel's own group (v0.33.0, 2026-09-19)
 
 Each Xtream channel plays one stream, the best variant its group's name

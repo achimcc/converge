@@ -1426,12 +1426,14 @@ impl Task for ChannelEpg {
             .collect()
     }
 
-    /// Missing logos first (one POST each), then one bulk PATCH with an
-    /// override per channel that differs -- only the fields that differ, so
-    /// the rest of an existing override stays.
+    /// Missing logos first (one POST per URL, however many channels share
+    /// it: `Logo.url` is unique, and a second POST answers 400), then one bulk
+    /// PATCH with an override per channel that differs -- only the fields that
+    /// differ, so the rest of an existing override stays.
     fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
         let wanted = self.wanted(current).map_err(Error::NotFound)?;
         let mut body = Vec::new();
+        let mut created: BTreeMap<String, i64> = BTreeMap::new();
         for w in wanted.into_iter().filter(|w| !w.changes.is_empty()) {
             let mut o = Map::new();
             if let Some(epg) = w.epg {
@@ -1444,6 +1446,9 @@ impl Task for ChannelEpg {
                 Some(Ok(id)) => {
                     o.insert("logo".to_string(), json!(id));
                 }
+                Some(Err(url)) if created.contains_key(&url) => {
+                    o.insert("logo".to_string(), json!(created[&url]));
+                }
                 Some(Err(url)) => {
                     let name = w.display.clone().unwrap_or_else(|| w.name.clone());
                     let text = serialize(
@@ -1455,6 +1460,7 @@ impl Task for ChannelEpg {
                     expect_status_at(LOGO_CREATE.method, LOGO_CREATE.path, &reply, &[201])?;
                     let logo: Logo = decode(LOGO_CREATE.path, &reply.body)?;
                     o.insert("logo".to_string(), json!(logo.id));
+                    created.insert(url, logo.id);
                 }
                 None => {}
             }
@@ -2256,6 +2262,27 @@ mod tests {
         assert_eq!(written[1].0, "/api/channels/channels/edit/bulk/");
         let sent: Value = serde_json::from_str(&written[1].1).unwrap();
         assert_eq!(sent[0]["override"], json!({"logo": 777}));
+    }
+
+    /// `Logo.url` is unique: a second POST of the same URL answers 400. Thirty
+    /// event channels sharing one picture did exactly that (2026-09-21).
+    #[test]
+    fn a_missing_logo_shared_by_two_channels_is_created_once() {
+        let mut task = look("SKY CINEMA ACTION", None, Some(NEW_LOGO));
+        task.channels.extend(look("Das Erste", None, Some(NEW_LOGO)).channels);
+        let t = look_transport(vec![created_logo(), Step::Answer(200, "{}".to_string())]);
+        let current = task.read(&t).unwrap();
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 2, "one logo, one bulk write: {written:?}");
+        assert_eq!(written[0].0, "/api/channels/logos/");
+        assert_eq!(written[1].0, "/api/channels/channels/edit/bulk/");
+        let sent: Value = serde_json::from_str(&written[1].1).unwrap();
+        let entries = sent.as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        for entry in entries {
+            assert_eq!(entry["override"], json!({"logo": 777}));
+        }
     }
 
     #[test]
