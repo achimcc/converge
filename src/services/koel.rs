@@ -52,6 +52,12 @@ pub struct StationTarget {
 
 pub struct RadioStations {
     pub stations: Vec<StationTarget>,
+    /// The spec names every station the account should have: its other ones
+    /// are removed (design §39). False unless the spec says
+    /// `"exactly": true`. It can only ever reach the account's **own**
+    /// stations, because `read` refuses to run while the list holds
+    /// anybody else's (`check_only_own_stations_listed`).
+    pub exactly: bool,
 }
 
 /// A station as `GET /api/radio/stations` answers it
@@ -309,6 +315,17 @@ impl RadioStations {
         target.logo.as_ref().filter(|_| !has_logo)
     }
 
+    /// The account's stations the spec does not name.
+    fn not_in_the_spec<'a>(
+        &self,
+        current: &'a [RadioStationResource],
+    ) -> Vec<&'a RadioStationResource> {
+        current
+            .iter()
+            .filter(|s| !self.stations.iter().any(|t| t.name == s.name))
+            .collect()
+    }
+
     /// The whole entry: Koel's update resets what a body leaves out.
     fn body(target: &StationTarget, logo: Option<&Logo>) -> String {
         let mut body = Map::new();
@@ -364,12 +381,68 @@ impl Task for RadioStations {
         }
     }
 
+    /// With `exactly` nothing is left as it is, so the note would be a lie;
+    /// those stations are removals instead.
     fn notes(&self, current: &Self::Current) -> Vec<String> {
-        current
-            .iter()
-            .filter(|s| !self.stations.iter().any(|t| t.name == s.name))
+        if self.exactly {
+            return Vec::new();
+        }
+        self.not_in_the_spec(current)
+            .into_iter()
             .map(|s| format!("not in the spec, left as it is: {}", subject(&s.name)))
             .collect()
+    }
+
+    /// The account's own stations the spec does not name -- and never half
+    /// the list or more.
+    ///
+    /// Koel finds a station by its name, and a name is a string somebody
+    /// typed: another Unicode normalisation on either side, and no spec
+    /// station would match any of Koel's, making every one of them look
+    /// like a surplus. A spec that would take away half the account's
+    /// stations is therefore an error rather than a removal -- in `plan`
+    /// too, and before a single `DELETE`.
+    fn surplus(&self, current: &Self::Current) -> Result<Vec<String>, Error> {
+        if !self.exactly {
+            return Ok(Vec::new());
+        }
+        let surplus = self.not_in_the_spec(current);
+        if !surplus.is_empty() && 2 * surplus.len() >= current.len() {
+            return Err(Error::Refused(format!(
+                "would remove {} of {} stations (half or more) -- nothing removed",
+                surplus.len(),
+                current.len()
+            )));
+        }
+        Ok(surplus
+            .into_iter()
+            .map(|s| subject(&s.name))
+            .collect::<Vec<_>>())
+    }
+
+    /// One `DELETE /api/radio/stations/{id}` per surplus station. Koel's
+    /// controller deletes the Eloquent model, so its observer takes the
+    /// stored logo file with it (design §39); the answer is 204 and empty.
+    fn remove(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        if !self.exactly {
+            return Ok(());
+        }
+        // Nothing is removed while the guard above says no.
+        self.surplus(current)?;
+        for station in self.not_in_the_spec(current) {
+            let path = format!("{STATIONS}/{}", station.id);
+            let reply = t.delete(&path)?;
+            // `response()->noContent()` is 204; 200 is taken as well.
+            if ![200, 204].contains(&reply.status) {
+                return Err(Error::Status {
+                    method: "DELETE",
+                    path,
+                    status: reply.status,
+                    validation: vec![format!("{} was not removed", subject(&station.name))],
+                });
+            }
+        }
+        Ok(())
     }
 
     /// `POST` for a missing station, `PUT` with the whole entry for one that
@@ -479,6 +552,7 @@ mod tests {
         theirs.url = "https://example.org/other.mp3".to_string();
         let task = RadioStations {
             stations: vec![theirs],
+            exactly: false,
         };
         for mode in [Mode::Apply, Mode::Plan] {
             let t = FakeTransport::default()
@@ -501,6 +575,7 @@ mod tests {
     fn the_account_answer_is_checked_and_never_shown() {
         let task = RadioStations {
             stations: vec![fsk()],
+            exactly: false,
         };
         let mark = "subsonic-key-7f3a9c-never-print-me";
         let mut without: Value = serde_json::from_str(ME_RECORDED).unwrap();
@@ -575,6 +650,7 @@ mod tests {
     fn an_empty_body_is_an_error_and_an_empty_list_is_not() {
         let task = RadioStations {
             stations: vec![fsk()],
+            exactly: false,
         };
         assert!(task.read(&koel(RECORDED)).unwrap().is_empty());
         let err = task.read(&koel("")).err().unwrap().to_string();
@@ -609,6 +685,7 @@ mod tests {
     fn the_recorded_empty_list_adds_every_station_with_all_its_fields() {
         let task = RadioStations {
             stations: vec![rdl(true), fsk()],
+            exactly: false,
         };
         let t = koel(RECORDED).on_put(vec![Step::Answer(201, "{}".into())]);
         let current = task.read(&t).unwrap();
@@ -649,6 +726,7 @@ mod tests {
         // Its description is null on the service: the same as empty.
         let task = RadioStations {
             stations: vec![rdl(true), fsk(), own],
+            exactly: false,
         };
         let t = koel(CONSTRUCTED);
         let current = task.read(&t).unwrap();
@@ -656,6 +734,7 @@ mod tests {
 
         let task = RadioStations {
             stations: vec![rdl(false)],
+            exactly: false,
         };
         assert_eq!(task.diff(&current).unwrap(), vec![]);
         assert_eq!(
@@ -664,6 +743,145 @@ mod tests {
                 "not in the spec, left as it is: station FSK",
                 "not in the spec, left as it is: station Somebody's own"
             ]
+        );
+    }
+
+    // --- exactly (design §39) ---------------------------------------------
+
+    /// The station of the recording the spec below does not name.
+    const SURPLUS_ID: &str = "01K52Z6P7B8C9D0E1F2G3H4J5K";
+
+    /// Two of the three recorded stations, so removing the third is under
+    /// the half the guard allows.
+    fn two_of_three(exactly: bool) -> RadioStations {
+        RadioStations {
+            stations: vec![rdl(false), fsk()],
+            exactly,
+        }
+    }
+
+    #[test]
+    fn without_exactly_a_station_outside_the_spec_stays_a_note() {
+        let task = two_of_three(false);
+        let t = koel(CONSTRUCTED).on_delete(vec![Step::Answer(204, String::new())]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.surplus(&current).unwrap(), Vec::<String>::new());
+        task.remove(&t, &current).unwrap();
+        assert!(t.deleted.borrow().is_empty());
+        assert_eq!(
+            task.notes(&current),
+            ["not in the spec, left as it is: station Somebody's own"]
+        );
+    }
+
+    #[test]
+    fn with_exactly_a_station_outside_the_spec_is_a_removal_and_plan_removes_nothing() {
+        let task = two_of_three(true);
+        let t = koel(CONSTRUCTED);
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.surplus(&current).unwrap(), ["station Somebody's own"]);
+        assert_eq!(task.notes(&current), Vec::<String>::new());
+
+        let t = koel(CONSTRUCTED);
+        let report = run(Mode::Plan, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        match report.outcome {
+            Outcome::Differs(changes) => assert_eq!(
+                shown(&changes),
+                ["station Somebody's own: (present) -> (removed)"]
+            ),
+            other => panic!("expected Differs, got {other:?}"),
+        }
+        assert!(t.deleted.borrow().is_empty(), "plan removes nothing");
+    }
+
+    /// If the spec's names and Koel's do not line up at all -- another
+    /// Unicode normalisation, say -- every station looks like a surplus.
+    /// Half or more is therefore refused, before a single `DELETE`.
+    #[test]
+    fn removing_half_or_more_is_refused_before_anything_is_removed() {
+        let task = RadioStations {
+            stations: vec![rdl(false)],
+            exactly: true,
+        };
+        for mode in [Mode::Plan, Mode::Apply] {
+            let t = koel(CONSTRUCTED)
+                .on_put(vec![ok("{}")])
+                .on_delete(vec![Step::Answer(204, String::new())]);
+            let err = run(mode, &task, &t, &FakeClock::new(), Timing::default())
+                .err()
+                .unwrap()
+                .to_string();
+            assert_eq!(
+                err,
+                "refused: would remove 2 of 3 stations (half or more) -- nothing removed"
+            );
+            assert!(t.deleted.borrow().is_empty(), "{mode:?} removed something");
+            assert!(t.written.borrow().is_empty(), "{mode:?} wrote something");
+        }
+    }
+
+    /// A station renamed in the spec but keeping its URL: Koel's URL is
+    /// unique per account, so the `POST` that adds the new name would be
+    /// refused with 422 while the old station is still there.
+    #[test]
+    fn a_renamed_station_is_removed_before_the_new_one_is_added() {
+        let mut renamed = fsk();
+        renamed.name = "Radio 100,7".to_string();
+        renamed.url = "https://radio.example.org/live.ogg".to_string();
+        renamed.is_public = true;
+        let task = RadioStations {
+            stations: vec![rdl(false), fsk(), renamed],
+            exactly: true,
+        };
+        // After the run Koel lists the new station instead of the old one.
+        let after = {
+            let mut v: Value = serde_json::from_str(CONSTRUCTED).unwrap();
+            let list = v.as_array_mut().unwrap();
+            for station in list.iter_mut() {
+                if station["id"] == SURPLUS_ID {
+                    station["name"] = json!("Radio 100,7");
+                    station["description"] = json!("");
+                }
+            }
+            v.to_string()
+        };
+        let t = FakeTransport::default()
+            .on_get(ME, vec![ok(&me(false))])
+            // The probe reads the list too, so: probe, read, read back.
+            .on_get(STATIONS, vec![ok(CONSTRUCTED), ok(CONSTRUCTED), ok(&after)])
+            .on_put(vec![Step::Answer(201, "{}".into())])
+            .on_delete(vec![Step::Answer(204, String::new())]);
+        let report = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        match report.outcome {
+            Outcome::Changed(changes) => assert_eq!(
+                shown(&changes),
+                [
+                    "station Somebody's own: (present) -> (removed)",
+                    "station Radio 100,7: (missing) -> (added)"
+                ]
+            ),
+            other => panic!("expected Changed, got {other:?}"),
+        }
+        let calls = t.calls.borrow();
+        assert_eq!(
+            calls[0],
+            ("DELETE", format!("{STATIONS}/{SURPLUS_ID}")),
+            "{calls:?}"
+        );
+        assert_eq!(calls[1], ("POST", STATIONS.to_string()), "{calls:?}");
+    }
+
+    #[test]
+    fn a_refused_removal_names_the_station() {
+        let task = two_of_three(true);
+        let t = koel(CONSTRUCTED).on_delete(vec![Step::Answer(403, INVALID.into())]);
+        let current = task.read(&t).unwrap();
+        let err = task.remove(&t, &current).err().unwrap().to_string();
+        assert_eq!(
+            err,
+            format!(
+                "DELETE {STATIONS}/{SURPLUS_ID} answered HTTP 403: station Somebody's own was not removed"
+            )
         );
     }
 
@@ -680,6 +898,7 @@ mod tests {
         // A logo file for a station that has a logo changes nothing.
         let task = RadioStations {
             stations: vec![rdl(true), changed],
+            exactly: false,
         };
         let t = koel(CONSTRUCTED).on_put(vec![ok("{}")]);
         let current = task.read(&t).unwrap();
@@ -711,6 +930,7 @@ mod tests {
         described.description = "Neu.".to_string();
         let task = RadioStations {
             stations: vec![described],
+            exactly: false,
         };
         let t = koel(CONSTRUCTED).on_put(vec![ok("{}")]);
         task.write(&t, &task.read(&t).unwrap()).unwrap();
@@ -730,6 +950,7 @@ mod tests {
         list[2]["name"] = json!("FSK");
         let task = RadioStations {
             stations: vec![fsk()],
+            exactly: false,
         };
         let t = koel(&Value::Array(list).to_string());
         let err = task
@@ -747,6 +968,7 @@ mod tests {
     fn a_refused_write_shows_the_validation_fields() {
         let task = RadioStations {
             stations: vec![fsk()],
+            exactly: false,
         };
         let t = koel(RECORDED).on_put(vec![Step::Answer(422, INVALID.into())]);
         let err = task
@@ -764,6 +986,7 @@ mod tests {
     fn apply_adds_then_reads_back_until_the_station_is_there() {
         let task = RadioStations {
             stations: vec![fsk()],
+            exactly: false,
         };
         let after =
             json!([{"type": "radio-stations", "name": "FSK", "id": "01K52Z6N0R5S6T7V8W9X0Y1Z2A",

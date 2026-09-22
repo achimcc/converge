@@ -211,6 +211,11 @@ struct RawSpec {
     base_url: String,
     api_key_credential: String,
     task: TaskName,
+    /// "This spec names the whole collection": the task removes every entry
+    /// it does not name. Opt-in per spec, never the default, and only three
+    /// tasks take it (design §39).
+    #[serde(default)]
+    exactly: bool,
     desired: serde_json::Value,
 }
 
@@ -264,6 +269,12 @@ pub fn show(value: Option<f64>) -> String {
 #[serde(deny_unknown_fields)]
 pub struct ProfilePolicy {
     pub allow_in_every_profile: Vec<String>,
+    /// The profiles that survive, with `exactly` -- every other one is
+    /// removed. `None` without `exactly`, and required with it: there is no
+    /// sensible default for a list whose absence would empty the service
+    /// (design §39).
+    #[serde(default)]
+    pub keep: Option<Vec<String>>,
 }
 
 /// Fields by path in each named library's `LibraryOptions`.
@@ -977,12 +988,26 @@ fn list_items(path: &str, list: &ListItems) -> Result<(), String> {
     Ok(())
 }
 
+/// The tasks `"exactly": true` is allowed on: the three whose collection a
+/// spec can name in full, and whose shell predecessors on the host this was
+/// written for did the deleting (design §39). Every other task refuses the
+/// switch rather than accepting one that does nothing.
+fn supports_exactly(desired: &Desired) -> bool {
+    matches!(
+        desired,
+        Desired::Connections(_) | Desired::KoelRadioStations(_) | Desired::QualityProfiles(_)
+    )
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Spec {
     pub path: PathBuf,
     pub service: Service,
     pub base_url: String,
     pub api_key_credential: String,
+    /// The spec names the whole collection: what it leaves out is removed
+    /// (design §39). False unless the spec says so.
+    pub exactly: bool,
     pub desired: Desired,
 }
 
@@ -1418,6 +1443,36 @@ impl Spec {
                         "desired.allow_in_every_profile names {twice:?} twice"
                     )));
                 }
+                // `keep` and `exactly` only make sense together: alone,
+                // `keep` would name profiles nothing ever removes, and
+                // `exactly` would have to guess which profiles survive.
+                match (&policy.keep, raw.exactly) {
+                    (Some(_), false) => {
+                        return Err(invalid(
+                            "desired.keep says which profiles survive and needs \"exactly\": true"
+                                .to_string(),
+                        ))
+                    }
+                    (None, true) => {
+                        return Err(invalid(
+                            "\"exactly\": true needs desired.keep -- the profiles that survive"
+                                .to_string(),
+                        ))
+                    }
+                    _ => {}
+                }
+                if let Some(keep) = &policy.keep {
+                    if keep.is_empty() {
+                        return Err(invalid(
+                            "desired.keep names no profile, which would remove every one"
+                                .to_string(),
+                        ));
+                    }
+                    let mut seen = std::collections::BTreeSet::new();
+                    if let Some(twice) = keep.iter().find(|n| !seen.insert(n.as_str())) {
+                        return Err(invalid(format!("desired.keep names {twice:?} twice")));
+                    }
+                }
                 Desired::QualityProfiles(policy)
             }
             TaskName::ServerSettings => {
@@ -1846,13 +1901,24 @@ impl Spec {
                 }
             }
         };
-        Ok(Spec {
+        let spec = Spec {
             path: path.to_path_buf(),
             service: raw.service,
             base_url: raw.base_url,
             api_key_credential: raw.api_key_credential,
+            exactly: raw.exactly,
             desired,
-        })
+        };
+        // Last, so the message can name the task the way the spec spells it.
+        // A task that cannot remove says so instead of taking a switch that
+        // would quietly do nothing.
+        if spec.exactly && !supports_exactly(&spec.desired) {
+            return Err(invalid(format!(
+                "task {} does not support exactly",
+                spec.task_name()
+            )));
+        }
+        Ok(spec)
     }
 
     pub fn task_name(&self) -> &'static str {
@@ -2215,9 +2281,89 @@ mod tests {
         assert_eq!(
             spec.desired,
             Desired::QualityProfiles(ProfilePolicy {
-                allow_in_every_profile: vec!["Unknown".to_string()]
+                allow_in_every_profile: vec!["Unknown".to_string()],
+                keep: None,
             })
         );
+    }
+
+    // --- exactly (design §39) ---------------------------------------------
+
+    const STATIONS: &str = r#"{"service":"koel","base_url":"http://localhost","api_key_credential":"koel-token","task":"radio-stations","desired":{"stations":[{"name":"RDL","url":"https://stream.rdl.de/rdl","description":"","is_public":true,"homepage_url":null}]}}"#;
+    const CONNECTION_SPEC: &str = r#"{"service":"trailarr","base_url":"http://localhost:7889","api_key_credential":"trailarr-api-key","task":"connections","desired":{"connections":{"Radarr":{"set":{"arr_type":"radarr","url":"http://127.0.0.1:7878"},"api_key_credential":"radarr-api-key"}}}}"#;
+
+    /// The same spec with `"exactly": <value>` next to `task`.
+    fn with_exactly(spec: &str, value: &str) -> String {
+        spec.replace(r#""desired""#, &format!(r#""exactly":{value},"desired""#))
+    }
+
+    #[test]
+    fn exactly_defaults_to_false_and_may_be_written_out() {
+        assert!(!parse(STATIONS).unwrap().exactly);
+        assert!(!parse(&with_exactly(STATIONS, "false")).unwrap().exactly);
+        assert!(parse(&with_exactly(STATIONS, "true")).unwrap().exactly);
+        assert!(
+            parse(&with_exactly(CONNECTION_SPEC, "true"))
+                .unwrap()
+                .exactly
+        );
+    }
+
+    /// Only the three tasks that can remove take it; every other one says so
+    /// instead of accepting a switch that would do nothing.
+    #[test]
+    fn exactly_on_a_task_that_cannot_delete_is_invalid() {
+        let err = parse(&with_exactly(GOOD, "true"))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            err.contains("task quality-definitions does not support exactly"),
+            "{err}"
+        );
+        let trailer_profiles = r#"{"service":"trailarr","base_url":"http://localhost:7889","api_key_credential":"k","task":"trailer-profiles","exactly":true,"desired":{"set":{"always_search":true}}}"#;
+        let err = parse(trailer_profiles).err().unwrap().to_string();
+        assert!(
+            err.contains("task trailer-profiles does not support exactly"),
+            "{err}"
+        );
+        // `false` is what every other task already means, and stays allowed.
+        assert!(parse(&with_exactly(GOOD, "false")).is_ok());
+    }
+
+    /// `keep` says which profiles survive, so it makes sense only with
+    /// `exactly` -- and with `exactly` there is no default for it.
+    #[test]
+    fn quality_profiles_keep_belongs_to_exactly_and_is_required_with_it() {
+        let with_keep =
+            PROFILES.replace(r#"["Unknown"]}"#, r#"["Unknown"],"keep":["Anime","HD"]}"#);
+        let err = parse(&with_keep).err().unwrap().to_string();
+        assert!(err.contains("desired.keep"), "{err}");
+        assert!(err.contains("exactly"), "{err}");
+
+        let err = parse(&with_exactly(PROFILES, "true"))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(err.contains("desired.keep"), "{err}");
+
+        let spec = parse(&with_exactly(&with_keep, "true")).unwrap();
+        assert!(spec.exactly);
+        assert_eq!(
+            spec.desired,
+            Desired::QualityProfiles(ProfilePolicy {
+                allow_in_every_profile: vec!["Unknown".to_string()],
+                keep: Some(vec!["Anime".to_string(), "HD".to_string()]),
+            })
+        );
+    }
+
+    #[test]
+    fn an_empty_or_repeated_keep_is_invalid() {
+        let empty = PROFILES.replace(r#"["Unknown"]}"#, r#"["Unknown"],"keep":[]}"#);
+        assert!(parse(&with_exactly(&empty, "true")).is_err());
+        let twice = PROFILES.replace(r#"["Unknown"]}"#, r#"["Unknown"],"keep":["HD","HD"]}"#);
+        assert!(parse(&with_exactly(&twice, "true")).is_err());
     }
 
     #[test]

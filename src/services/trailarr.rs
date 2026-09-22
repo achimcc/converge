@@ -44,6 +44,14 @@ pub const CONNECTION_UPDATE: Endpoint = Endpoint {
     request: Some(Shape::One("ConnectionUpdate")),
     response: None,
 };
+/// Only with `"exactly": true` (design §39). Answers 200 with a string, as
+/// the create does; nothing of the answer is read.
+pub const CONNECTION_DELETE: Endpoint = Endpoint {
+    method: "DELETE",
+    path: "/api/v1/connections/{connection_id}",
+    request: None,
+    response: None,
+};
 pub const TRAILER_PROFILES: Endpoint = Endpoint {
     method: "GET",
     path: "/api/v1/trailerprofiles/",
@@ -56,11 +64,12 @@ pub const TRAILER_PROFILE_SETTING: Endpoint = Endpoint {
     request: Some(Shape::One("UpdateSetting")),
     response: None,
 };
-pub const ENDPOINTS: [Endpoint; 6] = [
+pub const ENDPOINTS: [Endpoint; 7] = [
     SETTINGS,
     CONNECTIONS,
     CONNECTION_CREATE,
     CONNECTION_UPDATE,
+    CONNECTION_DELETE,
     TRAILER_PROFILES,
     TRAILER_PROFILE_SETTING,
 ];
@@ -233,6 +242,9 @@ pub struct ConnectionTarget {
 
 pub struct Connections {
     pub connections: Vec<ConnectionTarget>,
+    /// The spec names every connection there should be: the others are
+    /// removed (design §39). False unless the spec says `"exactly": true`.
+    pub exactly: bool,
 }
 
 /// The fields Trailarr needs to add a connection and has no default for
@@ -297,6 +309,15 @@ impl Connections {
         }
         changes
     }
+
+    /// The connections the spec does not name. Without `exactly` this is
+    /// what `notes` reports and nothing else happens to them.
+    fn not_in_the_spec<'a>(&self, current: &'a [ConnectionRead]) -> Vec<&'a ConnectionRead> {
+        current
+            .iter()
+            .filter(|c| !self.connections.iter().any(|t| t.name == c.name))
+            .collect()
+    }
 }
 
 impl Task for Connections {
@@ -355,12 +376,51 @@ impl Task for Connections {
         }
     }
 
+    /// With `exactly` a connection outside the spec is a removal, and a
+    /// removal is a change -- not a note that says it was left alone.
     fn notes(&self, current: &Self::Current) -> Vec<String> {
-        current
-            .iter()
-            .filter(|c| !self.connections.iter().any(|t| t.name == c.name))
+        if self.exactly {
+            return Vec::new();
+        }
+        self.not_in_the_spec(current)
+            .into_iter()
             .map(|c| format!("not in the spec: {}", subject(&c.name)))
             .collect()
+    }
+
+    fn surplus(&self, current: &Self::Current) -> Result<Vec<String>, Error> {
+        if !self.exactly {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .not_in_the_spec(current)
+            .into_iter()
+            .map(|c| subject(&c.name))
+            .collect())
+    }
+
+    /// One `DELETE` per surplus connection. Trailarr answers with the API
+    /// keys of the Radarr and Sonarr it connects to, so a refusal names the
+    /// connection and carries nothing of the body.
+    fn remove(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        if !self.exactly {
+            return Ok(());
+        }
+        for connection in self.not_in_the_spec(current) {
+            let path = CONNECTION_DELETE
+                .path
+                .replace("{connection_id}", &connection.id.to_string());
+            let reply = t.delete(&path)?;
+            if !(200..300).contains(&reply.status) {
+                return Err(Error::Status {
+                    method: CONNECTION_DELETE.method,
+                    path,
+                    status: reply.status,
+                    validation: vec![format!("{} was not removed", subject(&connection.name))],
+                });
+            }
+        }
+        Ok(())
     }
 
     fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
@@ -522,7 +582,10 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::testing::{ok, FakeTransport, Step};
+    use crate::{
+        engine::{run, Mode},
+        testing::{ok, FakeTransport, Step},
+    };
 
     const SETTINGS_JSON: &str =
         include_str!("../../tests/fixtures/trailarr-0.11.5/constructed-settings-version-only.json");
@@ -563,6 +626,7 @@ mod tests {
                     api_key: Secret::new(key.to_string()),
                 },
             ],
+            exactly: false,
         }
     }
 
@@ -726,6 +790,135 @@ mod tests {
         let current = task.read(&t).unwrap();
         assert_eq!(task.diff(&current).unwrap(), vec![]);
         assert_eq!(task.notes(&current), ["not in the spec: connection Sonarr"]);
+    }
+
+    // --- exactly (design §39) ---------------------------------------------
+
+    /// The same spec with `exactly` on, and Sonarr dropped from it, so the
+    /// recorded Sonarr connection is the surplus.
+    fn only_radarr(exactly: bool) -> Connections {
+        let mut task = host_connections("<masked>");
+        task.connections.remove(1);
+        task.exactly = exactly;
+        task
+    }
+
+    #[test]
+    fn without_exactly_a_surplus_is_named_nowhere_and_removed_nowhere() {
+        let task = only_radarr(false);
+        let t = connections_transport(CONNECTIONS_JSON).on_delete(vec![Step::Answer(
+            200,
+            r#""Connection Deleted Successfully!""#.into(),
+        )]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.surplus(&current).unwrap(), Vec::<String>::new());
+        task.remove(&t, &current).unwrap();
+        assert!(t.deleted.borrow().is_empty());
+        // It stays the note it has always been.
+        assert_eq!(task.notes(&current), ["not in the spec: connection Sonarr"]);
+    }
+
+    #[test]
+    fn with_exactly_a_surplus_connection_is_a_removal_and_no_longer_a_note() {
+        let task = only_radarr(true);
+        let t = connections_transport(CONNECTIONS_JSON);
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.surplus(&current).unwrap(), ["connection Sonarr"]);
+        assert_eq!(task.notes(&current), Vec::<String>::new());
+    }
+
+    #[test]
+    fn plan_says_present_removed_and_apply_deletes_before_it_writes() {
+        let task = only_radarr(true);
+        // Radarr's URL differs too, so there is a write to come after.
+        let mut task = task;
+        task.connections[0]
+            .set
+            .insert("url".to_string(), json!("http://10.0.20.11:7878"));
+        let after: Value = {
+            let mut v: Value = serde_json::from_str(CONNECTIONS_JSON).unwrap();
+            let list = v.as_array_mut().unwrap();
+            list.retain(|c| c["name"] != "Sonarr");
+            list[0]["url"] = json!("http://10.0.20.11:7878");
+            v
+        };
+        let t = FakeTransport::default()
+            .on_get(SETTINGS.path, vec![ok(SETTINGS_JSON)])
+            .on_get(
+                CONNECTIONS.path,
+                vec![ok(CONNECTIONS_JSON), ok(&after.to_string())],
+            )
+            .on_put(vec![Step::Answer(
+                200,
+                r#""Connection Updated Successfully!""#.into(),
+            )])
+            .on_delete(vec![Step::Answer(
+                200,
+                r#""Connection Deleted Successfully!""#.into(),
+            )]);
+
+        let plan = run(
+            Mode::Plan,
+            &task,
+            &t,
+            &crate::testing::FakeClock::new(),
+            crate::engine::Timing::default(),
+        )
+        .unwrap();
+        match plan.outcome {
+            crate::engine::Outcome::Differs(changes) => assert_eq!(
+                changes[0].to_string(),
+                "connection Sonarr: (present) -> (removed)"
+            ),
+            other => panic!("expected Differs, got {other:?}"),
+        }
+        assert!(t.deleted.borrow().is_empty(), "plan removes nothing");
+
+        let t = FakeTransport::default()
+            .on_get(SETTINGS.path, vec![ok(SETTINGS_JSON)])
+            .on_get(
+                CONNECTIONS.path,
+                vec![ok(CONNECTIONS_JSON), ok(&after.to_string())],
+            )
+            .on_put(vec![Step::Answer(
+                200,
+                r#""Connection Updated Successfully!""#.into(),
+            )])
+            .on_delete(vec![Step::Answer(
+                200,
+                r#""Connection Deleted Successfully!""#.into(),
+            )]);
+        run(
+            Mode::Apply,
+            &task,
+            &t,
+            &crate::testing::FakeClock::new(),
+            crate::engine::Timing::default(),
+        )
+        .unwrap();
+        // Sonarr has id 2 in the recording.
+        assert_eq!(t.deleted.borrow().as_slice(), ["/api/v1/connections/2"]);
+        let calls = t.calls.borrow();
+        assert_eq!(calls[0], ("DELETE", "/api/v1/connections/2".to_string()));
+        assert_eq!(calls[1].0, "PUT", "{calls:?}");
+    }
+
+    /// Trailarr answers with the keys of the services it connects to, so no
+    /// part of a body may reach an error -- only the connection's name.
+    #[test]
+    fn a_refused_removal_names_the_connection_and_nothing_from_the_body() {
+        let task = only_radarr(true);
+        let t = connections_transport(CONNECTIONS_JSON).on_delete(vec![Step::Answer(
+            409,
+            r#"{"detail":"ERFUNDENER-SCHLUESSEL-XYZ"}"#.into(),
+        )]);
+        let current = task.read(&t).unwrap();
+        let err = task.remove(&t, &current).err().unwrap().to_string();
+        assert_eq!(
+            err,
+            "DELETE /api/v1/connections/2 answered HTTP 409: connection Sonarr was not removed"
+        );
+        assert!(!err.contains("ERFUNDENER"), "{err}");
     }
 
     #[test]

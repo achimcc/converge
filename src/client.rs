@@ -15,6 +15,9 @@ pub trait Transport {
     fn post_json(&self, path: &str, body: &str) -> Result<Reply, Error>;
     /// Audiobookshelf's settings take a partial body (design §27).
     fn patch_json(&self, path: &str, body: &str) -> Result<Reply, Error>;
+    /// Removes one entry. Only a task with `exactly` sends this, and only
+    /// for an entry `Task::surplus` named (design §39).
+    fn delete(&self, path: &str) -> Result<Reply, Error>;
 }
 
 pub struct HttpTransport {
@@ -191,6 +194,15 @@ impl Transport for HttpTransport {
             .content_type("application/json")
             .send(body);
         Self::finish("PATCH", path, result)
+    }
+
+    /// No body, and no redirect is followed: a 3xx comes back as a status
+    /// the caller refuses, as for the other writes.
+    fn delete(&self, path: &str) -> Result<Reply, Error> {
+        let result = self
+            .headers(self.agent.delete(format!("{}{path}", self.base_url)))
+            .call();
+        Self::finish("DELETE", path, result)
     }
 }
 

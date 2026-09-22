@@ -75,6 +75,43 @@ pub trait Task {
     ) -> Result<Vec<String>, Error> {
         Ok(Vec::new())
     }
+
+    /// The subjects `remove` would take away: entries of the reconciled
+    /// collection the spec does not name. Empty unless the spec says
+    /// `"exactly": true`, and empty for every task that cannot delete
+    /// (design §39) -- so by default converge removes nothing.
+    ///
+    /// A task's guard against a removal it should not make (half the list,
+    /// a writer that has not run yet) belongs here, not in `remove`: this
+    /// runs in `plan` as well, and before anything is written.
+    fn surplus(&self, _current: &Self::Current) -> Result<Vec<String>, Error> {
+        Ok(Vec::new())
+    }
+
+    /// Takes the surplus away. `apply` calls this **before** `write`, and a
+    /// failure here stops the run before a single write goes out.
+    fn remove(&self, _t: &dyn Transport, _current: &Self::Current) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+/// A surplus subject as a change line: `station WDR 2: (present) -> (removed)`,
+/// the counterpart of the `(missing) -> (added)` a list task prints.
+fn removal(subject: &str) -> Change {
+    Change {
+        subject: subject.to_string(),
+        field: String::new(),
+        current: "(present)".to_string(),
+        desired: "(removed)".to_string(),
+    }
+}
+
+/// What a run would do: first what it would take away, then what it would
+/// set. An empty result is an unchanged service.
+fn pending<T: Task>(task: &T, current: &T::Current) -> Result<Vec<Change>, Error> {
+    let mut changes: Vec<Change> = task.surplus(current)?.iter().map(|s| removal(s)).collect();
+    changes.extend(task.diff(current)?);
+    Ok(changes)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -132,7 +169,7 @@ pub fn run<T: Task>(
     let version = wait_ready(task, t, clock, timing, start)?;
     let current = task.read(t)?;
     let notes = task.notes(&current);
-    let changes = task.diff(&current)?;
+    let changes = pending(task, &current)?;
     if changes.is_empty() {
         let handed_over = match mode {
             Mode::Apply => task.hand_over(t, &current)?,
@@ -153,12 +190,18 @@ pub fn run<T: Task>(
             handed_over: Vec::new(),
         });
     }
+    // Removal first. A Koel station renamed in the spec but keeping its URL
+    // is a removal and an addition; the other way round the addition would
+    // be a `POST` the service refuses, the URL still being taken (§39).
+    task.remove(t, &current)?;
     task.write(t, &current)?;
     let written = clock.now();
     loop {
-        // An accepted write is not a saved one: ask for the content.
+        // An accepted write is not a saved one: ask for the content. An
+        // accepted removal is not a finished one either -- `surplus` has to
+        // come back empty as well.
         let now = task.read(t)?;
-        let remaining = task.diff(&now)?;
+        let remaining = pending(task, &now)?;
         if remaining.is_empty() {
             // Handed over against what was read back, so an entry the write
             // just added gets its hidden values too.
@@ -432,6 +475,191 @@ mod tests {
             inner: task(desired),
             handed: std::cell::RefCell::new(Vec::new()),
         }
+    }
+
+    /// A task with a surplus: it names entries the spec does not, removes
+    /// them with one `DELETE`, and -- unless `keeps_them` -- the service
+    /// stops listing them afterwards.
+    struct Removing {
+        inner: QualityDefinitions,
+        surplus: Vec<String>,
+        keeps_them: bool,
+        removed: std::cell::Cell<bool>,
+    }
+
+    impl Task for Removing {
+        type Current = Vec<crate::services::arr::QualityDefinitionResource>;
+        fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+            self.inner.probe(t)
+        }
+        fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+            self.inner.read(t)
+        }
+        fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+            self.inner.diff(current)
+        }
+        fn notes(&self, current: &Self::Current) -> Vec<String> {
+            self.inner.notes(current)
+        }
+        /// Like the three tasks that can remove: only what differs is
+        /// written, so a run with nothing but a surplus writes nothing.
+        /// (`QualityDefinitions` itself always sends the whole list.)
+        fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+            if self.inner.diff(current)?.is_empty() {
+                return Ok(());
+            }
+            self.inner.write(t, current)
+        }
+        fn surplus(&self, _current: &Self::Current) -> Result<Vec<String>, Error> {
+            if self.removed.get() && !self.keeps_them {
+                return Ok(Vec::new());
+            }
+            Ok(self.surplus.clone())
+        }
+        fn remove(&self, t: &dyn Transport, _current: &Self::Current) -> Result<(), Error> {
+            for name in &self.surplus {
+                let path = format!("/api/v3/qualitydefinition/{name}");
+                let reply = t.delete(&path)?;
+                crate::client::expect_status_at("DELETE", &path, &reply, &[200, 204])?;
+            }
+            self.removed.set(true);
+            Ok(())
+        }
+    }
+
+    fn removing(desired: &str, surplus: &[&str], keeps_them: bool) -> Removing {
+        Removing {
+            inner: task(desired),
+            surplus: surplus.iter().map(ToString::to_string).collect(),
+            keeps_them,
+            removed: std::cell::Cell::new(false),
+        }
+    }
+
+    #[test]
+    fn plan_names_a_surplus_as_a_change_and_removes_nothing() {
+        let t = up().on_get(QUALITY_LIST.path, vec![ok(LIST)]);
+        let report = run(
+            Mode::Plan,
+            &removing(DESIRED, &["Raw-HD"], false),
+            &t,
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .unwrap();
+        match report.outcome {
+            Outcome::Differs(changes) => {
+                assert_eq!(changes.len(), 1);
+                assert_eq!(changes[0].to_string(), "Raw-HD: (present) -> (removed)");
+            }
+            other => panic!("expected Differs, got {other:?}"),
+        }
+        assert!(t.deleted.borrow().is_empty(), "plan removes nothing");
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn apply_removes_before_it_writes() {
+        let new = list_with_bluray_min(35.0);
+        let t = up()
+            .on_get(QUALITY_LIST.path, vec![ok(LIST), ok(&new)])
+            .on_put(vec![Step::Answer(202, String::new())])
+            .on_delete(vec![Step::Answer(204, String::new())]);
+        let report = run(
+            Mode::Apply,
+            &removing(&desired_with_bluray_min(35.0), &["Raw-HD"], false),
+            &t,
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .unwrap();
+        match report.outcome {
+            // The removal first, then the field that differs.
+            Outcome::Changed(changes) => {
+                assert_eq!(changes.len(), 2);
+                assert_eq!(changes[0].to_string(), "Raw-HD: (present) -> (removed)");
+                assert_eq!(changes[1].to_string(), "Bluray-1080p: min 12.5 -> 35");
+            }
+            other => panic!("expected Changed, got {other:?}"),
+        }
+        let calls = t.calls.borrow();
+        assert_eq!(calls[0].0, "DELETE", "{calls:?}");
+        assert_eq!(calls[1].0, "PUT", "{calls:?}");
+        assert_eq!(calls.len(), 2, "{calls:?}");
+    }
+
+    #[test]
+    fn a_surplus_alone_is_enough_to_act_and_nothing_is_unchanged() {
+        let t = up()
+            .on_get(QUALITY_LIST.path, vec![ok(LIST)])
+            .on_delete(vec![Step::Answer(204, String::new())]);
+        let report = run(
+            Mode::Apply,
+            &removing(DESIRED, &["Raw-HD"], false),
+            &t,
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .unwrap();
+        assert!(matches!(report.outcome, Outcome::Changed(ref c) if c.len() == 1));
+        assert_eq!(t.deleted.borrow().len(), 1);
+        assert!(t.written.borrow().is_empty(), "nothing to write");
+    }
+
+    #[test]
+    fn an_entry_still_there_after_its_removal_is_not_confirmed() {
+        let t = up()
+            .on_get(QUALITY_LIST.path, vec![ok(LIST)])
+            .on_delete(vec![Step::Answer(204, String::new())]);
+        let err = run(
+            Mode::Apply,
+            &removing(DESIRED, &["Raw-HD"], true),
+            &t,
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert_eq!(
+            err,
+            "written, but after 60 s these still differ: Raw-HD: (present) -> (removed)"
+        );
+    }
+
+    #[test]
+    fn a_refused_removal_stops_the_run_before_anything_is_written() {
+        let t = up()
+            .on_get(QUALITY_LIST.path, vec![ok(LIST)])
+            .on_put(vec![Step::Answer(202, String::new())])
+            .on_delete(vec![Step::Answer(409, String::new())]);
+        let err = run(
+            Mode::Apply,
+            &removing(&desired_with_bluray_min(35.0), &["Raw-HD"], false),
+            &t,
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(err.contains("409"), "{err}");
+        assert!(t.written.borrow().is_empty(), "nothing written");
+    }
+
+    #[test]
+    fn without_a_surplus_and_without_a_diff_it_stays_unchanged() {
+        let t = up().on_get(QUALITY_LIST.path, vec![ok(LIST)]);
+        let report = run(
+            Mode::Apply,
+            &removing(DESIRED, &[], false),
+            &t,
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .unwrap();
+        assert_eq!(report.outcome, Outcome::Unchanged);
+        assert!(t.deleted.borrow().is_empty());
     }
 
     #[test]

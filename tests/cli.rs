@@ -58,7 +58,7 @@ fn schema_check_passes_for_the_vendored_file() {
     // Exit 0 alone would also pass for a program that does nothing.
     assert!(
         String::from_utf8_lossy(&out.stdout)
-            .contains("radarr: 25 endpoints and their wire types match"),
+            .contains("radarr: 26 endpoints and their wire types match"),
         "{}",
         String::from_utf8_lossy(&out.stdout)
     );
@@ -504,7 +504,7 @@ fn schema_check_passes_the_hosts_trailarr_specs_and_rejects_monitor() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("trailarr: 6 endpoints and their wire types match"),
+        stdout.contains("trailarr: 7 endpoints and their wire types match"),
         "{stdout}"
     );
     assert!(
@@ -1012,6 +1012,72 @@ fn trailarr_connections_plan_over_http_sends_the_key_as_x_api_key() {
     );
     let headers = server.requests()[0].headers.to_ascii_lowercase();
     assert!(headers.contains("x-api-key: trailarr-key"), "{headers}");
+}
+
+/// The whole way from the spec's `"exactly": true` to the line a plan
+/// prints, over HTTP -- and the same spec without the switch, which says the
+/// connection is left alone (design §39).
+#[test]
+fn exactly_turns_a_connection_outside_the_spec_into_a_removal_in_the_plan() {
+    const SETTINGS: &str =
+        include_str!("fixtures/trailarr-0.11.5/constructed-settings-version-only.json");
+    const CONNECTIONS: &str = include_str!("fixtures/trailarr-0.11.5/connections.json");
+    // The spec names Radarr alone; the recording also holds Sonarr.
+    let only_radarr = r#"{"connections":{"Radarr":{"set":{"arr_type":"radarr","url":"http://127.0.0.1:7878","monitor_new_media":true,"external_url":"","path_mappings":[]},"api_key_credential":"radarr-api-key"}}}"#;
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("trailarr-api-key"), "trailarr-key\n").unwrap();
+    std::fs::write(dir.path().join("radarr-api-key"), "<masked>\n").unwrap();
+
+    for (exactly, expected_code) in [(true, 2), (false, 0)] {
+        let server = Server::start(vec![
+            ("GET", "/api/v1/settings/", 200, SETTINGS.into()),
+            ("GET", "/api/v1/connections/", 200, CONNECTIONS.into()),
+        ]);
+        let path = dir.path().join(format!("exactly-{exactly}.json"));
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"service":"trailarr","base_url":"{}","api_key_credential":"trailarr-api-key","task":"connections","exactly":{exactly},"desired":{only_radarr}}}"#,
+                server.base_url()
+            ),
+        )
+        .unwrap();
+        let out = converge()
+            .arg("plan")
+            .arg(&path)
+            .env("CREDENTIALS_DIRECTORY", dir.path())
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(
+            out.status.code(),
+            Some(expected_code),
+            "{stdout}{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        if exactly {
+            assert!(
+                stdout.contains(
+                    "trailarr connections: would change connection Sonarr: (present) -> (removed)"
+                ),
+                "{stdout}"
+            );
+            assert!(stdout.contains("1 field(s) differ"), "{stdout}");
+        } else {
+            assert!(
+                stdout.contains("trailarr connections: note: not in the spec: connection Sonarr"),
+                "{stdout}"
+            );
+            assert!(
+                stdout.contains("trailarr connections: unchanged"),
+                "{stdout}"
+            );
+            assert!(!stdout.contains("removed"), "{stdout}");
+        }
+        // Neither run sends anything but the two reads.
+        assert_eq!(server.requests().len(), 2, "{stdout}");
+    }
 }
 
 #[test]

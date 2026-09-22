@@ -43,6 +43,11 @@ pub enum Error {
     NotFound(Vec<String>),
     #[error("the spec does not fit the service: {}", .0.join("; "))]
     Mismatch(Vec<String>),
+    /// Entries the service refused to delete (design §39): each by name and
+    /// with the status it answered -- never anything from its body. The
+    /// removals after it were still tried.
+    #[error("not removed: {}", .0.join("; "))]
+    NotRemoved(Vec<String>),
     #[error("the service does not know these qualities from the spec: {}", .0.join(", "))]
     UnknownQualities(Vec<String>),
     #[error("written, but after {waited_secs} s these still differ: {}", .remaining.join("; "))]

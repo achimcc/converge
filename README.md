@@ -28,7 +28,7 @@ or an OpenTofu resource on the host it was written for:
 | service | task | desired state |
 |---|---|---|
 | Radarr, Sonarr | `quality-definitions` | size limits (MB per minute) per quality |
-| Radarr, Sonarr | `quality-profiles` | qualities every profile must allow |
+| Radarr, Sonarr | `quality-profiles` | qualities every profile must allow; with `exactly` and `keep`, the profiles that survive -- every other one is removed once all of them are there |
 | Radarr, Sonarr, Lidarr | `naming`, `media-management` | top-level fields of the configuration document |
 | Radarr, Sonarr, Lidarr | `download-client-config` | the same for `config/downloadclient` -- among them the switch every import hangs on |
 | Radarr, Sonarr, Lidarr | `indexer-config` | the same for `config/indexer`: retention, minimum age, maximum size, RSS interval. Only Radarr carries the four extra fields |
@@ -42,7 +42,7 @@ or an OpenTofu resource on the host it was written for:
 | Jellyfin | `library-options` | fields of the named libraries' `LibraryOptions`, by path |
 | Jellyfin | `scheduled-task-triggers` | the trigger list of tasks whose key starts with a prefix |
 | Jellyfin | `plugin-configurations` | fields of plugin configurations by path, keys from credentials, entries of shared lists by key, library ids by library name |
-| Trailarr | `connections` | connections to Radarr and Sonarr by name: top-level fields, key from a credential; missing ones are added |
+| Trailarr | `connections` | connections to Radarr and Sonarr by name: top-level fields, key from a credential; missing ones are added, and with `exactly` the ones the spec does not name are removed |
 | Trailarr | `trailer-profiles` | fields every trailer profile gets |
 | bindery | `download-clients`, `prowlarr-instances` | entries by name: top-level fields; secrets from credentials handed over on every `apply` in a `PUT` with only the secret (bindery answers them empty) |
 | bindery | `root-folders`, `settings` | root folders by path (added when missing); settings by key |
@@ -53,7 +53,7 @@ or an OpenTofu resource on the host it was written for:
 | Seerr | `jellyfin` | the link to Jellyfin (key from a credential, compared) and the libraries Seerr scans, by name -- exactly these |
 | Seerr | `radarr-servers`, `sonarr-servers` | entries by name: top-level fields, key from a credential; quality profile and root folder by name, resolved through Seerr's connection test; missing entries are added |
 | Seerr | `webhook` | the webhook agent: fields by path, the payload template as an object (stored the way the agent parses it), header values from credentials |
-| Koel | `radio-stations` | the account's own stations by name (refused while its `include_public_media` is on), every field written whole; a logo from an image file (at most 2 MiB), sent only where a station has none; missing stations are added |
+| Koel | `radio-stations` | the account's own stations by name (refused while its `include_public_media` is on), every field written whole; a logo from an image file (at most 2 MiB), sent only where a station has none; missing stations are added, and with `exactly` the account's other ones are removed -- never half the list or more |
 | Kavita | `server-settings` | fields of `ServerSettingDto`, by path -- among them the OIDC switches. The key is an auth key of an administrator in `x-api-key`. What the host writes into `appsettings.json` (authority, client id, secret, scopes, port, addresses, base URL, cache size), the SMTP password and Kavita's own install fields are refused |
 | Kavita | `libraries` | libraries by a folder they hold: fields of the update, written whole; a change of `type` is followed by a forced scan. converge does not create libraries |
 | Audiobookshelf | `auth-settings` | the authentication settings by name, `PATCH`ed key by key; the OIDC client secret from a credential, compared without being shown. `""` and `null` are one value, as Audiobookshelf treats them (except the redirect subfolder) |
@@ -87,8 +87,9 @@ instead of being ignored. The key itself is read from the systemd credential
 named in `api_key_credential` (`$CREDENTIALS_DIRECTORY/<name>`). Qualities the
 spec does not name are left as they are.
 
-A `quality-profiles` spec only allows, it never takes a quality away, and it
-only touches rungs that already exist at the top level of a profile's ladder:
+A `quality-profiles` spec only allows, it never takes a quality away from a
+profile, and it only touches rungs that already exist at the top level of a
+profile's ladder (whole profiles it can remove — see `exactly` below):
 
 ```json
 {
@@ -244,6 +245,61 @@ holds a bearer token of an account that is an administrator — the probe
   "api_key_credential": "authentik-converge-token",
   "task": "settings",
   "desired": { "set": { "impersonation": false, "reputation_lower_limit": -10 } }
+}
+```
+
+## Deleting things: `exactly`
+
+**By default converge removes nothing.** An entry the spec does not name is a
+note (`not in the spec: connection Lidarr`) and stays. `"exactly": true`, next
+to `task` and `desired`, says the opposite for that one spec: *this spec names
+the whole collection, take the rest away*. It is opt-in per spec, never a
+default, and shows up in `plan` before it happens:
+
+```
+trailarr connections: would change connection Lidarr: (present) -> (removed)
+trailarr connections: 1 field(s) differ
+```
+
+Three tasks take it — `connections` (Trailarr), `radio-stations` (Koel) and
+`quality-profiles` (Radarr, Sonarr). Every other task refuses the switch
+(`task quality-definitions does not support exactly`) rather than accepting
+one that would do nothing. `"exactly": false` is what every task already
+means and is always allowed.
+
+Within a run the removals come **first**, then the writes: a Koel station
+renamed in the spec but keeping its URL is a removal and an addition, and the
+other way round Koel would refuse the addition, the URL still being taken.
+Afterwards converge reads back until the surplus is gone *and* nothing
+differs — an accepted `DELETE` is no more a finished one than an accepted
+write is a saved one.
+
+Each task guards its own removals, and each guard fails in `plan` too, before
+a single `DELETE`:
+
+- **Koel** never removes half its account's stations or more. A station is
+  found by a name somebody typed; one different Unicode normalisation and
+  every station would look like a surplus.
+- **`quality-profiles`** needs `desired.keep`, the profiles that survive —
+  required with `exactly`, an error without it, and never empty. Nothing is
+  removed until **every** kept profile is there: on the host that means
+  Recyclarr has run, and if it has not, "the rest" is everything.
+- A **profile a film or a series still hangs on** is refused by the service.
+  That is reported by name (`not removed: profile Anime (HTTP 409, still in
+  use?)`), never forced; the other removals are still tried and the run ends
+  red with every name the service kept.
+
+```json
+{
+  "service": "radarr",
+  "base_url": "http://localhost:7878",
+  "api_key_credential": "radarr-api-key",
+  "task": "quality-profiles",
+  "exactly": true,
+  "desired": {
+    "allow_in_every_profile": ["Unknown"],
+    "keep": ["Dual Language, sonst Deutsch (1080p)", "Rarität, Originalsprache (auch SD)"]
+  }
 }
 ```
 

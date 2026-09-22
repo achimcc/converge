@@ -158,6 +158,9 @@ fn reconcile_one(
         Desired::QualityProfiles(policy) => {
             let task = arr::QualityProfiles {
                 allow_in_every_profile: policy.allow_in_every_profile.clone(),
+                // `keep` and `"exactly": true` come as a pair or not at all;
+                // the spec parser refuses either alone (design §39).
+                keep: policy.keep.clone(),
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
@@ -305,7 +308,10 @@ fn reconcile_one(
                         .map_err(fail)?,
                 });
             }
-            let task = trailarr::Connections { connections };
+            let task = trailarr::Connections {
+                connections,
+                exactly: spec.exactly,
+            };
             run(mode, &task, &transport, &SystemClock, timing)
         }
         Desired::TrailerProfiles(settings) => {
@@ -440,7 +446,10 @@ fn reconcile_one(
                     logo,
                 });
             }
-            let task = koel::RadioStations { stations: targets };
+            let task = koel::RadioStations {
+                stations: targets,
+                exactly: spec.exactly,
+            };
             run(mode, &task, &transport, &SystemClock, timing)
         }
         Desired::BinderySettings(set) => {

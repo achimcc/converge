@@ -29,6 +29,15 @@ pub const PROFILE_UPDATE: Endpoint = Endpoint {
     request: Some(Shape::One("QualityProfileResource")),
     response: None,
 };
+/// Only with `"exactly": true` and `desired.keep` (design §39). The
+/// description lists 200; a profile a film or a series still uses is
+/// refused with a 4xx, which is reported and never forced.
+pub const PROFILE_DELETE: Endpoint = Endpoint {
+    method: "DELETE",
+    path: "/api/v3/qualityprofile/{id}",
+    request: None,
+    response: None,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct QualityProfileResource {
@@ -57,10 +66,18 @@ pub struct QualityProfileQualityItemResource {
 
 pub struct QualityProfiles {
     pub allow_in_every_profile: Vec<String>,
+    /// With `"exactly": true`: the profiles that survive, every other one is
+    /// removed (design §39). `None` is the ordinary spec, which removes
+    /// nothing -- the spec parser lets the two appear only together.
+    pub keep: Option<Vec<String>>,
 }
 
 fn profile_name(profile: &QualityProfileResource) -> &str {
     profile.name.as_deref().unwrap_or("?")
+}
+
+fn subject(profile: &QualityProfileResource) -> String {
+    format!("profile {}", profile_name(profile))
 }
 
 /// The top-level item of `quality` in `profile`, if there is one.
@@ -77,6 +94,16 @@ fn top_level<'a>(
 }
 
 impl QualityProfiles {
+    /// Is this profile on its way out? Such a profile is left out of `diff`
+    /// and of `write`: it need not allow the spec's qualities to be deleted,
+    /// and a `PUT` to it would race its own `DELETE`.
+    fn is_surplus(&self, profile: &QualityProfileResource) -> bool {
+        match &self.keep {
+            None => false,
+            Some(keep) => !keep.iter().any(|k| k == profile_name(profile)),
+        }
+    }
+
     /// The profile as it should be, or `None` if it already is.
     fn corrected(&self, profile: &QualityProfileResource) -> Option<QualityProfileResource> {
         let mut fixed = profile.clone();
@@ -123,6 +150,9 @@ impl Task for QualityProfiles {
         let mut missing = Vec::new();
         let mut changes = Vec::new();
         for profile in current {
+            if self.is_surplus(profile) {
+                continue;
+            }
             for quality in &self.allow_in_every_profile {
                 match top_level(profile, quality) {
                     None => missing.push(format!("{}: {quality}", profile_name(profile))),
@@ -148,8 +178,70 @@ impl Task for QualityProfiles {
         Vec::new()
     }
 
+    /// The profiles `keep` does not name -- but only once every kept profile
+    /// is there.
+    ///
+    /// On the host this was written for, Recyclarr writes the profiles from
+    /// TRaSH's templates and converge takes the rest away. A kept profile
+    /// that is missing means Recyclarr has not run (or was renamed), and
+    /// removing "the rest" would then empty the service. So a missing one
+    /// is an error, in `plan` too, and before a single `DELETE`.
+    fn surplus(&self, current: &Self::Current) -> Result<Vec<String>, Error> {
+        let Some(keep) = &self.keep else {
+            return Ok(Vec::new());
+        };
+        let present = keep
+            .iter()
+            .filter(|k| current.iter().any(|p| profile_name(p) == k.as_str()))
+            .count();
+        if present < keep.len() {
+            return Err(Error::Refused(format!(
+                "{present} of {} kept profiles present -- has the profile writer run yet? \
+                 nothing removed",
+                keep.len()
+            )));
+        }
+        Ok(current
+            .iter()
+            .filter(|p| self.is_surplus(p))
+            .map(subject)
+            .collect())
+    }
+
+    /// One `DELETE` per surplus profile. A profile films or series still
+    /// hang on is refused by the service with a 4xx; converge reports that
+    /// and does not force it -- so the removals after it are still tried,
+    /// and the run ends with every name the service kept.
+    fn remove(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        if self.keep.is_none() {
+            return Ok(());
+        }
+        // Nothing is removed while a kept profile is missing.
+        self.surplus(current)?;
+        let mut refused = Vec::new();
+        for profile in current.iter().filter(|p| self.is_surplus(p)) {
+            let path = PROFILE_DELETE.path.replace("{id}", &profile.id.to_string());
+            let reply = t.delete(&path)?;
+            if ![200, 202].contains(&reply.status) {
+                refused.push(format!(
+                    "{} (HTTP {}, still in use?)",
+                    subject(profile),
+                    reply.status
+                ));
+            }
+        }
+        if refused.is_empty() {
+            Ok(())
+        } else {
+            Err(Error::NotRemoved(refused))
+        }
+    }
+
     fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
         for profile in current {
+            if self.is_surplus(profile) {
+                continue;
+            }
             let Some(fixed) = self.corrected(profile) else {
                 continue;
             };
@@ -182,6 +274,7 @@ mod tests {
     fn task() -> QualityProfiles {
         QualityProfiles {
             allow_in_every_profile: vec!["Unknown".to_string()],
+            keep: None,
         }
     }
 
@@ -274,6 +367,127 @@ mod tests {
         // Byte-for-byte the recorded profile: Unknown back on, groups still
         // without a `quality` key, `language` and scores untouched.
         assert_eq!(sent, expected);
+    }
+
+    // --- exactly (design §39) ---------------------------------------------
+
+    const KEPT: [&str; 2] = [
+        "Dual Language, sonst Deutsch (1080p)",
+        "Rarität, Originalsprache (auch SD)",
+    ];
+
+    fn keeping(names: &[&str]) -> QualityProfiles {
+        QualityProfiles {
+            allow_in_every_profile: vec!["Unknown".to_string()],
+            keep: Some(names.iter().map(ToString::to_string).collect()),
+        }
+    }
+
+    #[test]
+    fn without_keep_nothing_is_a_surplus_and_nothing_is_removed() {
+        let t = listing(RADARR).on_delete(vec![Step::Answer(200, String::new())]);
+        let current = task().read(&t).unwrap();
+        assert_eq!(task().surplus(&current).unwrap(), Vec::<String>::new());
+        task().remove(&t, &current).unwrap();
+        assert!(t.deleted.borrow().is_empty());
+    }
+
+    #[test]
+    fn with_keep_every_other_profile_is_a_removal() {
+        let t = listing(RADARR);
+        let task = keeping(&KEPT);
+        let current = task.read(&t).unwrap();
+        assert_eq!(
+            task.surplus(&current).unwrap(),
+            [
+                "profile Dual Language, sonst Deutsch (4K, sonst 1080p)",
+                "profile Dual Language, sonst Originalsprache (1080p)",
+                "profile Dual Language, sonst Originalsprache (4K, sonst 1080p)",
+            ]
+        );
+        // Ids 8, 9 and 10 of the recording.
+        let t = listing(RADARR).on_delete(vec![Step::Answer(200, String::new())]);
+        let current = task.read(&t).unwrap();
+        task.remove(&t, &current).unwrap();
+        assert_eq!(
+            t.deleted.borrow().as_slice(),
+            [
+                "/api/v3/qualityprofile/8",
+                "/api/v3/qualityprofile/9",
+                "/api/v3/qualityprofile/10"
+            ]
+        );
+    }
+
+    /// On the host Recyclarr writes the profiles and converge removes the
+    /// rest. If Recyclarr has not run, everything converge keeps is missing
+    /// -- and removing the rest would empty the service.
+    #[test]
+    fn a_kept_profile_the_service_lacks_refuses_before_anything_is_removed() {
+        let task = keeping(&["Dual Language, sonst Deutsch (1080p)", "Anime"]);
+        let t = listing(RADARR).on_delete(vec![Step::Answer(200, String::new())]);
+        let current = task.read(&t).unwrap();
+        let err = task.surplus(&current).err().unwrap().to_string();
+        assert_eq!(
+            err,
+            "refused: 1 of 2 kept profiles present -- has the profile writer run yet? nothing removed"
+        );
+        assert!(task.remove(&t, &current).is_err());
+        assert!(t.deleted.borrow().is_empty());
+    }
+
+    /// A profile a film or a series still hangs on cannot be deleted, and
+    /// the *arr says so with a 4xx. That is reported, not forced -- and the
+    /// other removals are still tried.
+    #[test]
+    fn a_profile_still_in_use_is_reported_by_name_and_the_others_are_still_tried() {
+        let task = keeping(&KEPT);
+        let t = listing(RADARR).on_delete(vec![
+            Step::Answer(409, "boom".into()),
+            Step::Answer(200, String::new()),
+            Step::Answer(400, "boom".into()),
+        ]);
+        let current = task.read(&t).unwrap();
+        let err = task.remove(&t, &current).err().unwrap().to_string();
+        assert_eq!(
+            err,
+            "not removed: profile Dual Language, sonst Deutsch (4K, sonst 1080p) \
+             (HTTP 409, still in use?); \
+             profile Dual Language, sonst Originalsprache (4K, sonst 1080p) \
+             (HTTP 400, still in use?)"
+        );
+        assert_eq!(t.deleted.borrow().len(), 3, "all three were tried");
+    }
+
+    /// A profile on its way out is not measured against the spec, and not
+    /// written: it need not allow `Unknown` to be deleted.
+    #[test]
+    fn a_profile_being_removed_is_neither_checked_nor_written() {
+        let body = with_unknown_off(RADARR, 9);
+        let mut list: Value = serde_json::from_str(&body).unwrap();
+        for profile in list.as_array_mut().unwrap() {
+            if profile["id"] == 9 {
+                profile["items"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|item| item["quality"]["name"] != "Unknown");
+            }
+        }
+        let body = list.to_string();
+        // Without `keep` the missing rung of profile 9 is an error.
+        let t = listing(&body);
+        let current = task().read(&t).unwrap();
+        assert!(task().diff(&current).is_err());
+
+        let task = keeping(&KEPT);
+        let t = listing(&body)
+            .on_put(vec![Step::Answer(202, String::new())])
+            .on_delete(vec![Step::Answer(200, String::new())]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+        task.remove(&t, &current).unwrap();
+        task.write(&t, &current).unwrap();
+        assert!(t.written.borrow().is_empty(), "{:?}", t.written.borrow());
     }
 
     #[test]

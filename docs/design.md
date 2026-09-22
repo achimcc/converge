@@ -472,7 +472,8 @@ wire type's untagged enum must name the same three types.
   Trailarr has no connections, and every connection the spec names then shows
   up as a change, so the comparison is never over an empty set.
 - Connections the spec does not name are a note (`not in the spec:
-  connection Lidarr`) and are never touched. Nothing is deleted.
+  connection Lidarr`) and are never touched -- unless the spec says
+  `"exactly": true`, and then they are removed instead (§39, v0.36.0).
 - Writes answer `201` with a string; `200` is accepted too.
 
 ### Trailer profiles
@@ -1177,11 +1178,15 @@ file is about 2.7 MiB of body — inside PHP's stock `post_max_size` (8 MiB)
 and nginx's NixOS default `client_max_body_size` (10 MiB), which a Koel host
 may keep.
 
-### No deletion, no description
+### Deletion only on request, and no description
 
-A station removed from the spec stays, like every other entry (§19);
-removing the account's own stations that the spec no longer names is the
-host's job, where the owner is known — the API answer does not name one.
+A station removed from the spec stays, like every other entry (§19) — until
+v0.36.0, where a spec may say `"exactly": true` and the account's other
+stations are removed, never half the list or more (§39). Until then this was
+the host's job, on the grounds that the API answer names no owner and only the
+host knew whose a station was. What made it converge's after all is the
+preference above: with `include_public_media` off, every station in the list
+*is* the account's own, and nothing else can be reached.
 `api-docs/api.yaml` in Koel's package still says 5.1.0 and knows neither
 radio stations nor this route, so `schema-check --service koel` validates
 the specs only, as for ntfy, bindery and Seerr. The field names come from
@@ -1964,12 +1969,151 @@ answer and at runtime. 403 says the token's account is no administrator, 401
 that the token was refused, and no error and no change carries anything from a
 body.
 
+## 39. Deleting, on request: `exactly` (v0.36.0, 2026-09-22)
+
+Until this version converge removed nothing, and that was a decision with a
+cost. The host it was written for still carried three shell remnants whose
+only job was deleting: one that dropped Trailarr connections, one that removed
+Koel's radio stations, one that cleaned up the quality profiles Recyclarr no
+longer wrote. Three languages, three ways of naming the same thing, and not
+one of them had a `plan` mode -- the only way to learn what such a script
+would take away was to let it run.
+
+**The switch is `"exactly": true`,** on the top level of a spec, next to
+`service`, `task` and `desired`. It says: this spec names the whole
+collection; every entry of it the spec does not name is removed. Without it
+nothing changes -- the default is `false`, `false` may be written out, and an
+entry outside the spec stays the note it has always been.
+
+Decided with the host's owner on 2026-09-22: **opt-in per spec, never a
+default, and visible in `plan`.** A flag per spec and not per run, because the
+question "may this list be emptied" belongs to the list, not to the person
+typing the command; a run-wide `--delete` would answer it for specs nobody was
+thinking about. And a task that cannot delete refuses the switch (`task
+quality-definitions does not support exactly`) instead of accepting one that
+quietly does nothing -- the same reason `keep` without `exactly` is an error
+rather than a field that is ignored.
+
+### In the engine
+
+Two methods on `Task`, both with a default that removes nothing, so the other
+thirty-odd tasks are untouched:
+
+| method | answers |
+|---|---|
+| `surplus(current)` | the subjects that would go, as strings |
+| `remove(t, current)` | takes them away |
+
+`plan` prints one line per subject, `<subject>: (present) -> (removed)` -- the
+counterpart of the `(missing) -> (added)` a list task already prints --, counts
+them among the changes and exits 2 like any other difference. `apply` runs
+`remove` **before** `write`, and a failure in `remove` ends the run before a
+single write goes out.
+
+**The order is not a detail.** A Koel station renamed in the spec but keeping
+its URL is one removal and one addition. Koel's URL is unique per account, so
+writing first means a `POST` for the new name while the old station still
+holds that URL -- 422, and the run fails with nothing done. Removing first,
+the addition finds the URL free.
+
+Afterwards the engine reads back as it always has, with one more condition:
+`surplus` must come back **empty** as well as `diff`. An accepted `DELETE` is
+no more a finished one than an accepted write is a saved one; an entry still
+listed afterwards is `written, but after 60 s these still differ: …
+(present) -> (removed)`. A run is `unchanged` only when neither has anything.
+
+### The three tasks, and the guard each one inherited
+
+Each task that got the switch took over the guard its shell predecessor had --
+and each guard runs in `plan` too, and before the first `DELETE`.
+
+**Trailarr `connections`** (§9): surplus is every connection whose `name` the
+spec does not name; `DELETE /api/v1/connections/{connection_id}`, any 2xx is
+good. A refusal is an `Error::Status` with the method, the path, the status and
+one validation line naming the **connection** -- never the body, because
+Trailarr's answers carry the API keys of the Radarr and Sonarr it connects to
+(§9). The endpoint is in `ENDPOINTS`, so `schema-check` holds it against the
+deployed description like every other one.
+
+**Koel `radio-stations`** (§18): surplus is every station of the **account's
+own** list the spec does not name. It can be nothing else: `read` already
+refuses to run while `include_public_media` is on, and with it off the list is
+`whereBelongsTo` the account (§18). That check was written so a `PUT` could not
+land on somebody else's station; it is what makes a `DELETE` here defensible at
+all.
+
+> **And never half the list or more.** A station is found by its `name`, and a
+> name is a string somebody typed. One different Unicode normalisation on
+> either side and not a single spec station would match any of Koel's -- every
+> one of them would look like a surplus, and a correct, green run would empty
+> the account. `2 * surplus >= all` is therefore an error before anything is
+> removed: `would remove 2 of 3 stations (half or more) -- nothing removed`.
+> The rule is deliberately crude; it is not there to catch a careful edit but a
+> total mismatch.
+
+**Radarr and Sonarr `quality-profiles`** (§5): the spec named only
+`allow_in_every_profile` until now. With `exactly` -- and only with it --
+`desired.keep` names the profiles that survive; it is required there, may not
+be empty, and may not repeat a name. Surplus is every profile whose `name`
+`keep` does not hold; `DELETE /api/v3/qualityprofile/{id}`, 200 and 202 are
+good.
+
+> **Nothing is removed until every kept profile is there.** On the host,
+> Recyclarr writes the profiles from TRaSH's templates and converge takes the
+> rest away -- two programs on one collection. If Recyclarr has not run yet, or
+> a template renamed a profile, the profiles converge means to keep are missing
+> and "the rest" is *everything*. So a kept profile the service lacks is an
+> error naming the count: `1 of 2 kept profiles present -- has the profile
+> writer run yet? nothing removed`.
+>
+> **A profile still in use is reported, not forced.** A profile films or series
+> hang on is refused by the service with a 4xx. converge does not reach around
+> that -- deleting the profile would mean deciding what happens to the media on
+> it, and that is not converge's decision. The other removals are still tried,
+> and the run ends red with every name that stayed: `not removed: profile Anime
+> (HTTP 409, still in use?)`. The status is all that is taken from the answer.
+
+A profile on its way out is also left out of `diff` and of `write`: it need not
+allow `Unknown` in order to be deleted, and a `PUT` racing its own `DELETE`
+would be pointless. The same holds for the notes -- with `exactly`, "not in the
+spec, left as it is" would be a lie, and those entries are removals instead.
+
+### What Koel's `DELETE` route does
+
+`DELETE /api/radio/stations/{station}`, read at tag **v9.11.3** of
+`github.com/koel/koel`. The routes live in `routes/api.base.php`, not
+`routes/api.php`, and the `/api` prefix comes from that file itself
+(`Route::prefix('api')`), not from a provider. The block is
+`Route::apiResource('stations', RadioStationController::class)` inside
+`Route::group(['prefix' => 'radio'])`, so the parameter is `{station}` and its
+siblings are the `GET` and `POST` converge already uses.
+
+`RadioStationController::destroy` authorises and then calls
+**`$station->delete()`** on the Eloquent model, answering
+`response()->noContent()` -- 204 with an empty body. That matters: the host's
+old shell removed a station through the model *on purpose*, "so the observer
+clears the logo away", and the API route goes the very same way.
+`RadioStation` carries `#[ObservedBy(RadioStationObserver::class)]`, whose
+`deleted` hook runs `ModelImageObserver::onModelDeleted` and unlinks the stored
+image. A query-builder delete would have skipped the model events and orphaned
+the logo file; this one does not. converge accepts 204 and 200; anything else
+is an error naming the station.
+
+The policy on `destroy` is `RadioStationPolicy::delete`, which is
+`edit`: the owner, or an account with `MANAGE_RADIO_STATIONS` in the same
+organization. converge's account is the owner of every station it sees, since
+that is what `include_public_media` off means.
+
 ## 20. Not in the pilot
 
 
 - Other services and tasks.
 - TLS, JSON output, a NixOS module.
-- Deleting things. `converge` only sets what the spec names, and appends
+- Deleting things, **except where a spec asks for it** (§39, v0.36.0): with
+  `"exactly": true`, Trailarr's connections (§9), Koel's radio stations (§18)
+  and Radarr's and Sonarr's quality profiles (§5) lose what the spec does not
+  name. Without that switch -- and for every other task, which refuses it --
+  `converge` only sets what the spec names, and appends
   list entries (§8), connections (§9), subscriptions (§10), root folders (§11, §14), providers (§12, §13), tags (§13), bindery's entries (§14), Seerr's servers
   (§17), Koel's radio stations (§18) and Audiobookshelf's libraries (§38) it is responsible for. SuggestArr's
   configuration (§19) is a document, not a list: converge sets the named

@@ -32,14 +32,15 @@ pub const QUALITY_UPDATE: Endpoint = Endpoint {
 };
 pub mod profiles;
 
-pub use profiles::{QualityProfiles, PROFILE_LIST, PROFILE_UPDATE};
+pub use profiles::{QualityProfiles, PROFILE_DELETE, PROFILE_LIST, PROFILE_UPDATE};
 
-pub const ENDPOINTS: [Endpoint; 5] = [
+pub const ENDPOINTS: [Endpoint; 6] = [
     SYSTEM_STATUS,
     QUALITY_LIST,
     QUALITY_UPDATE,
     PROFILE_LIST,
     PROFILE_UPDATE,
+    PROFILE_DELETE,
 ];
 
 /// The wire types, each named exactly like its OpenAPI component. Their

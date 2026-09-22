@@ -61,7 +61,14 @@ pub fn ok(body: &str) -> Step {
 pub struct FakeTransport {
     gets: RefCell<HashMap<String, VecDeque<Step>>>,
     puts: RefCell<VecDeque<Step>>,
+    deletes: RefCell<VecDeque<Step>>,
     pub written: RefCell<Vec<(String, String)>>,
+    /// The paths `delete` was called with, in order.
+    pub deleted: RefCell<Vec<String>>,
+    /// Every request that is not a GET, method and path, in order. A test
+    /// that must prove a removal happened *before* a write reads this one:
+    /// `written` and `deleted` alone cannot say which came first.
+    pub calls: RefCell<Vec<(&'static str, String)>>,
 }
 
 impl FakeTransport {
@@ -75,6 +82,17 @@ impl FakeTransport {
     pub fn on_put(self, steps: Vec<Step>) -> Self {
         *self.puts.borrow_mut() = steps.into();
         self
+    }
+
+    /// The answers to `DELETE`, in their own queue: a test scripts removals
+    /// and writes apart, since they are refused for different reasons.
+    pub fn on_delete(self, steps: Vec<Step>) -> Self {
+        *self.deletes.borrow_mut() = steps.into();
+        self
+    }
+
+    fn record(&self, method: &'static str, path: &str) {
+        self.calls.borrow_mut().push((method, path.to_string()));
     }
 }
 
@@ -109,6 +127,7 @@ impl Transport for FakeTransport {
         self.written
             .borrow_mut()
             .push((path.to_string(), body.to_string()));
+        self.record("PUT", path);
         let step = take(Some(&mut *self.puts.borrow_mut()));
         play(step, "PUT", path)
     }
@@ -119,6 +138,7 @@ impl Transport for FakeTransport {
         self.written
             .borrow_mut()
             .push((path.to_string(), body.to_string()));
+        self.record("POST", path);
         let step = take(Some(&mut *self.puts.borrow_mut()));
         play(step, "POST", path)
     }
@@ -128,7 +148,17 @@ impl Transport for FakeTransport {
         self.written
             .borrow_mut()
             .push((path.to_string(), body.to_string()));
+        self.record("PATCH", path);
         let step = take(Some(&mut *self.puts.borrow_mut()));
         play(step, "PATCH", path)
+    }
+
+    /// Its own queue, and its own record: `written` stays what it was, so a
+    /// test that counts writes is not confused by a removal.
+    fn delete(&self, path: &str) -> Result<Reply, Error> {
+        self.deleted.borrow_mut().push(path.to_string());
+        self.record("DELETE", path);
+        let step = take(Some(&mut *self.deletes.borrow_mut()));
+        play(step, "DELETE", path)
     }
 }
