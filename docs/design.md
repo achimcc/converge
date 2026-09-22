@@ -2363,6 +2363,126 @@ what two families of profiles over one library look like, and it is why the
 "nothing to do" test names `AMZN` and `0` rather than a format one would have
 guessed.
 
+## 42. Lidarr: quality and metadata profiles, declared (2026-09-22)
+
+A Lidarr root folder names its default profiles by name (§11), and that is
+all the host ever said about them: `Standard` for both. What a name *means* is
+whatever Lidarr shipped — the same shape of hole as Ghostfolio's
+`ENABLE_FEATURE_AUTH_TOKEN` on 2026-09-10, where a check demanded the
+*absence* of a setting and so pinned an open door. These two tasks write the
+contents down, as a guard: the values as they are, so a change to them is a
+change somebody made.
+
+| task | read | write | desired |
+|---|---|---|---|
+| `quality-profiles` (Lidarr) | `GET /api/v1/qualityprofile` | `PUT /api/v1/qualityprofile/{id}` | per profile: `upgrade_allowed`, `cutoff` by name, `allowed` qualities |
+| `metadata-profiles` | `GET /api/v1/metadataprofile` | `PUT /api/v1/metadataprofile/{id}` | per profile: the primary and secondary album types and the release statuses allowed |
+
+```json
+{
+  "service": "lidarr",
+  "base_url": "http://10.0.30.10:8686",
+  "api_key_credential": "lidarr-api-key",
+  "task": "quality-profiles",
+  "desired": { "profiles": {
+    "Standard": {
+      "upgrade_allowed": false,
+      "cutoff": "Low Quality Lossy",
+      "allowed": ["MP3-192", "OGG Vorbis Q6", "AAC-192", "WMA", "MP3-224"]
+    } } }
+}
+```
+
+### One task name, two tasks
+
+`quality-profiles` already exists for Radarr and Sonarr (§5), and it means
+something else there: *allow this one quality in every profile*, because the
+profiles themselves belong to Recyclarr. Lidarr has no Recyclarr; its three
+profiles are the ones it shipped with, and the spec names them one by one.
+The parser tells the two apart by service, as it already does for `settings`
+(bindery, authentik) and `indexers` (Prowlarr, bindery). Radarr and Sonarr
+have no metadata profiles at all, so `metadata-profiles` belongs to Lidarr
+alone.
+
+### The ladder, and why `allowed` names only qualities
+
+Lidarr's `items` is two levels deep: a rung is either a quality
+(`quality.name`, no `name`) or a **group** with `items` of its own (`name`
+and `id`, no `quality`). `allowed` names qualities, never groups, and a group
+follows the qualities it holds: it is allowed exactly when one of them is.
+There is no way to say "the group yes, one of its qualities no" — Lidarr's
+own interface cannot say it either, and a spec that could would have two ways
+to write the same state.
+
+### The cutoff is a name in the spec and an id on the wire
+
+`cutoff` holds an **id**, and which id depends on what the rung is: a
+quality's `quality.id` (`Any` holds 0, which is `Unknown`) or a group's own
+`id` (`Standard` holds 1002, which is `Low Quality Lossy`). Ids are database
+rows; a rebuilt instance hands out different ones, so the spec says the name
+and converge resolves it on every run. A name that matches no rung is an
+error, and so is one that matches two — the cutoff would then be a guess.
+
+A cutoff the profile does not allow is refused before the `PUT`: Lidarr
+refuses it as well, and a spec that allows a set of qualities and cuts off
+outside it says two things at once.
+
+### What fails before anything is written
+
+- **A quality the profile does not have**, named: `profile Standard: it has
+  no quality "MP3-321"`. Lidarr's ladder holds every quality it knows, so
+  this is a typo or a version that renamed one.
+- **A profile Lidarr does not have** — `metadata profile Bootlegs, which
+  converge does not create`. Adding one is a decision about what the service
+  offers, not a reconciliation; and a name that is only *almost* right would
+  otherwise be created next to the one it was meant to be.
+- **An unknown album type or release status**, named with its list:
+  `secondaryAlbumTypes has no entry "Bootleg"` — `Bootleg` is a release
+  status, and the three lists have names that read alike.
+
+All of it is collected first and reported together, and **no profile is
+written while anything at all is wrong**: half a list of profiles is worse
+than none. Neither task takes `"exactly": true` (§39); converge removes no
+profile.
+
+### Writing
+
+One `PUT` per profile that differs, carrying the **whole profile as the
+service sent it** with the flags set — `formatItems`, the scores and every
+id travel back untouched, groups keep their shape, and a quality gains no
+`name` key nor a group a `quality` one. Servarr answers `202 Accepted`, so the
+engine reads back. A profile that already agrees is not written.
+
+Changes name the rung they are about, so a plan reads as the profile does:
+
+```
+lidarr quality-profiles: note: not in the spec: profile Any
+lidarr quality-profiles: would change profile Standard: cutoff Low Quality Lossy -> MP3-320
+lidarr quality-profiles: would change profile Standard: items.High Quality Lossy.allowed true -> false
+lidarr metadata-profiles: would change metadata profile Standard: primaryAlbumTypes.EP.allowed false -> true
+```
+
+### The schema check, and the one field it does not follow
+
+Both profiles are typed, so `schema-check` compares them with Lidarr's
+description down to the nested components the metadata lists carry
+(`ProfilePrimaryAlbumTypeItemResource.albumType` → `PrimaryAlbumType`). One
+field is left out on purpose: `QualityProfileQualityItemResource.items`, a
+group's qualities, is a list of **that same component**. Following it would
+descend into itself forever, and everything it would compare down there is
+what is compared one level up.
+
+The two list endpoints are `servarr::V1`'s, which the root folder task
+already declares; naming them again would check the same endpoint twice.
+Lidarr's wire types for both components used to be the two fields the root
+folder lookup needs (`id`, `name`) — those are gone from the list, because
+`schema-check` finds a component by name and would have compared whichever of
+two same-named types came first.
+
+Recorded answers: `tests/fixtures/lidarr-3.1.0.4875/{qualityprofile,metadataprofile}.json`
+(re-recorded 2026-09-22 and byte-identical to the ones from 2026-09-13 apart
+from key order, so they stayed as they were).
+
 ## 20. Not in the pilot
 
 

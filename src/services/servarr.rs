@@ -4,7 +4,6 @@
 
 use std::collections::BTreeMap;
 
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -203,13 +202,14 @@ impl Api {
 }
 
 /// Lidarr's wire types. The status answer shares its component with Radarr
-/// and Sonarr; the profile lists are read for their names only.
+/// and Sonarr; both profiles are declared whole in `services::lidarr`, which
+/// reconciles their contents -- the root folder task below reads the same
+/// lists for their names only, and a second wire type of the same component
+/// name would be the one `schema-check` happened to find first.
 pub fn lidarr_wire_types() -> Vec<schemars::Schema> {
-    vec![
-        schemars::schema_for!(crate::services::arr::SystemResource),
-        schemars::schema_for!(QualityProfileName),
-        schemars::schema_for!(MetadataProfileName),
-    ]
+    let mut types = vec![schemars::schema_for!(crate::services::arr::SystemResource)];
+    types.extend(crate::services::lidarr::wire_types());
+    types
 }
 
 /// Prowlarr's: only its status answer is typed; providers are documents.
@@ -217,19 +217,12 @@ pub fn prowlarr_wire_types() -> Vec<schemars::Schema> {
     vec![schemars::schema_for!(crate::services::arr::SystemResource)]
 }
 
-/// A quality profile, read for its id and name. Named after the component so
-/// `schema-check` compares exactly these two fields.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[schemars(rename = "QualityProfileResource")]
+/// A profile of either kind, read for what a root folder needs of it: its id
+/// and its name. Not a wire type -- `services::lidarr` declares both profiles
+/// whole, and `schema-check` finds a component by name, so a second type of
+/// the same name would be whichever of the two it came across first.
+#[derive(Debug, Clone, Deserialize)]
 pub struct QualityProfileName {
-    pub id: i64,
-    #[serde(default)]
-    pub name: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[schemars(rename = "MetadataProfileResource")]
-pub struct MetadataProfileName {
     pub id: i64,
     #[serde(default)]
     pub name: Option<String>,

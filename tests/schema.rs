@@ -681,6 +681,40 @@ fn a_root_folder_list_of_the_wrong_component_and_a_renamed_profile_name_are_foun
     );
 }
 
+/// The profile tasks are typed, so a renamed field of Lidarr's own profile
+/// components fails the build -- down to the nested components the three
+/// metadata lists carry.
+#[test]
+fn a_renamed_field_of_a_lidarr_profile_is_found() {
+    let rename = |component: &str, from: &str, to: &str| {
+        let mut d = doc("lidarr-3.1.0.4875");
+        let props = properties(&mut d, component);
+        let v = props.remove(from).unwrap();
+        props.insert(to.into(), v);
+        servarr_findings(&d, true)
+    };
+    assert_eq!(
+        rename("QualityProfileResource", "cutoff", "cutoffQuality"),
+        ["QualityProfileResource.cutoff: not in the OpenAPI description"]
+    );
+    assert_eq!(
+        rename("QualityProfileQualityItemResource", "allowed", "enabled"),
+        ["QualityProfileQualityItemResource.allowed: not in the OpenAPI description"]
+    );
+    assert_eq!(
+        rename("MetadataProfileResource", "releaseStatuses", "statuses"),
+        ["MetadataProfileResource.releaseStatuses: not in the OpenAPI description"]
+    );
+    assert_eq!(
+        rename("ProfileSecondaryAlbumTypeItemResource", "albumType", "kind"),
+        ["ProfileSecondaryAlbumTypeItemResource.albumType: not in the OpenAPI description"]
+    );
+    assert_eq!(
+        rename("PrimaryAlbumType", "name", "title"),
+        ["PrimaryAlbumType.name: not in the OpenAPI description"]
+    );
+}
+
 #[test]
 fn the_hosts_documents_are_checked_by_name_type_and_enum() {
     // Radarr's colon replacement is an enum of strings, Sonarr's of numbers.

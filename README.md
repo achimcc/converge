@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.38.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.39.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11),
 **SuggestArr** (2.14), **Kavita** (0.9), **Audiobookshelf** (2.36),
 **Dispatcharr** (0.31) and **authentik** (2026.5), each replacing a shell unit
@@ -39,6 +39,8 @@ or an OpenTofu resource on the host it was written for:
 | Prowlarr | `applications` | the same for Prowlarr's links to Radarr, Sonarr and Lidarr |
 | Prowlarr | `indexers`, `indexer-proxies` | the same, added from a named template; tags by label (missing labels are added); an indexer's app profile by name instead of `appProfileId` (never both); secrets the service shows are compared, never printed |
 | Radarr, Sonarr, Lidarr | `root-folders` | root folders by path; Lidarr's with fields and profiles by name; missing ones are added |
+| Lidarr | `quality-profiles` | what a profile a root folder names holds: the qualities it allows (a group follows its own), the `cutoff` by name and the upgrade switch. converge creates no profile |
+| Lidarr | `metadata-profiles` | the same for a metadata profile: the primary and secondary album types and the release statuses it allows -- everything the lists do not name is not allowed |
 | Jellyfin | `server-configuration` | fields of `ServerConfiguration`, by path |
 | Jellyfin | `named-configuration` | fields of a named configuration (`network`, `branding`, `livetv`), by path, checked against its component |
 | Jellyfin | `library-options` | fields of the named libraries' `LibraryOptions`, by path |

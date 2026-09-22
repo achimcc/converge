@@ -110,6 +110,7 @@ enum TaskName {
     QualityDefinitions,
     QualityProfiles,
     CustomFormats,
+    MetadataProfiles,
     AppProfiles,
     ServerConfiguration,
     LibraryOptions,
@@ -156,9 +157,13 @@ enum TaskName {
 impl TaskName {
     fn belongs_to(self, service: Service) -> bool {
         match self {
-            TaskName::QualityDefinitions | TaskName::QualityProfiles | TaskName::CustomFormats => {
-                service.is_arr()
-            }
+            TaskName::QualityDefinitions | TaskName::CustomFormats => service.is_arr(),
+            // `quality-profiles` means two different things, as `settings`
+            // and `indexers` do below: which quality every Radarr or Sonarr
+            // profile must allow (§5), and what a named Lidarr profile holds
+            // (§42). The parse arms tell them apart by service.
+            TaskName::QualityProfiles => service.is_arr() || service == Service::Lidarr,
+            TaskName::MetadataProfiles => service == Service::Lidarr,
             TaskName::AppProfiles => service == Service::Prowlarr,
             TaskName::ServerConfiguration
             | TaskName::LibraryOptions
@@ -707,6 +712,9 @@ pub enum Desired {
     QualityDefinitions(BTreeMap<String, SizeLimits>),
     QualityProfiles(ProfilePolicy),
     CustomFormats(CustomFormatSettings),
+    /// Lidarr's own profiles, by name: what each one holds (design §42).
+    LidarrQualityProfiles(BTreeMap<String, crate::services::lidarr::QualityWish>),
+    LidarrMetadataProfiles(BTreeMap<String, crate::services::lidarr::MetadataWish>),
     ProwlarrAppProfiles(AppProfileSettings),
     ServerConfiguration(BTreeMap<String, serde_json::Value>),
     LibraryOptions(LibrarySettings),
@@ -1539,6 +1547,34 @@ impl Spec {
                 }
                 Desired::QualityDefinitions(map)
             }
+            // Lidarr's profiles are not "allow this quality everywhere" but
+            // the contents of the profiles a root folder names (design §42):
+            // both tasks read a map of profile name to what it holds, and
+            // converge creates no profile.
+            TaskName::QualityProfiles if raw.service == Service::Lidarr => {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Raw {
+                    profiles: BTreeMap<String, crate::services::lidarr::QualityWish>,
+                }
+                let desired: Raw = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                crate::services::lidarr::check_quality_profiles(&desired.profiles)
+                    .map_err(invalid)?;
+                Desired::LidarrQualityProfiles(desired.profiles)
+            }
+            TaskName::MetadataProfiles => {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Raw {
+                    profiles: BTreeMap<String, crate::services::lidarr::MetadataWish>,
+                }
+                let desired: Raw = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                crate::services::lidarr::check_metadata_profiles(&desired.profiles)
+                    .map_err(invalid)?;
+                Desired::LidarrMetadataProfiles(desired.profiles)
+            }
             TaskName::QualityProfiles => {
                 let policy: ProfilePolicy = serde_json::from_value(raw.desired)
                     .map_err(|e| invalid(format!("desired: {e}")))?;
@@ -2200,7 +2236,8 @@ impl Spec {
     pub fn task_name(&self) -> &'static str {
         match self.desired {
             Desired::QualityDefinitions(_) => "quality-definitions",
-            Desired::QualityProfiles(_) => "quality-profiles",
+            Desired::QualityProfiles(_) | Desired::LidarrQualityProfiles(_) => "quality-profiles",
+            Desired::LidarrMetadataProfiles(_) => "metadata-profiles",
             Desired::CustomFormats(_) => "custom-formats",
             Desired::ProwlarrAppProfiles(_) => "app-profiles",
             Desired::ServerConfiguration(_) => "server-configuration",
@@ -3526,6 +3563,74 @@ mod tests {
         parse(&format!(
             r#"{{"service":"{service}","base_url":"http://localhost:8686","api_key_credential":"k","task":"{task}","desired":{desired}}}"#
         ))
+    }
+
+    const LIDARR_QUALITY: &str = r#"{"profiles":{"Standard":{"upgrade_allowed":false,
+        "cutoff":"Low Quality Lossy","allowed":["MP3-192","MP3-320"]}}}"#;
+    const LIDARR_METADATA: &str = r#"{"profiles":{"Standard":{"primary_album_types":["Album"],
+        "secondary_album_types":["Studio"],"release_statuses":["Official"]}}}"#;
+
+    /// `quality-profiles` is two tasks under one name, told apart by the
+    /// service: Radarr's and Sonarr's allow a quality in every profile,
+    /// Lidarr's declares what a named profile holds (design §42).
+    #[test]
+    fn lidarrs_profile_tasks_are_read_by_name() {
+        let spec = servarr("lidarr", "quality-profiles", LIDARR_QUALITY).unwrap();
+        assert_eq!(spec.task_name(), "quality-profiles");
+        let Desired::LidarrQualityProfiles(profiles) = &spec.desired else {
+            panic!("not a Lidarr quality-profiles spec: {:?}", spec.desired);
+        };
+        let standard = &profiles["Standard"];
+        assert_eq!(standard.cutoff, "Low Quality Lossy");
+        assert_eq!(standard.allowed, ["MP3-192", "MP3-320"]);
+        assert!(!standard.upgrade_allowed);
+
+        let spec = servarr("lidarr", "metadata-profiles", LIDARR_METADATA).unwrap();
+        assert_eq!(spec.task_name(), "metadata-profiles");
+        let Desired::LidarrMetadataProfiles(profiles) = &spec.desired else {
+            panic!("not a Lidarr metadata-profiles spec: {:?}", spec.desired);
+        };
+        assert_eq!(profiles["Standard"].release_statuses, ["Official"]);
+
+        // Radarr keeps the task it had, and has no metadata profiles.
+        let spec = servarr(
+            "radarr",
+            "quality-profiles",
+            r#"{"allow_in_every_profile":["Unknown"]}"#,
+        )
+        .unwrap();
+        assert!(matches!(spec.desired, Desired::QualityProfiles(_)));
+        assert!(
+            reason(servarr("radarr", "metadata-profiles", LIDARR_METADATA))
+                .contains("does not belong to service")
+        );
+        // And Lidarr does not take Radarr's form of the task.
+        assert!(reason(servarr(
+            "lidarr",
+            "quality-profiles",
+            r#"{"allow_in_every_profile":["Unknown"]}"#
+        ))
+        .contains("profiles"));
+    }
+
+    #[test]
+    fn a_lidarr_profile_spec_that_says_nothing_is_an_error() {
+        let empty = r#"{"profiles":{}}"#;
+        assert!(reason(servarr("lidarr", "quality-profiles", empty)).contains("names no profile"));
+        assert!(reason(servarr("lidarr", "metadata-profiles", empty)).contains("names no profile"));
+        let nothing = LIDARR_QUALITY.replace(r#"["MP3-192","MP3-320"]"#, "[]");
+        assert!(
+            reason(servarr("lidarr", "quality-profiles", &nothing)).contains("names no quality")
+        );
+        let misspelt = LIDARR_METADATA.replace("release_statuses", "release_status");
+        assert!(
+            reason(servarr("lidarr", "metadata-profiles", &misspelt)).contains("release_status")
+        );
+        // Neither task removes a profile, so neither takes `exactly`.
+        let exactly = format!(
+            r#"{{"service":"lidarr","base_url":"http://localhost:8686","api_key_credential":"k","task":"quality-profiles","exactly":true,"desired":{LIDARR_QUALITY}}}"#
+        );
+        assert!(reason(parse(&exactly)).contains("quality-profiles does not support exactly"));
     }
 
     #[test]

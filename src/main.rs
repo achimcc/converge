@@ -11,7 +11,7 @@ use converge::{
     error::Error,
     schema,
     services::{
-        arr, audiobookshelf, authentik, bindery, dispatcharr, jellyfin, kavita, koel, ntfy,
+        arr, audiobookshelf, authentik, bindery, dispatcharr, jellyfin, kavita, koel, lidarr, ntfy,
         providers, prowlarr, seerr, servarr, suggestarr, trailarr,
     },
     spec::{Desired, DispatcharrTask, Service, Spec},
@@ -199,6 +199,19 @@ fn reconcile_one(
         Desired::ProwlarrAppProfiles(desired) => {
             let task = prowlarr::AppProfiles {
                 profiles: desired.profiles.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        // Lidarr's own profiles: what each named profile holds (design §42).
+        Desired::LidarrQualityProfiles(profiles) => {
+            let task = lidarr::QualityProfiles {
+                profiles: profiles.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        Desired::LidarrMetadataProfiles(profiles) => {
+            let task = lidarr::MetadataProfiles {
+                profiles: profiles.clone(),
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
@@ -731,6 +744,7 @@ fn schema_check(args: &[String]) -> ExitCode {
             let mut endpoints = vec![servarr::V1.status];
             endpoints.extend(servarr::V1.task_endpoints());
             endpoints.extend(providers::ProviderApi::endpoints_of(Service::Lidarr));
+            endpoints.extend(lidarr::ENDPOINTS);
             (endpoints, servarr::lidarr_wire_types())
         }
         "prowlarr" => {
@@ -780,7 +794,10 @@ fn schema_check(args: &[String]) -> ExitCode {
             // Typed tasks: their fields are the wire types checked above.
             // `format_scores` names custom formats, not fields -- what the
             // service has is a runtime question (design §41).
-            Desired::QualityDefinitions(_) | Desired::QualityProfiles(_) => (Vec::new(), 0),
+            Desired::QualityDefinitions(_)
+            | Desired::QualityProfiles(_)
+            | Desired::LidarrQualityProfiles(_)
+            | Desired::LidarrMetadataProfiles(_) => (Vec::new(), 0),
             // An app profile's fields are plain properties of the component.
             Desired::ProwlarrAppProfiles(desired) => {
                 let mut found = Vec::new();

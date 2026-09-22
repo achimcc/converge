@@ -50,3 +50,11 @@ At recording time the host's desired state (`lib/arr-einstellungen.nix`,
   number, a boolean, an empty string or an empty list -- these documents hold
   no secret. `preferredProtocol` was already `usenet` at recording time, the
   factory default; both delays were `0`.
+
+- `qualityprofile.json` and `metadataprofile.json` were **recorded again** on
+  2026-09-22 from the same running service, for the two profile tasks
+  (design §42). The answers are the ones already here: they differ from the
+  files above only in the order of the keys within each object, which the
+  recording sorted (`jq -S`). The files were therefore left as they were --
+  a re-recording that says the service has not changed is a measurement, not
+  a reason to rewrite a fixture.

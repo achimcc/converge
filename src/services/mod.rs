@@ -6,6 +6,7 @@ pub mod dispatcharr;
 pub mod jellyfin;
 pub mod kavita;
 pub mod koel;
+pub mod lidarr;
 pub mod ntfy;
 pub mod providers;
 pub mod prowlarr;

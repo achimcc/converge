@@ -1299,7 +1299,7 @@ fn schema_check_passes_lidarr_specs_and_names_a_provider_field_name() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("lidarr: 24 endpoints and their wire types match"),
+        stdout.contains("lidarr: 26 endpoints and their wire types match"),
         "{stdout}"
     );
     // path, name, defaultMonitorOption, defaultQualityProfileId; two fields.
@@ -1323,6 +1323,168 @@ fn schema_check_passes_lidarr_specs_and_names_a_provider_field_name() {
             "MediaManagementConfigResource.hardlinks_copy: MediaManagementConfigResource has no property hardlinks_copy"
         ),
         "{stderr}"
+    );
+}
+
+const LIDARR_STATUS: &str = include_str!("fixtures/lidarr-3.1.0.4875/system-status.json");
+const LIDARR_QUALITY: &str = include_str!("fixtures/lidarr-3.1.0.4875/qualityprofile.json");
+const LIDARR_METADATA: &str = include_str!("fixtures/lidarr-3.1.0.4875/metadataprofile.json");
+
+/// The profile `Standard` as Lidarr holds it, in the form a host writes into
+/// its spec.
+const LIDARR_STANDARD: &str = r#"{"profiles":{"Standard":{"upgrade_allowed":false,
+    "cutoff":"Low Quality Lossy",
+    "allowed":["MP3-192","OGG Vorbis Q6","AAC-192","WMA","MP3-224","OGG Vorbis Q7",
+               "MP3-VBR-V2","MP3-256","OGG Vorbis Q8","AAC-256","MP3-VBR-V0","AAC-VBR",
+               "MP3-320","OGG Vorbis Q9","AAC-320","OGG Vorbis Q10"]}}}"#;
+const LIDARR_META_STANDARD: &str = r#"{"profiles":{"Standard":{
+    "primary_album_types":["Album"],"secondary_album_types":["Studio"],
+    "release_statuses":["Official"]}}}"#;
+
+/// Both profile tasks are typed, so `schema-check` compares their wire types
+/// against Lidarr's description and counts no spec field.
+#[test]
+fn schema_check_accepts_the_lidarr_profile_specs_and_refuses_an_unknown_key() {
+    let openapi = format!(
+        "{}/openapi/lidarr-3.1.0.4875.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let quality = lidarr_spec(dir.path(), "q.json", "quality-profiles", LIDARR_STANDARD);
+    let metadata = lidarr_spec(
+        dir.path(),
+        "m.json",
+        "metadata-profiles",
+        LIDARR_META_STANDARD,
+    );
+    let out = schema_check("lidarr", Some(&openapi), &[&quality, &metadata]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("lidarr: 26 endpoints and their wire types match"),
+        "{stdout}"
+    );
+
+    // `cutoff_quality` is not a key of this spec, and a misspelt key is an
+    // error rather than something ignored.
+    let misspelt = lidarr_spec(
+        dir.path(),
+        "bad.json",
+        "quality-profiles",
+        &LIDARR_STANDARD.replace(r#""cutoff""#, r#""cutoff_quality""#),
+    );
+    let out = schema_check("lidarr", Some(&openapi), &[&misspelt]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("cutoff_quality"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// `plan` against the recorded profiles: the spec written from them changes
+/// nothing, and one quality taken out is one named change.
+#[test]
+fn a_lidarr_profile_plan_is_0_when_it_matches_the_recording_and_2_when_it_does_not() {
+    let server = Server::start(vec![
+        ("GET", "/api/v1/system/status", 200, LIDARR_STATUS.into()),
+        ("GET", "/api/v1/qualityprofile", 200, LIDARR_QUALITY.into()),
+        (
+            "GET",
+            "/api/v1/metadataprofile",
+            200,
+            LIDARR_METADATA.into(),
+        ),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("lidarr-api-key"), "k\n").unwrap();
+    let spec = |file: &str, task: &str, desired: &str| {
+        let path = dir.path().join(file);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"service":"lidarr","base_url":"{}","api_key_credential":"lidarr-api-key","task":"{task}","desired":{desired}}}"#,
+                server.base_url()
+            ),
+        )
+        .unwrap();
+        path
+    };
+    let plan = |path: &Path| {
+        let out = converge()
+            .arg("plan")
+            .arg(path)
+            .env("CREDENTIALS_DIRECTORY", dir.path())
+            .output()
+            .unwrap();
+        (
+            out.status.code(),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ),
+        )
+    };
+
+    let (code, all) = plan(&spec("q.json", "quality-profiles", LIDARR_STANDARD));
+    assert_eq!(code, Some(0), "{all}");
+    assert!(
+        all.contains("lidarr quality-profiles: service version 3.1.0.4875"),
+        "{all}"
+    );
+    assert!(all.contains("lidarr quality-profiles: unchanged"), "{all}");
+    assert!(all.contains("note: not in the spec: profile Any"), "{all}");
+
+    let (code, all) = plan(&spec("m.json", "metadata-profiles", LIDARR_META_STANDARD));
+    assert_eq!(code, Some(0), "{all}");
+    assert!(all.contains("lidarr metadata-profiles: unchanged"), "{all}");
+
+    let (code, all) = plan(&spec(
+        "less.json",
+        "quality-profiles",
+        &LIDARR_STANDARD.replace(r#""MP3-320","#, ""),
+    ));
+    assert_eq!(code, Some(2), "{all}");
+    assert!(
+        all.contains(
+            "lidarr quality-profiles: would change profile Standard: items.MP3-320.allowed true -> false"
+        ),
+        "{all}"
+    );
+
+    // A quality no profile has fails before anything is written, naming it.
+    let (code, all) = plan(&spec(
+        "unknown.json",
+        "quality-profiles",
+        &LIDARR_STANDARD.replace(r#""MP3-320""#, r#""MP3-321""#),
+    ));
+    assert_eq!(code, Some(1), "{all}");
+    assert!(
+        all.contains(r#"profile Standard: it has no quality "MP3-321""#),
+        "{all}"
+    );
+
+    // Neither task takes `exactly`: converge removes no Lidarr profile.
+    let path = dir.path().join("exactly.json");
+    std::fs::write(
+        &path,
+        format!(
+            r#"{{"service":"lidarr","base_url":"{}","api_key_credential":"lidarr-api-key","task":"metadata-profiles","exactly":true,"desired":{LIDARR_META_STANDARD}}}"#,
+            server.base_url()
+        ),
+    )
+    .unwrap();
+    let (code, all) = plan(&path);
+    assert_eq!(code, Some(1), "{all}");
+    assert!(
+        all.contains("task metadata-profiles does not support exactly"),
+        "{all}"
     );
 }
 
