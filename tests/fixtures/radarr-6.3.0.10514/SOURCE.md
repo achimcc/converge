@@ -60,3 +60,15 @@ searched for long tokens, the only hits were field names.
   number, a boolean, an empty string or an empty list -- these documents hold
   no secret. `preferredProtocol` was already `usenet` at recording time, the
   factory default; both delays were `0`.
+
+- `customformat.json` — `GET /api/v3/customformat`, recorded 2026-09-22 from
+  the running service the same way, keys sorted (`jq -S`). **Reduced, not
+  masked:** the answer held 78 formats (about 700 KB, most of it the
+  `selectOptions` lists a `select` field carries); this file keeps five of
+  them **byte for byte** — `1080p`, `Repack/Proper`, `x265 (HD)`, `AV1` and
+  `BR-DISK` —, chosen because between them they cover one specification and
+  two, a regular expression and a `select` value, and `negate` both ways.
+  Nothing that stayed was changed: a custom format carries no credential.
+
+  The count matters when reading the tests: a note here says "5 other
+  formats" where the running service would say 78.

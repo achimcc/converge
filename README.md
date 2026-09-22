@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.37.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.38.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11),
 **SuggestArr** (2.14), **Kavita** (0.9), **Audiobookshelf** (2.36),
 **Dispatcharr** (0.31) and **authentik** (2026.5), each replacing a shell unit
@@ -28,14 +28,16 @@ or an OpenTofu resource on the host it was written for:
 | service | task | desired state |
 |---|---|---|
 | Radarr, Sonarr | `quality-definitions` | size limits (MB per minute) per quality |
-| Radarr, Sonarr | `quality-profiles` | qualities every profile must allow; with `exactly` and `keep`, the profiles that survive -- every other one is removed once all of them are there |
+| Radarr, Sonarr | `quality-profiles` | qualities every profile must allow; with `exactly` and `keep`, the profiles that survive -- every other one is removed once all of them are there. `format_scores` gives a named custom format its score in every profile (in every kept one with `keep`); every other `formatItems` entry stays as its writer left it |
+| Radarr, Sonarr | `custom-formats` | custom formats by name: the switch that puts one into a file name, and its specifications by name with `implementation`, `negate`, `required` and their `fields`. Formats the spec does not name are counted, never listed, and never removed -- `exactly` is refused here |
+| Prowlarr | `app-profiles` | app profiles by name: `enableRss`, `enableAutomaticSearch`, `enableInteractiveSearch`, `minimumSeeders`. A missing one is added |
 | Radarr, Sonarr, Lidarr | `naming`, `media-management` | top-level fields of the configuration document |
 | Radarr, Sonarr, Lidarr | `download-client-config` | the same for `config/downloadclient` -- among them the switch every import hangs on |
 | Radarr, Sonarr, Lidarr | `indexer-config` | the same for `config/indexer`: retention, minimum age, maximum size, RSS interval. Only Radarr carries the four extra fields |
 | Radarr, Sonarr, Lidarr | `delay-profiles` | the **default** delay profile -- the one without tags -- by its fields: `preferredProtocol` and the two delays. A tagged profile belongs to whoever set the tag and is left alone; `tags` and `order` cannot be set, they say which profile is meant |
 | Radarr, Sonarr, Lidarr, Prowlarr | `download-clients`, `notifications` | providers by name: top-level fields, `fields` entries by name, secrets from credentials handed over on every `apply` |
 | Prowlarr | `applications` | the same for Prowlarr's links to Radarr, Sonarr and Lidarr |
-| Prowlarr | `indexers`, `indexer-proxies` | the same, added from a named template; tags by label (missing labels are added); secrets the service shows are compared, never printed |
+| Prowlarr | `indexers`, `indexer-proxies` | the same, added from a named template; tags by label (missing labels are added); an indexer's app profile by name instead of `appProfileId` (never both); secrets the service shows are compared, never printed |
 | Radarr, Sonarr, Lidarr | `root-folders` | root folders by path; Lidarr's with fields and profiles by name; missing ones are added |
 | Jellyfin | `server-configuration` | fields of `ServerConfiguration`, by path |
 | Jellyfin | `named-configuration` | fields of a named configuration (`network`, `branding`, `livetv`), by path, checked against its component |
@@ -250,6 +252,67 @@ holds a bearer token of an account that is an administrator — the probe
 }
 ```
 
+Radarr's and Sonarr's own custom formats are a collection with **two
+writers**: on the host Recyclarr writes some seventy of them from TRaSH's
+templates, and converge writes the one or two nobody else has a template for.
+So `custom-formats` names the formats it owns and leaves every other one
+alone -- counted in a note (`not in the spec, left as they are: 78 other
+formats`), never listed, and never removed: `exactly` is refused for this
+task. Within a format the spec *is* complete, and a specification it does not
+name is taken out of that format.
+
+Scoring is the other half, and it belongs to the profile, not to the format:
+`format_scores` on a `quality-profiles` spec says what a named format is worth
+in every profile. Recyclarr can only score formats it knows by TRaSH id, and
+its `reset_unmatched_scores` sets every other one to 0 -- so a format of one's
+own needs a second writer for its score, and Recyclarr's `except` list to keep
+its hands off. A format name the service does not have is an error before
+anything is written; `custom-formats` creates it, and the order of the two
+specs is the host's to arrange.
+
+```json
+{
+  "service": "radarr",
+  "base_url": "http://localhost:7878",
+  "api_key_credential": "radarr-api-key",
+  "task": "custom-formats",
+  "desired": {
+    "formats": {
+      "3D": {
+        "include_custom_format_when_renaming": true,
+        "specifications": [
+          { "name": "3D", "implementation": "ReleaseTitleSpecification",
+            "negate": false, "required": true,
+            "fields": { "value": "(?i)\\b(3d|hsbs|sbs)\\b" } }
+        ]
+      }
+    }
+  }
+}
+```
+
+Prowlarr's app profiles say how an indexer is searched, and they are the only
+place `minimumSeeders` can be set at all. An indexer may name its profile
+instead of carrying the id -- the id is the service's own and would be the
+wrong one after a rebuild (the same reason a root folder names its profiles,
+and Seerr its quality profile and root folder). Naming both is a spec error,
+and a name Prowlarr does not have fails before anything is written:
+
+```json
+{
+  "service": "prowlarr",
+  "base_url": "http://localhost:9696",
+  "api_key_credential": "prowlarr-api-key",
+  "task": "app-profiles",
+  "desired": {
+    "profiles": {
+      "Standard": { "enableRss": true, "enableAutomaticSearch": true,
+                    "enableInteractiveSearch": true, "minimumSeeders": 1 }
+    }
+  }
+}
+```
+
 ## Deleting things: `exactly`
 
 **By default converge removes nothing.** An entry the spec does not name is a
@@ -266,8 +329,10 @@ trailarr connections: 1 field(s) differ
 Three tasks take it — `connections` (Trailarr), `radio-stations` (Koel) and
 `quality-profiles` (Radarr, Sonarr). Every other task refuses the switch
 (`task quality-definitions does not support exactly`) rather than accepting
-one that would do nothing. `"exactly": false` is what every task already
-means and is always allowed.
+one that would do nothing -- `custom-formats` among them, and for a reason
+worth saying out loud: its collection has a second writer, and "the rest"
+there is Recyclarr's seventy formats. `"exactly": false` is what every task
+already means and is always allowed.
 
 Within a run the removals come **first**, then the writes: a Koel station
 renamed in the spec but keeping its URL is a removal and an addition, and the

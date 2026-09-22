@@ -12,7 +12,7 @@ use converge::{
     schema,
     services::{
         arr, audiobookshelf, authentik, bindery, dispatcharr, jellyfin, kavita, koel, ntfy,
-        providers, seerr, servarr, suggestarr, trailarr,
+        providers, prowlarr, seerr, servarr, suggestarr, trailarr,
     },
     spec::{Desired, DispatcharrTask, Service, Spec},
 };
@@ -161,6 +161,44 @@ fn reconcile_one(
                 // `keep` and `"exactly": true` come as a pair or not at all;
                 // the spec parser refuses either alone (design §39).
                 keep: policy.keep.clone(),
+                // The scores of named custom formats (design §41); every
+                // other `formatItems` entry stays as Recyclarr wrote it.
+                format_scores: policy.format_scores.clone().unwrap_or_default(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        Desired::CustomFormats(desired) => {
+            let task = arr::CustomFormats {
+                formats: desired
+                    .formats
+                    .iter()
+                    .map(|(name, format)| {
+                        (
+                            name.clone(),
+                            arr::formats::FormatTarget {
+                                include_custom_format_when_renaming: format
+                                    .include_custom_format_when_renaming,
+                                specifications: format
+                                    .specifications
+                                    .iter()
+                                    .map(|s| arr::formats::SpecificationTarget {
+                                        name: s.name.clone(),
+                                        implementation: s.implementation.clone(),
+                                        negate: s.negate,
+                                        required: s.required,
+                                        fields: s.fields.clone(),
+                                    })
+                                    .collect(),
+                            },
+                        )
+                    })
+                    .collect(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        Desired::ProwlarrAppProfiles(desired) => {
+            let task = prowlarr::AppProfiles {
+                profiles: desired.profiles.clone(),
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
@@ -553,6 +591,7 @@ fn reconcile_one(
                     implementation: entry.implementation.clone(),
                     template: entry.template.clone(),
                     tags: entry.tags.clone(),
+                    app_profile: entry.app_profile.clone(),
                     set: entry.set.clone(),
                     fields: entry.fields.clone(),
                     secret_fields,
@@ -697,7 +736,10 @@ fn schema_check(args: &[String]) -> ExitCode {
         "prowlarr" => {
             let mut endpoints = vec![servarr::V1.status];
             endpoints.extend(providers::ProviderApi::endpoints_of(Service::Prowlarr));
-            (endpoints, servarr::prowlarr_wire_types())
+            endpoints.extend(prowlarr::ENDPOINTS);
+            let mut wire = servarr::prowlarr_wire_types();
+            wire.extend(prowlarr::wire_types());
+            (endpoints, wire)
         }
         "jellyfin" => (jellyfin::ENDPOINTS.to_vec(), jellyfin::wire_types()),
         "trailarr" => (trailarr::ENDPOINTS.to_vec(), trailarr::wire_types()),
@@ -736,7 +778,68 @@ fn schema_check(args: &[String]) -> ExitCode {
         }
         let (spec_findings, count) = match &spec.desired {
             // Typed tasks: their fields are the wire types checked above.
+            // `format_scores` names custom formats, not fields -- what the
+            // service has is a runtime question (design §41).
             Desired::QualityDefinitions(_) | Desired::QualityProfiles(_) => (Vec::new(), 0),
+            // An app profile's fields are plain properties of the component.
+            Desired::ProwlarrAppProfiles(desired) => {
+                let mut found = Vec::new();
+                let mut count = 0;
+                for (name, set) in &desired.profiles {
+                    count += set.len();
+                    found.extend(
+                        schema::check_paths(&document, "AppProfileResource", set)
+                            .into_iter()
+                            .map(|f| format!("app profile {name}: {f}")),
+                    );
+                }
+                (found, count)
+            }
+            // The format's switch is a property of `CustomFormatResource`,
+            // and each specification is a `CustomFormatSpecificationSchema`.
+            // Its `fields` entries depend on the implementation and have no
+            // schema, as for providers (§12): runtime only.
+            Desired::CustomFormats(desired) => {
+                let mut found = Vec::new();
+                let mut count = 0;
+                for (name, format) in &desired.formats {
+                    let switch: std::collections::BTreeMap<String, serde_json::Value> = [(
+                        "includeCustomFormatWhenRenaming".to_string(),
+                        serde_json::Value::Bool(format.include_custom_format_when_renaming),
+                    )]
+                    .into_iter()
+                    .collect();
+                    count += 1;
+                    found.extend(
+                        schema::check_paths(&document, arr::formats::FORMAT_COMPONENT, &switch)
+                            .into_iter()
+                            .map(|f| format!("custom format {name}: {f}")),
+                    );
+                    let specifications: Vec<serde_json::Value> = format
+                        .specifications
+                        .iter()
+                        .map(|s| {
+                            serde_json::json!({
+                                "name": s.name,
+                                "implementation": s.implementation,
+                                "negate": s.negate,
+                                "required": s.required,
+                            })
+                        })
+                        .collect();
+                    count += 4 * specifications.len();
+                    found.extend(
+                        schema::check_objects(
+                            &document,
+                            arr::formats::SPECIFICATION_COMPONENT,
+                            &serde_json::Value::Array(specifications),
+                        )
+                        .into_iter()
+                        .map(|f| format!("custom format {name}: {f}")),
+                    );
+                }
+                (found, count)
+            }
             // No schema to check against (design §7): only the endpoints and
             // PluginInfo are, above; the fields are checked at runtime.
             Desired::PluginConfigurations(_) => (Vec::new(), 0),

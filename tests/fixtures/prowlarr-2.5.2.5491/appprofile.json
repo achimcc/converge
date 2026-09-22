@@ -1,0 +1,10 @@
+[
+  {
+    "enableAutomaticSearch": true,
+    "enableInteractiveSearch": true,
+    "enableRss": true,
+    "id": 1,
+    "minimumSeeders": 1,
+    "name": "Standard"
+  }
+]

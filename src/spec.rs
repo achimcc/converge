@@ -109,6 +109,8 @@ impl Service {
 enum TaskName {
     QualityDefinitions,
     QualityProfiles,
+    CustomFormats,
+    AppProfiles,
     ServerConfiguration,
     LibraryOptions,
     ScheduledTaskTriggers,
@@ -154,7 +156,10 @@ enum TaskName {
 impl TaskName {
     fn belongs_to(self, service: Service) -> bool {
         match self {
-            TaskName::QualityDefinitions | TaskName::QualityProfiles => service.is_arr(),
+            TaskName::QualityDefinitions | TaskName::QualityProfiles | TaskName::CustomFormats => {
+                service.is_arr()
+            }
+            TaskName::AppProfiles => service == Service::Prowlarr,
             TaskName::ServerConfiguration
             | TaskName::LibraryOptions
             | TaskName::ScheduledTaskTriggers
@@ -279,6 +284,12 @@ pub struct ProfilePolicy {
     /// (design §39).
     #[serde(default)]
     pub keep: Option<Vec<String>>,
+    /// The score a named custom format must have in every profile -- in
+    /// every **kept** profile where `keep` is set (design §41). Absent where
+    /// the spec says nothing about scores; every `formatItems` entry it does
+    /// not name stays as it is, because Recyclarr writes those.
+    #[serde(default)]
+    pub format_scores: Option<BTreeMap<String, i64>>,
 }
 
 /// Fields by path in each named library's `LibraryOptions`.
@@ -603,12 +614,57 @@ pub struct ProviderEntry {
     pub template: Option<String>,
     #[serde(default)]
     pub tags: Option<Vec<String>>,
+    /// Prowlarr's app profile by name, instead of `set.appProfileId`
+    /// (design §41). Only an `indexers` spec may carry it, and never
+    /// together with the id.
+    #[serde(default)]
+    pub app_profile: Option<String>,
     #[serde(default)]
     pub set: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub fields: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub secret_fields: BTreeMap<String, String>,
+}
+
+/// The custom formats a spec names, by name (design §41). Formats it does
+/// not name are left alone: on the host Recyclarr writes some seventy of
+/// them into the same collection.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CustomFormatSettings {
+    pub formats: BTreeMap<String, CustomFormatEntry>,
+}
+
+/// One custom format: whether it goes into a file name, and the rules it
+/// matches by. The specification list is complete -- one the spec does not
+/// name is removed from that format.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CustomFormatEntry {
+    pub include_custom_format_when_renaming: bool,
+    pub specifications: Vec<CustomFormatSpecification>,
+}
+
+/// One rule of a format. `fields` are the implementation's own entries by
+/// name (a `ReleaseTitleSpecification` has one, `value`); they have no
+/// schema and are checked against the answer at runtime, as for providers.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CustomFormatSpecification {
+    pub name: String,
+    pub implementation: String,
+    pub negate: bool,
+    pub required: bool,
+    #[serde(default)]
+    pub fields: BTreeMap<String, serde_json::Value>,
+}
+
+/// Prowlarr's app profiles by name, their fields by name (design §41).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppProfileSettings {
+    pub profiles: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
 }
 
 /// Top-level fields of a provider the service owns or converge sets itself.
@@ -650,6 +706,8 @@ pub enum BinderyKind {
 pub enum Desired {
     QualityDefinitions(BTreeMap<String, SizeLimits>),
     QualityProfiles(ProfilePolicy),
+    CustomFormats(CustomFormatSettings),
+    ProwlarrAppProfiles(AppProfileSettings),
     ServerConfiguration(BTreeMap<String, serde_json::Value>),
     LibraryOptions(LibrarySettings),
     ScheduledTaskTriggers(TaskTriggers),
@@ -1526,7 +1584,98 @@ impl Spec {
                         return Err(invalid(format!("desired.keep names {twice:?} twice")));
                     }
                 }
+                if let Some(scores) = &policy.format_scores {
+                    if scores.is_empty() {
+                        return Err(invalid(
+                            "desired.format_scores names no custom format".to_string(),
+                        ));
+                    }
+                    if scores.keys().any(String::is_empty) {
+                        return Err(invalid(
+                            "desired.format_scores: a format name is empty".to_string(),
+                        ));
+                    }
+                }
                 Desired::QualityProfiles(policy)
+            }
+            TaskName::CustomFormats => {
+                let desired: CustomFormatSettings = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if desired.formats.is_empty() {
+                    return Err(invalid("desired.formats names no format".to_string()));
+                }
+                for (name, format) in &desired.formats {
+                    if name.is_empty() {
+                        return Err(invalid(
+                            "desired.formats: a format name is empty".to_string(),
+                        ));
+                    }
+                    let at = format!("desired.formats.{name}");
+                    if format.specifications.is_empty() {
+                        return Err(invalid(format!(
+                            "{at}.specifications names no specification -- a format without one \
+                             matches nothing"
+                        )));
+                    }
+                    let mut seen = std::collections::BTreeSet::new();
+                    for specification in &format.specifications {
+                        if specification.name.is_empty() {
+                            return Err(invalid(format!(
+                                "{at}.specifications: a specification name is empty"
+                            )));
+                        }
+                        // Found by name on both sides: two of a name would
+                        // make "the second one" undecidable.
+                        if !seen.insert(specification.name.as_str()) {
+                            return Err(invalid(format!(
+                                "{at}.specifications: {:?} is named twice",
+                                specification.name
+                            )));
+                        }
+                        if specification.implementation.is_empty() {
+                            return Err(invalid(format!(
+                                "{at}.specifications.{}: implementation is empty",
+                                specification.name
+                            )));
+                        }
+                        if specification.fields.keys().any(String::is_empty) {
+                            return Err(invalid(format!(
+                                "{at}.specifications.{}.fields: a field name is empty",
+                                specification.name
+                            )));
+                        }
+                    }
+                }
+                Desired::CustomFormats(desired)
+            }
+            TaskName::AppProfiles => {
+                let desired: AppProfileSettings = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if desired.profiles.is_empty() {
+                    return Err(invalid("desired.profiles names no profile".to_string()));
+                }
+                for (name, set) in &desired.profiles {
+                    if name.is_empty() {
+                        return Err(invalid(
+                            "desired.profiles: a profile name is empty".to_string(),
+                        ));
+                    }
+                    let at = format!("desired.profiles.{name}");
+                    if set.is_empty() {
+                        return Err(invalid(format!("{at} names no field")));
+                    }
+                    // `id` and `name` are not among them: the name is how a
+                    // profile is found, the id is the service's.
+                    for field in set.keys() {
+                        if !crate::services::prowlarr::SETTABLE.contains(&field.as_str()) {
+                            return Err(invalid(format!(
+                                "{at}: {field} is not a field of an app profile (these are: {})",
+                                crate::services::prowlarr::SETTABLE.join(", ")
+                            )));
+                        }
+                    }
+                }
+                Desired::ProwlarrAppProfiles(desired)
             }
             TaskName::ServerSettings => {
                 let map: BTreeMap<String, serde_json::Value> = serde_json::from_value(raw.desired)
@@ -1965,10 +2114,33 @@ impl Spec {
                             }
                         }
                     }
+                    if let Some(profile) = &provider.app_profile {
+                        // Prowlarr's indexers are the only providers that
+                        // carry an `appProfileId` at all (design §41).
+                        if raw.service != Service::Prowlarr
+                            || !matches!(raw.task, TaskName::Indexers)
+                        {
+                            return Err(invalid(format!(
+                                "{at}.app_profile belongs to a prowlarr indexers spec"
+                            )));
+                        }
+                        if profile.is_empty() {
+                            return Err(invalid(format!("{at}.app_profile is empty")));
+                        }
+                        // Two ways of saying the same thing, and nothing to
+                        // decide which one wins.
+                        if provider.set.contains_key("appProfileId") {
+                            return Err(invalid(format!(
+                                "{at}: app_profile names the profile and appProfileId its id -- \
+                                 name one of them"
+                            )));
+                        }
+                    }
                     if provider.set.is_empty()
                         && provider.fields.is_empty()
                         && provider.secret_fields.is_empty()
                         && provider.tags.is_none()
+                        && provider.app_profile.is_none()
                     {
                         return Err(invalid(format!("{at} names no field")));
                     }
@@ -2029,6 +2201,8 @@ impl Spec {
         match self.desired {
             Desired::QualityDefinitions(_) => "quality-definitions",
             Desired::QualityProfiles(_) => "quality-profiles",
+            Desired::CustomFormats(_) => "custom-formats",
+            Desired::ProwlarrAppProfiles(_) => "app-profiles",
             Desired::ServerConfiguration(_) => "server-configuration",
             Desired::LibraryOptions(_) => "library-options",
             Desired::ScheduledTaskTriggers(_) => "scheduled-task-triggers",
@@ -2389,6 +2563,7 @@ mod tests {
             Desired::QualityProfiles(ProfilePolicy {
                 allow_in_every_profile: vec!["Unknown".to_string()],
                 keep: None,
+                format_scores: None,
             })
         );
     }
@@ -2460,6 +2635,7 @@ mod tests {
             Desired::QualityProfiles(ProfilePolicy {
                 allow_in_every_profile: vec!["Unknown".to_string()],
                 keep: Some(vec!["Anime".to_string(), "HD".to_string()]),
+                format_scores: None,
             })
         );
     }
@@ -3845,5 +4021,178 @@ mod tests {
         assert!(parse(bindery).is_ok());
         let elsewhere = r#"{"service":"kavita","base_url":"http://127.0.0.1:5000","api_key_credential":"k","task":"settings","desired":{"set":{"a":1}}}"#;
         assert!(reason(parse(elsewhere)).contains("does not belong"));
+    }
+    // --- custom formats, app profiles and format scores (design §41) ------
+
+    fn radarr_task(task: &str, desired: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"radarr","base_url":"http://localhost:7878",
+                 "api_key_credential":"radarr-api-key","task":"{task}","desired":{desired}}}"#
+        ))
+    }
+
+    fn prowlarr_task(task: &str, desired: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"prowlarr","base_url":"http://localhost:9696",
+                 "api_key_credential":"prowlarr-api-key","task":"{task}","desired":{desired}}}"#
+        ))
+    }
+
+    const THREE_D: &str = r#"{"formats":{"3D":{
+        "include_custom_format_when_renaming": true,
+        "specifications":[{"name":"3D","implementation":"ReleaseTitleSpecification",
+                           "negate":false,"required":true,
+                           "fields":{"value":"(?i)\\b(3d|hsbs|sbs)\\b"}}]}}}"#;
+
+    #[test]
+    fn parses_a_custom_formats_spec() {
+        let spec = radarr_task("custom-formats", THREE_D).unwrap();
+        assert_eq!(spec.task_name(), "custom-formats");
+        let Desired::CustomFormats(desired) = &spec.desired else {
+            panic!("{:?}", spec.desired);
+        };
+        let format = &desired.formats["3D"];
+        assert!(format.include_custom_format_when_renaming);
+        assert_eq!(format.specifications.len(), 1);
+        assert_eq!(format.specifications[0].name, "3D");
+        assert!(format.specifications[0].fields.contains_key("value"));
+    }
+
+    #[test]
+    fn a_custom_formats_spec_is_strict_about_its_shape() {
+        assert!(
+            reason(radarr_task("custom-formats", r#"{"formats":{}}"#)).contains("names no format")
+        );
+        let no_specification = r#"{"formats":{"3D":{"include_custom_format_when_renaming":false,
+                                   "specifications":[]}}}"#;
+        assert!(
+            reason(radarr_task("custom-formats", no_specification)).contains("matches nothing"),
+            "{}",
+            reason(radarr_task("custom-formats", no_specification))
+        );
+        // Found by name on both sides.
+        let twice = THREE_D.replace(
+            r#""fields":{"value":"(?i)\\b(3d|hsbs|sbs)\\b"}}]"#,
+            r#""fields":{}},{"name":"3D","implementation":"ReleaseTitleSpecification",
+               "negate":false,"required":true,"fields":{}}]"#,
+        );
+        assert!(reason(radarr_task("custom-formats", &twice)).contains("is named twice"));
+        // The switch is required: leaving it out would write the service's
+        // default, and which one that is nobody would have decided.
+        let without = THREE_D.replace(r#""include_custom_format_when_renaming": true,"#, "");
+        assert!(reason(radarr_task("custom-formats", &without)).contains("missing field"));
+        // The task belongs to Radarr and Sonarr, and nowhere else.
+        assert!(reason(prowlarr_task("custom-formats", THREE_D)).contains("does not belong"));
+    }
+
+    /// Recyclarr writes seventy formats into the same collection; a spec
+    /// that said "take the rest away" would remove all of them.
+    #[test]
+    fn custom_formats_refuses_exactly() {
+        let with = format!(
+            r#"{{"service":"radarr","base_url":"http://localhost:7878",
+                 "api_key_credential":"k","task":"custom-formats","exactly":true,
+                 "desired":{THREE_D}}}"#
+        );
+        assert!(reason(parse(&with)).contains("task custom-formats does not support exactly"));
+    }
+
+    const APP_PROFILES: &str = r#"{"profiles":{"Standard":{"enableRss":true,"minimumSeeders":1}}}"#;
+
+    #[test]
+    fn parses_an_app_profiles_spec_and_takes_only_its_four_fields() {
+        let spec = prowlarr_task("app-profiles", APP_PROFILES).unwrap();
+        assert_eq!(spec.task_name(), "app-profiles");
+        let Desired::ProwlarrAppProfiles(desired) = &spec.desired else {
+            panic!("{:?}", spec.desired);
+        };
+        assert_eq!(desired.profiles["Standard"].len(), 2);
+
+        assert!(reason(prowlarr_task("app-profiles", r#"{"profiles":{}}"#))
+            .contains("names no profile"));
+        assert!(reason(prowlarr_task(
+            "app-profiles",
+            r#"{"profiles":{"Standard":{}}}"#
+        ))
+        .contains("names no field"));
+        // `name` is how a profile is found and `id` is the service's.
+        for field in ["name", "id", "enabled"] {
+            let spec = format!(r#"{{"profiles":{{"Standard":{{"{field}":1}}}}}}"#);
+            assert!(
+                reason(prowlarr_task("app-profiles", &spec))
+                    .contains("is not a field of an app profile"),
+                "{field}"
+            );
+        }
+        // Prowlarr's alone.
+        assert!(reason(radarr_task("app-profiles", APP_PROFILES)).contains("does not belong"));
+    }
+
+    fn indexer(extra: &str) -> Result<Spec, Error> {
+        prowlarr_task(
+            "indexers",
+            &format!(
+                r#"{{"providers":{{"TNTracker":{{"implementation":"Torznab",{extra}
+                     "fields":{{"baseUrl":"http://tntracker.org"}}}}}}}}"#
+            ),
+        )
+    }
+
+    #[test]
+    fn an_indexer_names_an_app_profile_or_its_id_but_never_both() {
+        let by_name = indexer(r#""app_profile":"Standard","#).unwrap();
+        let Desired::Indexers(desired) = &by_name.desired else {
+            panic!("{:?}", by_name.desired);
+        };
+        assert_eq!(
+            desired.providers["TNTracker"].app_profile.as_deref(),
+            Some("Standard")
+        );
+        assert!(indexer(r#""set":{"appProfileId":1},"#).is_ok());
+
+        let both = indexer(r#""app_profile":"Standard","set":{"appProfileId":1},"#);
+        assert!(
+            reason(both).contains("name one of them"),
+            "both are refused"
+        );
+        assert!(indexer(r#""app_profile":"","#)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("app_profile is empty"));
+        // Only Prowlarr's indexers carry an app profile at all.
+        let elsewhere = prowlarr_task(
+            "applications",
+            r#"{"providers":{"Radarr":{"implementation":"Radarr","app_profile":"Standard"}}}"#,
+        );
+        assert!(reason(elsewhere).contains("prowlarr indexers spec"));
+    }
+
+    #[test]
+    fn format_scores_are_optional_and_may_not_be_empty() {
+        let spec = parse(PROFILES).unwrap();
+        let Desired::QualityProfiles(policy) = &spec.desired else {
+            panic!("{:?}", spec.desired);
+        };
+        assert_eq!(policy.format_scores, None);
+
+        let with = PROFILES.replace(
+            r#"["Unknown"]}"#,
+            r#"["Unknown"],"format_scores":{"3D":-10000}}"#,
+        );
+        let spec = parse(&with).unwrap();
+        let Desired::QualityProfiles(policy) = &spec.desired else {
+            panic!("{:?}", spec.desired);
+        };
+        assert_eq!(policy.format_scores.as_ref().unwrap()["3D"], -10000);
+
+        let empty = PROFILES.replace(r#"["Unknown"]}"#, r#"["Unknown"],"format_scores":{}}"#);
+        assert!(reason(parse(&empty)).contains("names no custom format"));
+        // A score is a whole number of points, not a fraction.
+        let fraction = PROFILES.replace(
+            r#"["Unknown"]}"#,
+            r#"["Unknown"],"format_scores":{"3D":1.5}}"#,
+        );
+        assert!(parse(&fraction).is_err());
     }
 }

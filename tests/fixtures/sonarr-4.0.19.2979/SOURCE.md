@@ -60,3 +60,8 @@ searched for long tokens, the only hits were field names.
   number, a boolean, an empty string or an empty list -- these documents hold
   no secret. `preferredProtocol` was already `usenet` at recording time, the
   factory default; both delays were `0`.
+
+- `customformat.json` — `GET /api/v3/customformat`, recorded 2026-09-22 from
+  the running service. **Reduced, not masked**, exactly as Radarr's: 60
+  formats in the answer, the same five kept byte for byte. A custom format
+  carries no credential, so nothing was masked.

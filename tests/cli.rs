@@ -58,7 +58,7 @@ fn schema_check_passes_for_the_vendored_file() {
     // Exit 0 alone would also pass for a program that does nothing.
     assert!(
         String::from_utf8_lossy(&out.stdout)
-            .contains("radarr: 26 endpoints and their wire types match"),
+            .contains("radarr: 29 endpoints and their wire types match"),
         "{}",
         String::from_utf8_lossy(&out.stdout)
     );
@@ -1444,7 +1444,7 @@ fn schema_check_passes_a_prowlarr_applications_spec_and_rejects_an_own_field() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("prowlarr: 31 endpoints and their wire types match"),
+        stdout.contains("prowlarr: 34 endpoints and their wire types match"),
         "{stdout}"
     );
     assert!(
@@ -1689,5 +1689,213 @@ fn authentik_plan_over_http_sends_a_bearer_token_and_never_shows_it() {
             request.headers
         );
         assert!(request.path.ends_with('/'), "{}", request.path);
+    }
+}
+
+// --- custom formats, app profiles and format scores (design §41) ----------
+
+const RADARR_FORMATS: &str = include_str!("fixtures/radarr-6.3.0.10514/customformat.json");
+const PROWLARR_STATUS_V1: &str = include_str!("fixtures/prowlarr-2.5.2.5491/system-status.json");
+const PROWLARR_APP_PROFILES: &str = include_str!("fixtures/prowlarr-2.5.2.5491/appprofile.json");
+
+/// The three specs the host deploys, against the vendored descriptions: the
+/// field names of an app profile, of a custom format and of each of its
+/// specifications are properties of the components they are written to.
+#[test]
+fn schema_check_reads_the_new_arr_and_prowlarr_specs_and_names_a_wrong_field() {
+    let dir = tempfile::tempdir().unwrap();
+    let write = |file: &str, text: String| {
+        let path = dir.path().join(file);
+        std::fs::write(&path, text).unwrap();
+        path
+    };
+    let radarr = format!(
+        "{}/openapi/radarr-6.3.0.10514.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let prowlarr = format!(
+        "{}/openapi/prowlarr-2.5.2.5491.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+
+    let format_spec = |specification: &str| {
+        format!(
+            r#"{{"service":"radarr","base_url":"http://localhost:7878","api_key_credential":"k",
+                 "task":"custom-formats","desired":{{"formats":{{"3D":{{
+                   "include_custom_format_when_renaming":true,
+                   "specifications":[{specification}]}}}}}}}}"#
+        )
+    };
+    let good = write(
+        "formats.json",
+        format_spec(
+            r#"{"name":"3D","implementation":"ReleaseTitleSpecification",
+                "negate":false,"required":true,"fields":{"value":"(?i)\\b3d\\b"}}"#,
+        ),
+    );
+    let out = schema_check("radarr", Some(&radarr), &[&good]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("5 spec field(s) in 1 spec(s) match"),
+        "{stdout}"
+    );
+
+    // The count says the four fields of the specification were compared as
+    // well, not only the format's switch: 1 + 4. What the comparison is for
+    // is an upgrade that renames one of them -- `negate` is typed `bool` in
+    // the spec, so a wrong VALUE never reaches the schema check:
+    let bad = write(
+        "negate.json",
+        format_spec(
+            r#"{"name":"3D","implementation":"ReleaseTitleSpecification",
+                "negate":false,"required":true,"fields":{"value":"x"}}"#,
+        )
+        .replace(r#""negate":false"#, r#""negate":"no""#),
+    );
+    let out = schema_check("radarr", Some(&radarr), &[&bad]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("expected a boolean") && stderr.contains("negate.json"),
+        "{stderr}"
+    );
+
+    let profile = |set: &str| {
+        format!(
+            r#"{{"service":"prowlarr","base_url":"http://localhost:9696","api_key_credential":"k",
+                 "task":"app-profiles","desired":{{"profiles":{{"Standard":{set}}}}}}}"#
+        )
+    };
+    let good = write("appprofile.json", profile(r#"{"minimumSeeders":1}"#));
+    let out = schema_check("prowlarr", Some(&prowlarr), &[&good]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("1 spec field(s) in 1 spec(s) match"),
+        "{stdout}"
+    );
+
+    let bad = write("seeders.json", profile(r#"{"minimumSeeders":"one"}"#));
+    let out = schema_check("prowlarr", Some(&prowlarr), &[&bad]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(
+            "app profile Standard: AppProfileResource.minimumSeeders: expects integer, \
+             the spec has a string"
+        ),
+        "{stderr}"
+    );
+}
+
+/// The host's own format, against a service that does not have it yet: one
+/// `POST`, and the seventy TRaSH formats beside it are a counted note.
+#[test]
+fn custom_formats_plan_and_apply_over_http_leave_the_other_formats_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("radarr-api-key"), "k\n").unwrap();
+    let server = Server::start(vec![
+        ("GET", "/api/v3/system/status", 200, STATUS.into()),
+        ("GET", "/api/v3/customformat", 200, RADARR_FORMATS.into()),
+    ]);
+    let spec = dir.path().join("formats.json");
+    std::fs::write(
+        &spec,
+        format!(
+            r#"{{"service":"radarr","base_url":"{}","api_key_credential":"radarr-api-key",
+                 "task":"custom-formats","desired":{{"formats":{{"3D":{{
+                   "include_custom_format_when_renaming":true,
+                   "specifications":[{{"name":"3D","implementation":"ReleaseTitleSpecification",
+                     "negate":false,"required":true,
+                     "fields":{{"value":"(?i)\\b(3d|hsbs|sbs)\\b"}}}}]}}}}}}}}"#,
+            server.base_url()
+        ),
+    )
+    .unwrap();
+    let out = converge()
+        .arg("plan")
+        .arg(&spec)
+        .env("CREDENTIALS_DIRECTORY", dir.path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("would change custom format 3D: (missing) -> (added)"),
+        "{stdout}"
+    );
+    // Counted, not listed: five recorded formats, one of them named.
+    assert!(
+        stdout.contains("not in the spec, left as they are: 5 other formats"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("BR-DISK"), "{stdout}");
+}
+
+/// An app profile by name, and a name Prowlarr does not have: the refusal
+/// names the indexer and the name it was given, and nothing from the body.
+#[test]
+fn an_indexer_app_profile_by_name_is_refused_by_name_and_nothing_is_written() {
+    const INDEXERS: &str = include_str!("fixtures/prowlarr-2.5.2.5491/indexer.json");
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("prowlarr-api-key"), "k\n").unwrap();
+    std::fs::write(dir.path().join("tnt-key"), "tnt-secret-never-print\n").unwrap();
+    for (profile, code, expect) in [
+        ("Standard", 0, "prowlarr indexers: unchanged"),
+        (
+            "Gibt es nicht",
+            1,
+            "indexer TNTracker: app_profile names \"Gibt es nicht\", which the service does not have",
+        ),
+    ] {
+        let server = Server::start(vec![
+            ("GET", "/api/v1/system/status", 200, PROWLARR_STATUS_V1.into()),
+            ("GET", "/api/v1/indexer", 200, INDEXERS.into()),
+            ("GET", "/api/v1/appprofile", 200, PROWLARR_APP_PROFILES.into()),
+        ]);
+        let spec = dir.path().join("indexers.json");
+        std::fs::write(
+            &spec,
+            format!(
+                r#"{{"service":"prowlarr","base_url":"{}","api_key_credential":"prowlarr-api-key",
+                     "task":"indexers","desired":{{"providers":{{"TNTracker":{{
+                       "implementation":"Torznab","app_profile":"{profile}",
+                       "set":{{"priority":25}},
+                       "secret_fields":{{"apiKey":"tnt-key"}}}}}}}}}}"#,
+                server.base_url()
+            ),
+        )
+        .unwrap();
+        let out = converge()
+            .arg("plan")
+            .arg(&spec)
+            .env("CREDENTIALS_DIRECTORY", dir.path())
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(code), "{stdout}{stderr}");
+        assert!(
+            stdout.contains(expect) || stderr.contains(expect),
+            "{stdout}{stderr}"
+        );
+        assert!(!stdout.contains("tnt-secret-never-print"), "{stdout}");
+        assert!(!stderr.contains("tnt-secret-never-print"), "{stderr}");
     }
 }

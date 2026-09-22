@@ -30,17 +30,22 @@ pub const QUALITY_UPDATE: Endpoint = Endpoint {
     request: Some(Shape::List("QualityDefinitionResource")),
     response: None,
 };
+pub mod formats;
 pub mod profiles;
 
+pub use formats::{CustomFormats, CUSTOM_FORMAT_CREATE, CUSTOM_FORMAT_LIST, CUSTOM_FORMAT_UPDATE};
 pub use profiles::{QualityProfiles, PROFILE_DELETE, PROFILE_LIST, PROFILE_UPDATE};
 
-pub const ENDPOINTS: [Endpoint; 6] = [
+pub const ENDPOINTS: [Endpoint; 9] = [
     SYSTEM_STATUS,
     QUALITY_LIST,
     QUALITY_UPDATE,
     PROFILE_LIST,
     PROFILE_UPDATE,
     PROFILE_DELETE,
+    CUSTOM_FORMAT_LIST,
+    CUSTOM_FORMAT_CREATE,
+    CUSTOM_FORMAT_UPDATE,
 ];
 
 /// The wire types, each named exactly like its OpenAPI component. Their

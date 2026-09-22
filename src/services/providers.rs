@@ -202,6 +202,10 @@ pub struct ProviderTarget {
     pub secret_fields: BTreeMap<String, Secret>,
     /// Tag labels; `None` leaves the provider's tags alone.
     pub tags: Option<Vec<String>>,
+    /// Prowlarr's app profile by name, in place of `set.appProfileId`
+    /// (design §41). The two are mutually exclusive -- the spec parser
+    /// refuses both at once -- and only an indexer spec may carry it.
+    pub app_profile: Option<String>,
 }
 
 pub struct Providers {
@@ -215,6 +219,8 @@ pub struct Current {
     pub templates: Vec<Map<String, Value>>,
     /// Read only when a provider names tags: label to id.
     pub tags: BTreeMap<String, i64>,
+    /// Read only when a provider names an app profile: name to id.
+    pub app_profiles: BTreeMap<String, i64>,
 }
 
 fn name_of(entry: &Map<String, Value>) -> Option<&str> {
@@ -320,16 +326,41 @@ impl Providers {
         }
     }
 
+    /// The spec's `set`, with `appProfileId` filled in where the spec named
+    /// an app profile instead of its id (design §41). A name Prowlarr does
+    /// not have is an error, and it is raised before anything is written.
+    fn effective_set(
+        &self,
+        target: &ProviderTarget,
+        current: &Current,
+    ) -> Result<BTreeMap<String, Value>, String> {
+        let mut set = target.set.clone();
+        let Some(name) = &target.app_profile else {
+            return Ok(set);
+        };
+        match current.app_profiles.get(name) {
+            Some(id) => {
+                set.insert("appProfileId".to_string(), Value::from(*id));
+                Ok(set)
+            }
+            None => Err(format!(
+                "{}: app_profile names {name:?}, which the service does not have",
+                self.subject(&target.name)
+            )),
+        }
+    }
+
     /// Checks that every name the spec uses exists in `entry` (a provider or
     /// a template).
     fn check_names(
         &self,
         target: &ProviderTarget,
+        set: &BTreeMap<String, Value>,
         entry: &Map<String, Value>,
         missing: &mut Vec<String>,
     ) {
         let subject = self.subject(&target.name);
-        for key in target.set.keys() {
+        for key in set.keys() {
             if !entry.contains_key(key) {
                 missing.push(format!("{subject}: {key}"));
             }
@@ -382,12 +413,13 @@ impl Providers {
     fn changes_of(
         &self,
         target: &ProviderTarget,
+        set: &BTreeMap<String, Value>,
         entry: &Map<String, Value>,
         known: &BTreeMap<String, i64>,
     ) -> Vec<Change> {
         let subject = self.subject(&target.name);
         let mut changes = Vec::new();
-        for (key, desired) in &target.set {
+        for (key, desired) in set {
             if let Some(current) = entry.get(key) {
                 if current != desired {
                     changes.push(Change {
@@ -449,11 +481,12 @@ impl Providers {
     fn filled(
         &self,
         target: &ProviderTarget,
+        set: &BTreeMap<String, Value>,
         base: &Map<String, Value>,
         known: &BTreeMap<String, i64>,
     ) -> Result<Map<String, Value>, Error> {
         let mut body = base.clone();
-        for (key, value) in &target.set {
+        for (key, value) in set {
             body.insert(key.clone(), value.clone());
         }
         let mut missing = Vec::new();
@@ -592,10 +625,19 @@ impl Task for Providers {
                 }
             }
         }
+        let mut app_profiles = BTreeMap::new();
+        if self.providers.iter().any(|p| p.app_profile.is_some()) {
+            for profile in crate::services::prowlarr::read_profiles(t)? {
+                if let Some(name) = profile.name.clone() {
+                    app_profiles.insert(name, i64::from(profile.id));
+                }
+            }
+        }
         Ok(Current {
             entries,
             templates,
             tags,
+            app_profiles,
         })
     }
 
@@ -609,8 +651,16 @@ impl Task for Providers {
                 desired: "(added)".to_string(),
             });
         }
+        let mut unknown = Vec::new();
         for target in &self.providers {
             let subject = self.subject(&target.name);
+            let set = match self.effective_set(target, current) {
+                Ok(set) => set,
+                Err(reason) => {
+                    unknown.push(reason);
+                    continue;
+                }
+            };
             match Self::find(&current.entries, &target.name) {
                 Some(entry) => {
                     let implementation = entry.get("implementation").and_then(Value::as_str);
@@ -622,12 +672,12 @@ impl Task for Providers {
                         ));
                         continue;
                     }
-                    self.check_names(target, entry, &mut missing);
-                    changes.extend(self.changes_of(target, entry, &current.tags));
+                    self.check_names(target, &set, entry, &mut missing);
+                    changes.extend(self.changes_of(target, &set, entry, &current.tags));
                 }
                 None => {
                     match self.template(current, target) {
-                        Ok(template) => self.check_names(target, template, &mut missing),
+                        Ok(template) => self.check_names(target, &set, template, &mut missing),
                         Err(reason) => mismatch.push(reason),
                     }
                     changes.push(Change {
@@ -641,6 +691,11 @@ impl Task for Providers {
         }
         if !mismatch.is_empty() {
             return Err(Error::Mismatch(mismatch));
+        }
+        // A name the service does not have: reported before anything is
+        // written, as for a root folder's profiles (design §11).
+        if !unknown.is_empty() {
+            return Err(Error::NotFound(unknown));
         }
         if !missing.is_empty() {
             return Err(Error::MissingField(missing));
@@ -665,12 +720,15 @@ impl Task for Providers {
             known.insert(label, id);
         }
         for target in &self.providers {
+            let set = self
+                .effective_set(target, current)
+                .map_err(|reason| Error::NotFound(vec![reason]))?;
             match Self::find(&current.entries, &target.name) {
                 None => {
                     let template = self
                         .template(current, target)
                         .map_err(|reason| Error::Mismatch(vec![reason]))?;
-                    let mut body = self.filled(target, template, &known)?;
+                    let mut body = self.filled(target, &set, template, &known)?;
                     body.insert("name".to_string(), Value::from(target.name.clone()));
                     body.remove("id");
                     self.send(t, self.api.create, self.api.create.path, &body)?;
@@ -678,10 +736,13 @@ impl Task for Providers {
                 Some(entry) => {
                     // Against the tags as they were read: a label just added
                     // is a change for every provider that names it.
-                    if self.changes_of(target, entry, &current.tags).is_empty() {
+                    if self
+                        .changes_of(target, &set, entry, &current.tags)
+                        .is_empty()
+                    {
                         continue;
                     }
-                    let body = self.filled(target, entry, &known)?;
+                    let body = self.filled(target, &set, entry, &known)?;
                     let path = self
                         .api
                         .update
@@ -714,7 +775,10 @@ impl Task for Providers {
             if names.is_empty() {
                 continue;
             }
-            let body = self.filled(target, entry, &current.tags)?;
+            let set = self
+                .effective_set(target, current)
+                .map_err(|reason| Error::NotFound(vec![reason]))?;
+            let body = self.filled(target, &set, entry, &current.tags)?;
             let path = self
                 .api
                 .update
@@ -767,6 +831,7 @@ mod tests {
             implementation: "QBittorrent".to_string(),
             template: None,
             tags: None,
+            app_profile: None,
             set: map(json!({"enable": true, "priority": 1})),
             // The recording masks the user name on the host; the spec uses it.
             fields: map(json!({"host": "10.0.10.11", "port": port,
@@ -783,6 +848,7 @@ mod tests {
             implementation: "Sabnzbd".to_string(),
             template: None,
             tags: None,
+            app_profile: None,
             set: map(json!({"enable": true, "priority": 1})),
             fields: map(json!({"host": "10.0.10.10", "port": 8080, "movieCategory": "radarr"})),
             secret_fields: [(
@@ -1051,6 +1117,7 @@ mod tests {
                 implementation: "Webhook".to_string(),
                 template: None,
                 tags: None,
+                app_profile: None,
                 set: map(
                     json!({"onReleaseImport": true, "onUpgrade": true, "onRename": true,
                                 "onGrab": false, "onHealthIssue": false, "includeHealthWarnings": false}),
@@ -1074,6 +1141,7 @@ mod tests {
                 implementation: "Lidarr".to_string(),
                 template: None,
                 tags: None,
+                app_profile: None,
                 set: map(json!({"syncLevel": "fullSync"})),
                 fields: map(
                     json!({"prowlarrUrl": "http://10.0.10.10:9696", "baseUrl": "http://10.0.80.10:8686",
@@ -1174,6 +1242,7 @@ mod tests {
                 fields: map(json!({"baseUrl": "https://karagarga.in/"})),
                 secret_fields: secrets(&[("username", "<masked>"), ("password", "<masked>")]),
                 tags: tags(&[]),
+                app_profile: None,
             },
             ProviderTarget {
                 name: "TorrentLeech".to_string(),
@@ -1183,6 +1252,7 @@ mod tests {
                 fields: map(json!({"baseUrl": "https://www.torrentleech.org/"})),
                 secret_fields: secrets(&[("username", "<masked>"), ("password", "<masked>")]),
                 tags: tags(&[]),
+                app_profile: None,
             },
             ProviderTarget {
                 name: "TNTracker".to_string(),
@@ -1192,6 +1262,7 @@ mod tests {
                 fields: map(json!({"baseUrl": "http://tntracker.org"})),
                 secret_fields: secrets(&[("apiKey", "tnt-key-never-print")]),
                 tags: tags(&["umlautadaptarr"]),
+                app_profile: None,
             },
             ProviderTarget {
                 name: "Treasure Maps".to_string(),
@@ -1201,6 +1272,7 @@ mod tests {
                 fields: map(json!({"baseUrl": "http://treasure-maps.com", "apiPath": "/api"})),
                 secret_fields: secrets(&[("apiKey", "tm-key-never-print")]),
                 tags: tags(&["umlautadaptarr"]),
+                app_profile: None,
             },
             ProviderTarget {
                 name: "MyAnonamouse".to_string(),
@@ -1210,6 +1282,7 @@ mod tests {
                 fields: map(json!({"baseUrl": "https://www.myanonamouse.net/"})),
                 secret_fields: secrets(&[("mamId", "<masked>")]),
                 tags: tags(&[]),
+                app_profile: None,
             },
         ]
     }
@@ -1233,6 +1306,109 @@ mod tests {
                 .collect(),
         )
         .to_string()
+    }
+
+    // --- an app profile by name (design §41) ------------------------------
+
+    const PROWLARR_APP_PROFILES: &str =
+        include_str!("../../tests/fixtures/prowlarr-2.5.2.5491/appprofile.json");
+
+    /// The host's five indexers, but naming the app profile instead of its
+    /// id. Prowlarr's recording answers `Standard` with id 1, which is what
+    /// `appProfileId` holds -- so this must be `unchanged`.
+    fn indexers_by_profile_name(profile: &str) -> Vec<ProviderTarget> {
+        hosts_indexers()
+            .into_iter()
+            .map(|mut target| {
+                target.set.remove("appProfileId");
+                target.app_profile = Some(profile.to_string());
+                target
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_app_profile_named_instead_of_its_id_resolves_to_the_same_state() {
+        let task = Providers {
+            api: &INDEXERS_V1,
+            providers: indexers_by_profile_name("Standard"),
+        };
+        let t = prowlarr(vec![ok(PROWLARR_INDEXERS)], vec![ok(PROWLARR_TAGS)])
+            .on_get("/api/v1/appprofile", vec![ok(PROWLARR_APP_PROFILES)])
+            .on_put(vec![Step::Answer(202, String::new())]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(current.app_profiles["Standard"], 1);
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+    }
+
+    /// The other id: a name that points somewhere else is an ordinary
+    /// difference, named as the field it stands for.
+    #[test]
+    fn a_name_pointing_at_another_profile_is_one_change_per_indexer() {
+        let task = Providers {
+            api: &INDEXERS_V1,
+            providers: indexers_by_profile_name("Wenig Seeder"),
+        };
+        let mut profiles: Value = serde_json::from_str(PROWLARR_APP_PROFILES).unwrap();
+        let mut second = profiles.as_array().unwrap()[0].clone();
+        second["id"] = 2.into();
+        second["name"] = "Wenig Seeder".into();
+        profiles.as_array_mut().unwrap().push(second);
+        let t = prowlarr(vec![ok(PROWLARR_INDEXERS)], vec![ok(PROWLARR_TAGS)])
+            .on_get("/api/v1/appprofile", vec![ok(&profiles.to_string())])
+            .on_put(vec![Step::Answer(202, String::new())]);
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        assert_eq!(changes.len(), 5, "{changes:?}");
+        assert_eq!(
+            changes[0].to_string(),
+            "indexer Karagarga: appProfileId 1 -> 2"
+        );
+        task.write(&t, &current).unwrap();
+        assert_eq!(t.written.borrow().len(), 5);
+        let (_, body) = sent(&t, 0);
+        assert_eq!(body["appProfileId"], 2);
+    }
+
+    /// A name Prowlarr does not have: an error before anything is written,
+    /// and it names the indexer and the name, nothing from the answer.
+    #[test]
+    fn an_app_profile_the_service_does_not_have_is_an_error_before_any_write() {
+        let task = Providers {
+            api: &INDEXERS_V1,
+            providers: indexers_by_profile_name("Gibt es nicht"),
+        };
+        let t = prowlarr(vec![ok(PROWLARR_INDEXERS)], vec![ok(PROWLARR_TAGS)])
+            .on_get("/api/v1/appprofile", vec![ok(PROWLARR_APP_PROFILES)])
+            .on_put(vec![Step::Answer(202, String::new())]);
+        let current = task.read(&t).unwrap();
+        let err = task.diff(&current).err().unwrap().to_string();
+        assert!(
+            err.starts_with(
+                "not found on the service: indexer Karagarga: app_profile names \"Gibt es nicht\", \
+                 which the service does not have"
+            ),
+            "{err}"
+        );
+        assert!(task.write(&t, &current).is_err());
+        assert!(t.written.borrow().is_empty(), "nothing was written");
+        // And the refusal carries no stored credential.
+        assert!(!err.contains(PASSWORD), "{err}");
+        assert!(!err.contains("tnt-key-never-print"), "{err}");
+    }
+
+    /// The list is read only where a spec names a profile: an `indexers`
+    /// spec that gives the id never asks for it.
+    #[test]
+    fn the_profile_list_is_only_read_when_a_spec_names_one() {
+        let task = Providers {
+            api: &INDEXERS_V1,
+            providers: hosts_indexers(),
+        };
+        // No answer is scripted for `/api/v1/appprofile`: asking would panic.
+        let t = prowlarr(vec![ok(PROWLARR_INDEXERS)], vec![ok(PROWLARR_TAGS)]);
+        let current = task.read(&t).unwrap();
+        assert!(current.app_profiles.is_empty());
     }
 
     #[test]
@@ -1427,6 +1603,7 @@ mod tests {
                 fields: map(json!({"host": host, "port": port})),
                 secret_fields: BTreeMap::new(),
                 tags: tags(&[label]),
+                app_profile: None,
             };
         let mut task = Providers {
             api: &INDEXER_PROXIES_V1,

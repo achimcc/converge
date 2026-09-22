@@ -5,6 +5,8 @@
 //! host this was written for, Recyclarr and TRaSH's templates. converge only
 //! flips `allowed` on a top-level item that is already there.
 
+use std::collections::BTreeMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -46,6 +48,29 @@ pub struct QualityProfileResource {
     pub name: Option<String>,
     #[serde(default)]
     pub items: Option<Vec<QualityProfileQualityItemResource>>,
+    /// The score every custom format has in this profile (design §41).
+    /// Absent where a service answers none; it must not grow a `null` on the
+    /// way back, hence `skip_serializing_if`.
+    #[serde(
+        default,
+        rename = "formatItems",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub format_items: Option<Vec<ProfileFormatItemResource>>,
+    #[serde(flatten)]
+    #[schemars(skip)]
+    pub rest: Map<String, Value>,
+}
+
+/// One custom format's score in one profile. `format` is the format's id and
+/// `name` its name; the spec names the format, so both are read and only
+/// `score` is ever written.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ProfileFormatItemResource {
+    pub format: i32,
+    #[serde(default)]
+    pub name: Option<String>,
+    pub score: i64,
     #[serde(flatten)]
     #[schemars(skip)]
     pub rest: Map<String, Value>,
@@ -70,6 +95,11 @@ pub struct QualityProfiles {
     /// removed (design §39). `None` is the ordinary spec, which removes
     /// nothing -- the spec parser lets the two appear only together.
     pub keep: Option<Vec<String>>,
+    /// The score a named custom format must have in every profile (in every
+    /// **kept** profile where `keep` is set), by the format's name. Empty
+    /// where the spec names none; every other `formatItems` entry stays as
+    /// it is, because Recyclarr writes those (design §41).
+    pub format_scores: BTreeMap<String, i64>,
 }
 
 fn profile_name(profile: &QualityProfileResource) -> &str {
@@ -117,7 +147,45 @@ impl QualityProfiles {
                 }
             }
         }
+        for item in fixed.format_items.iter_mut().flatten() {
+            let Some(name) = item.name.as_deref() else {
+                continue;
+            };
+            if let Some(score) = self.format_scores.get(name) {
+                if item.score != *score {
+                    item.score = *score;
+                    changed = true;
+                }
+            }
+        }
         changed.then_some(fixed)
+    }
+
+    /// Score differences of one profile, and the format names it does not
+    /// know. The lookup is by name, the way a spec names a format; `format`
+    /// carries the id and stays the service's.
+    fn score_changes(
+        &self,
+        profile: &QualityProfileResource,
+        unknown: &mut Vec<String>,
+        changes: &mut Vec<Change>,
+    ) {
+        let items = profile.format_items.as_deref().unwrap_or_default();
+        for (format, score) in &self.format_scores {
+            match items
+                .iter()
+                .find(|item| item.name.as_deref() == Some(format.as_str()))
+            {
+                None => unknown.push(format!("{}: custom format {format}", profile_name(profile))),
+                Some(item) if item.score != *score => changes.push(Change {
+                    subject: format!("{}: {format}", profile_name(profile)),
+                    field: "score".to_string(),
+                    current: item.score.to_string(),
+                    desired: score.to_string(),
+                }),
+                Some(_) => {}
+            }
+        }
     }
 }
 
@@ -148,6 +216,7 @@ impl Task for QualityProfiles {
 
     fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
         let mut missing = Vec::new();
+        let mut unknown = Vec::new();
         let mut changes = Vec::new();
         for profile in current {
             if self.is_surplus(profile) {
@@ -165,11 +234,18 @@ impl Task for QualityProfiles {
                     Some(_) => {}
                 }
             }
+            self.score_changes(profile, &mut unknown, &mut changes);
         }
         // A quality that is not a top-level rung cannot be switched on without
         // rebuilding the ladder -- which is not converge's to do. Say so.
         if !missing.is_empty() {
             return Err(Error::MissingItem(missing));
+        }
+        // A format the service does not have: `custom-formats` creates it,
+        // and the order of the two specs is the host's to arrange. Nothing
+        // is written until it is there.
+        if !unknown.is_empty() {
+            return Err(Error::NotFound(unknown));
         }
         Ok(changes)
     }
@@ -238,6 +314,15 @@ impl Task for QualityProfiles {
     }
 
     fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        // Nothing is written while a named format is missing from a profile:
+        // `corrected` would silently leave that score alone.
+        let mut unknown = Vec::new();
+        for profile in current.iter().filter(|p| !self.is_surplus(p)) {
+            self.score_changes(profile, &mut unknown, &mut Vec::new());
+        }
+        if !unknown.is_empty() {
+            return Err(Error::NotFound(unknown));
+        }
         for profile in current {
             if self.is_surplus(profile) {
                 continue;
@@ -275,6 +360,15 @@ mod tests {
         QualityProfiles {
             allow_in_every_profile: vec!["Unknown".to_string()],
             keep: None,
+            format_scores: BTreeMap::new(),
+        }
+    }
+
+    /// The same task, plus the score one named custom format must have.
+    fn scoring(format: &str, score: i64) -> QualityProfiles {
+        QualityProfiles {
+            format_scores: [(format.to_string(), score)].into_iter().collect(),
+            ..task()
         }
     }
 
@@ -369,6 +463,88 @@ mod tests {
         assert_eq!(sent, expected);
     }
 
+    // --- format_scores (design §41) ---------------------------------------
+
+    /// The recording's `AMZN` carries 0 in all five of Radarr's profiles --
+    /// one of fifteen formats that do. (Sonarr's recording has none: every
+    /// one of its sixty formats is scored differently somewhere, which is
+    /// what two profile families for the same library look like.)
+    #[test]
+    fn a_score_that_already_matches_everywhere_is_no_change() {
+        let task = scoring("AMZN", 0);
+        let current = task.read(&listing(RADARR)).unwrap();
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn a_differing_score_is_one_change_per_profile() {
+        let task = scoring("German DL", 12000);
+        let current = task.read(&listing(RADARR)).unwrap();
+        let changes = task.diff(&current).unwrap();
+        assert_eq!(changes.len(), 5, "{changes:?}");
+        assert_eq!(
+            changes[0].to_string(),
+            "Dual Language, sonst Deutsch (1080p): German DL: score 11000 -> 12000"
+        );
+    }
+
+    /// Only the named entry changes; the seventy-seven Recyclarr writes
+    /// travel back as they were.
+    #[test]
+    fn the_write_changes_one_format_item_and_leaves_the_others() {
+        let task = scoring("German DL", 12000);
+        let t = listing(RADARR).on_put(vec![Step::Answer(202, String::new())]);
+        let current = task.read(&t).unwrap();
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 5, "every profile carries the format");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        let recorded: Value = serde_json::from_str(RADARR).unwrap();
+        let mut expected = recorded.as_array().unwrap()[0].clone();
+        for item in expected["formatItems"].as_array_mut().unwrap() {
+            if item["name"] == "German DL" {
+                item["score"] = 12000.into();
+            }
+        }
+        assert_eq!(sent, expected);
+    }
+
+    /// `custom-formats` creates the format; until it has, nothing is written.
+    #[test]
+    fn a_format_the_service_does_not_have_is_an_error_before_any_write() {
+        let task = scoring("Dolby Vision HDR10+", 500);
+        let t = listing(RADARR).on_put(vec![Step::Answer(202, String::new())]);
+        let current = task.read(&t).unwrap();
+        let err = task.diff(&current).err().unwrap().to_string();
+        assert!(
+            err.starts_with(
+                "not found on the service: Dual Language, sonst Deutsch (1080p): \
+                 custom format Dolby Vision HDR10+"
+            ),
+            "{err}"
+        );
+        assert!(task.write(&t, &current).is_err());
+        assert!(t.written.borrow().is_empty(), "nothing was written");
+    }
+
+    /// With `keep`, only the profiles that survive are measured -- a profile
+    /// on its way out need not carry the score.
+    #[test]
+    fn with_keep_only_the_kept_profiles_are_scored() {
+        let task = QualityProfiles {
+            format_scores: [("German DL".to_string(), 12000)].into_iter().collect(),
+            ..keeping(&KEPT)
+        };
+        let t = listing(RADARR).on_put(vec![Step::Answer(202, String::new())]);
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        // Three of the five profiles are on their way out; the two kept ones
+        // are the only ones the score is measured in.
+        assert_eq!(changes.len(), 2, "{changes:?}");
+        assert!(changes.iter().all(|c| c.field == "score"), "{changes:?}");
+        assert_eq!(task.surplus(&current).unwrap().len(), 3);
+    }
+
     // --- exactly (design §39) ---------------------------------------------
 
     const KEPT: [&str; 2] = [
@@ -380,6 +556,7 @@ mod tests {
         QualityProfiles {
             allow_in_every_profile: vec!["Unknown".to_string()],
             keep: Some(names.iter().map(ToString::to_string).collect()),
+            format_scores: BTreeMap::new(),
         }
     }
 

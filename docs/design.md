@@ -2199,6 +2199,170 @@ them: it is what turns the provider id of a policy into a name.
 error here either -- a refused write says the status, the account's id in the
 path, and which of the two refusals it was.
 
+## 41. Prowlarr app profiles, custom formats and their scores (2026-09-22)
+
+Three tasks from one inventory of the host, and one thread running through
+them: **a collection with two writers**. Recyclarr writes seventy-odd custom
+formats into Radarr and Sonarr from TRaSH's templates; the host has one format
+of its own, a `3D` rule nobody publishes a template for. Recyclarr cannot
+score that format -- its `custom_formats` list takes TRaSH ids, and a format
+it does not know is not in it -- and `reset_unmatched_scores`, which is what
+keeps a profile clean, sets every score it did not write to **0**. So the
+host's own format was worth nothing after every Recyclarr run, and the only
+place it could be scored was Radarr's own web interface, by hand.
+
+Hence the split:
+
+| task | services | read | write | desired |
+|---|---|---|---|---|
+| `app-profiles` | Prowlarr | `GET /api/v1/appprofile` | `POST /api/v1/appprofile`, `PUT …/appprofile/{id}` | `profiles`: name → the four fields |
+| `custom-formats` | Radarr, Sonarr | `GET /api/v3/customformat` | `POST …/customformat`, `PUT …/customformat/{id}` | `formats`: name → the renaming switch and the specifications |
+| `quality-profiles` (extended) | Radarr, Sonarr | as in §5 | as in §5 | `format_scores`: format name → points |
+
+The host's answer to the second writer is `except` in Recyclarr's
+configuration: the format stays out of Recyclarr's reach, converge owns it and
+its score, and the two programs stop writing over each other. That is a
+decision on the host and not in this program, but it is the reason these three
+tasks exist at all.
+
+### Prowlarr's app profiles
+
+An app profile says how Prowlarr searches an indexer: `enableRss`,
+`enableAutomaticSearch`, `enableInteractiveSearch`, and `minimumSeeders`, the
+number below which a torrent is not handed on to Radarr or Sonarr. Prowlarr
+ships exactly one (`Standard`, id 1) and offers no way of writing another but
+the API -- so a second one is always something somebody clicked together, and
+nothing in a repository says what it holds.
+
+- **Found by name.** `id` and `name` are therefore not settable: the name is
+  how a profile is found, the id is the service's. A spec naming another field
+  is refused with the four that exist.
+- **A missing profile is added** with `name` and the fields the spec gives
+  (`app profile Wenig Seeder: (missing) -> (added)`). An existing one is
+  written **whole**, as it was read, with the named fields changed -- so a
+  field a later Prowlarr adds travels back untouched.
+- **The write takes 200 and 202**, the update being `202 Accepted` like every
+  other Servarr update; the engine reads back either way.
+- `AppProfileResource` is a wire type with all six of the component's fields,
+  so `schema-check` compares them, and a spec's fields go through
+  `check_paths` on top: `"minimumSeeders": "one"` fails at build time.
+
+### An indexer's app profile by name
+
+`IndexerResource.appProfileId` is an id, and an id in a spec is the wrong one
+after the database is rebuilt -- the same argument as for a root folder's
+default profiles (§11) and for Seerr's quality profile and root folder (§17).
+An `indexers` spec may therefore carry `app_profile` with the profile's
+**name** instead:
+
+```json
+{ "service": "prowlarr", "task": "indexers", "…": "…",
+  "desired": { "providers": {
+    "TNTracker": { "implementation": "Torznab", "app_profile": "Standard",
+                   "set": { "enable": true, "priority": 25 } } } } }
+```
+
+- **Naming both is a spec error** (`app_profile names the profile and
+  appProfileId its id -- name one of them`). There would be nothing to decide
+  which one wins, and a silent winner is worse than a refusal.
+- **Only a Prowlarr `indexers` spec may carry it.** No other provider resource
+  has an `appProfileId` at all, so a `download-clients` or `applications` spec
+  with one is refused rather than ignored.
+- **The list is read only when a spec names a profile**, as the tag list is
+  (§13) and the profile lists for a root folder are (§11). A spec that gives
+  the id never asks for it.
+- **A name the service does not have fails before the first write**, naming
+  the indexer and the name and nothing from the answer:
+  `not found on the service: indexer TNTracker: app_profile names "Gibt es
+  nicht", which the service does not have`. It is raised in `diff`, so `plan`
+  says it too.
+
+### Custom formats
+
+A custom format is a name, `includeCustomFormatWhenRenaming`, and a list of
+specifications -- each a rule (`ReleaseTitleSpecification` with a regular
+expression, `ResolutionSpecification` with a number) that can be negated and
+required, with `fields` entries that depend on the implementation.
+
+- **Formats the spec does not name are left alone, and `exactly` is refused
+  for this task.** This is the whole point: "the rest" here is Recyclarr's
+  seventy formats, and a green run that took them away would be a disaster
+  nobody asked for. They are **counted** in the note rather than listed --
+  `not in the spec, left as they are: 78 other formats` --, because
+  seventy-eight lines saying "left as it is" bury the one line that says
+  something.
+- **Within a named format the spec is complete.** Its specification list is
+  compared by name: one the spec does not name is `custom format 3D:
+  specification Old: (present) -> (removed)` and is gone from the body that is
+  written. There is no second writer inside a format converge owns, so there
+  is nothing to protect there.
+- **An existing specification is written as it was read**, with
+  `implementation`, `negate`, `required` and the named `fields` values
+  changed; `id`, `implementationName`, `infoLink` and a `select` field's
+  option list travel back untouched. A **new** one is built from the spec
+  alone (`{name, implementation, negate, required, fields: [{name, value}]}`),
+  which is what the service fills the rest in from.
+- **A `fields` name the specification does not have is an error before any
+  write** (`the answer has no such field: custom format AV1: specification
+  AV1: fields.regex`). Without it the value would be dropped silently, and the
+  run would end green on a format that matches nothing.
+- **`fields` have no schema**, as for providers (§12): `Field.value` is
+  untyped in the description. So `schema-check` compares the format's switch
+  against `CustomFormatResource` and each specification's four named fields
+  against `CustomFormatSpecificationSchema` (with `check_objects`, §6), and
+  the `fields` entries are checked against the answer at runtime only.
+- **The switch is required in the spec.** Leaving it out would write the
+  service's default, and which one that is nobody would have decided -- the
+  same reason Ghostfolio's `ENABLE_FEATURE_AUTH_TOKEN` is written out rather
+  than left absent.
+
+### Scores, in the profile
+
+A format's score does not live on the format; it lives in each quality
+profile's `formatItems`, one entry per format, with the format's `id` in
+`format` and its name in `name`. `desired.format_scores` on a
+`quality-profiles` spec names formats and points:
+
+```json
+{ "service": "radarr", "task": "quality-profiles", "…": "…",
+  "desired": { "allow_in_every_profile": ["Unknown"],
+               "format_scores": { "3D": -10000 } } }
+```
+
+- **Every profile, or every kept one.** Without `keep` the score must hold in
+  every profile; with `exactly` and `keep` (§39) only in the profiles that
+  survive -- a profile on its way out is not measured and not written, exactly
+  as for `allow_in_every_profile`.
+- **Found by name, written by id.** `format` is the service's id and stays
+  where it is; only `score` is ever changed, and every other `formatItems`
+  entry travels back as Recyclarr left it.
+- **A format the service does not have is an error before anything is
+  written**, naming the profile and the format: `not found on the service:
+  Dual Language, sonst Deutsch (1080p): custom format Dolby Vision HDR10+`.
+  `custom-formats` is what creates it, and **the order of the two specs is the
+  host's to arrange** -- converge runs the specs it is given, in order, and a
+  failing one does not stop the next (§13).
+- `QualityProfileResource` grew `formatItems` as a typed field and
+  `ProfileFormatItemResource` beside it, so `schema-check` descends into the
+  list (§5) instead of letting it pass as "an array".
+
+### What the recordings say, and what they cost
+
+`tests/fixtures/{radarr,sonarr}-*/customformat.json` are **reduced, not
+masked**: the answers held 78 and 60 formats and about 700 KB, most of it the
+`selectOptions` list every `select` field repeats. Five formats are kept byte
+for byte, chosen to cover one specification and two, a regular expression and
+a `select` value, and `negate` both ways. `SOURCE.md` says so, and says what
+the count means when a test reads "5 other formats" where the service would
+say 78.
+
+The profile recording gave one finding worth keeping: **not one of Radarr's
+78 formats carries the same score in all five profiles, except fifteen that
+are 0 everywhere, and Sonarr's 60 carry no uniform score at all.** That is
+what two families of profiles over one library look like, and it is why the
+"nothing to do" test names `AMZN` and `0` rather than a format one would have
+guessed.
+
 ## 20. Not in the pilot
 
 
@@ -2207,7 +2371,9 @@ path, and which of the two refusals it was.
 - Deleting things, **except where a spec asks for it** (§39, v0.36.0): with
   `"exactly": true`, Trailarr's connections (§9), Koel's radio stations (§18)
   and Radarr's and Sonarr's quality profiles (§5) lose what the spec does not
-  name. Without that switch -- and for every other task, which refuses it --
+  name. `custom-formats` (§41) refuses it on purpose: its collection has a
+  second writer, and "the rest" there is Recyclarr's seventy formats.
+  Without that switch -- and for every other task, which refuses it --
   `converge` only sets what the spec names, and appends
   list entries (§8), connections (§9), subscriptions (§10), root folders (§11, §14), providers (§12, §13), tags (§13), bindery's entries (§14), Seerr's servers
   (§17), Koel's radio stations (§18) and Audiobookshelf's libraries (§38) it is responsible for. SuggestArr's

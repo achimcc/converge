@@ -43,3 +43,11 @@ its public configuration names anyway.
 
 At recording time the host's desired state (`lib/arr-einstellungen.nix`,
 `.prowlarr`) matched: `plan` reported `unchanged` for both specs.
+
+Recorded 2026-09-22 from the same instance, upgraded to **Prowlarr 2.6.5**:
+
+- `appprofile.json` — `GET /api/v1/appprofile`, the one profile the service
+  has (`Standard`, id 1). **Verbatim**, keys sorted (`jq -S`). An app profile
+  carries no credential of any kind — four booleans, a number, a name and an
+  id — so nothing was masked, and the file was searched for long tokens all
+  the same.

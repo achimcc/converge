@@ -8,6 +8,7 @@ pub mod kavita;
 pub mod koel;
 pub mod ntfy;
 pub mod providers;
+pub mod prowlarr;
 pub mod seerr;
 pub mod servarr;
 pub mod suggestarr;

@@ -1,0 +1,266 @@
+[
+  {
+    "id": 2,
+    "includeCustomFormatWhenRenaming": false,
+    "name": "1080p",
+    "specifications": [
+      {
+        "fields": [
+          {
+            "advanced": false,
+            "isFloat": false,
+            "label": "Resolution",
+            "name": "value",
+            "order": 0,
+            "privacy": "normal",
+            "selectOptions": [
+              {
+                "name": "Unknown",
+                "order": 0,
+                "value": 0
+              },
+              {
+                "name": "R360p",
+                "order": 360,
+                "value": 360
+              },
+              {
+                "name": "R480p",
+                "order": 480,
+                "value": 480
+              },
+              {
+                "name": "R540p",
+                "order": 540,
+                "value": 540
+              },
+              {
+                "name": "R576p",
+                "order": 576,
+                "value": 576
+              },
+              {
+                "name": "R720p",
+                "order": 720,
+                "value": 720
+              },
+              {
+                "name": "R1080p",
+                "order": 1080,
+                "value": 1080
+              },
+              {
+                "name": "R2160p",
+                "order": 2160,
+                "value": 2160
+              }
+            ],
+            "type": "select",
+            "value": 1080
+          }
+        ],
+        "implementation": "ResolutionSpecification",
+        "implementationName": "Resolution",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "name": "1080p",
+        "negate": false,
+        "required": true
+      }
+    ]
+  },
+  {
+    "id": 20,
+    "includeCustomFormatWhenRenaming": false,
+    "name": "Repack/Proper",
+    "specifications": [
+      {
+        "fields": [
+          {
+            "advanced": false,
+            "helpText": "Custom Format RegEx is Case Insensitive",
+            "isFloat": false,
+            "label": "Regular Expression",
+            "name": "value",
+            "order": 0,
+            "privacy": "normal",
+            "type": "textbox",
+            "value": "\\b(Repack|Proper|Rerip)\\b"
+          }
+        ],
+        "implementation": "ReleaseTitleSpecification",
+        "implementationName": "Release Title",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "name": "Repack/Proper/Rerip",
+        "negate": false,
+        "required": true
+      },
+      {
+        "fields": [
+          {
+            "advanced": false,
+            "helpText": "Custom Format RegEx is Case Insensitive",
+            "isFloat": false,
+            "label": "Regular Expression",
+            "name": "value",
+            "order": 0,
+            "privacy": "normal",
+            "type": "textbox",
+            "value": "\\b((repack|proper)[23])\\b|\\bREAL\\.(REAL\\.)?(PROPER|REPACK)\\b"
+          }
+        ],
+        "implementation": "ReleaseTitleSpecification",
+        "implementationName": "Release Title",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "name": "Not Higher Version Repack/Proper",
+        "negate": true,
+        "required": true
+      }
+    ]
+  },
+  {
+    "id": 42,
+    "includeCustomFormatWhenRenaming": false,
+    "name": "x265 (HD)",
+    "specifications": [
+      {
+        "fields": [
+          {
+            "advanced": false,
+            "helpText": "Custom Format RegEx is Case Insensitive",
+            "isFloat": false,
+            "label": "Regular Expression",
+            "name": "value",
+            "order": 0,
+            "privacy": "normal",
+            "type": "textbox",
+            "value": "[xh][ ._-]?265|\\bHEVC(\\b|\\d)"
+          }
+        ],
+        "implementation": "ReleaseTitleSpecification",
+        "implementationName": "Release Title",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "name": "x265/HEVC",
+        "negate": false,
+        "required": true
+      },
+      {
+        "fields": [
+          {
+            "advanced": false,
+            "isFloat": false,
+            "label": "Resolution",
+            "name": "value",
+            "order": 0,
+            "privacy": "normal",
+            "selectOptions": [
+              {
+                "name": "Unknown",
+                "order": 0,
+                "value": 0
+              },
+              {
+                "name": "R360p",
+                "order": 360,
+                "value": 360
+              },
+              {
+                "name": "R480p",
+                "order": 480,
+                "value": 480
+              },
+              {
+                "name": "R540p",
+                "order": 540,
+                "value": 540
+              },
+              {
+                "name": "R576p",
+                "order": 576,
+                "value": 576
+              },
+              {
+                "name": "R720p",
+                "order": 720,
+                "value": 720
+              },
+              {
+                "name": "R1080p",
+                "order": 1080,
+                "value": 1080
+              },
+              {
+                "name": "R2160p",
+                "order": 2160,
+                "value": 2160
+              }
+            ],
+            "type": "select",
+            "value": 2160
+          }
+        ],
+        "implementation": "ResolutionSpecification",
+        "implementationName": "Resolution",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "name": "Not 2160p",
+        "negate": true,
+        "required": true
+      }
+    ]
+  },
+  {
+    "id": 43,
+    "includeCustomFormatWhenRenaming": false,
+    "name": "AV1",
+    "specifications": [
+      {
+        "fields": [
+          {
+            "advanced": false,
+            "helpText": "Custom Format RegEx is Case Insensitive",
+            "isFloat": false,
+            "label": "Regular Expression",
+            "name": "value",
+            "order": 0,
+            "privacy": "normal",
+            "type": "textbox",
+            "value": "\\bAV1\\b"
+          }
+        ],
+        "implementation": "ReleaseTitleSpecification",
+        "implementationName": "Release Title",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "name": "AV1",
+        "negate": false,
+        "required": true
+      }
+    ]
+  },
+  {
+    "id": 44,
+    "includeCustomFormatWhenRenaming": false,
+    "name": "BR-DISK",
+    "specifications": [
+      {
+        "fields": [
+          {
+            "advanced": false,
+            "helpText": "Custom Format RegEx is Case Insensitive",
+            "isFloat": false,
+            "label": "Regular Expression",
+            "name": "value",
+            "order": 0,
+            "privacy": "normal",
+            "type": "textbox",
+            "value": "^(?!.*\\b((?<!HD[._ -]|HD)DVD|BDRip|MKV|XviD|WMV|d3g|(BD)?REMUX|^(?=.*1080p)(?=.*HEVC)|[xh][-_. ]?26[45]|German.*[DM]L|((?<=\\d{4}).*German.*([DM]L)?)(?=.*\\b(AVC|HEVC|VC[-_. ]?1|MVC|MPEG[-_. ]?2)\\b))\\b)(((?=.*\\b(Blu[-_. ]?ray|BD|HD[-_. ]?DVD)\\b)(?=.*\\b(AVC|HEVC|VC[-_. ]?1|MVC|MPEG[-_. ]?2|BDMV|ISO)\\b))|^((?=.*\\b(((?=.*\\b((.*_)?COMPLETE.*|Dis[ck])\\b)(?=.*(Blu[-_. ]?ray|HD[-_. ]?DVD)))|3D[-_. ]?BD|BR[-_. ]?DISK|Full[-_. ]?Blu[-_. ]?ray|^((?=.*((BD|UHD)[-_. ]?(25|50|66|100|ISO)))))))).*"
+          }
+        ],
+        "implementation": "ReleaseTitleSpecification",
+        "implementationName": "Release Title",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "name": "BR-DISK",
+        "negate": false,
+        "required": true
+      }
+    ]
+  }
+]
