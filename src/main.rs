@@ -259,6 +259,25 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::UserPolicies(settings) => {
+            let task = jellyfin::UserPolicies {
+                all: settings.all.clone(),
+                accounts: settings.accounts.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        Desired::DisplayPreferences(settings) => {
+            let task = jellyfin::DisplayPreferences {
+                client: settings.client.clone(),
+                all: settings.all.custom_prefs.clone(),
+                accounts: settings
+                    .accounts
+                    .iter()
+                    .map(|(name, prefs)| (name.clone(), prefs.custom_prefs.clone()))
+                    .collect(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
         Desired::LibraryOptions(settings) => {
             let task = jellyfin::LibraryOptions {
                 libraries: settings.libraries.clone(),
@@ -764,6 +783,26 @@ fn schema_check(args: &[String]) -> ExitCode {
                 schema::check_paths(&document, jellyfin::LIBRARY_OPTIONS, &settings.set),
                 settings.set.len(),
             ),
+            // Every field of both maps is a top-level property of
+            // `UserPolicy`, checked for existence, type and enum (§40).
+            Desired::UserPolicies(settings) => {
+                let mut found =
+                    schema::check_paths(&document, jellyfin::USER_POLICY, &settings.all);
+                let mut count = settings.all.len();
+                for (name, set) in &settings.accounts {
+                    count += set.len();
+                    found.extend(
+                        schema::check_paths(&document, jellyfin::USER_POLICY, set)
+                            .into_iter()
+                            .map(|f| format!("account {name}: {f}")),
+                    );
+                }
+                (found, count)
+            }
+            // `CustomPrefs` is a free string map (`additionalProperties` in
+            // `DisplayPreferencesDto`): its keys are not properties a schema
+            // could know. Only the endpoints are checked, above.
+            Desired::DisplayPreferences(_) => (Vec::new(), 0),
             Desired::ScheduledTaskTriggers(triggers) => {
                 let list = serde_json::Value::Array(
                     triggers

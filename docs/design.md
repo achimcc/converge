@@ -2104,6 +2104,101 @@ The policy on `destroy` is `RadioStationPolicy::delete`, which is
 organization. converge's account is the owner of every station it sees, since
 that is what `include_public_media` off means.
 
+## 40. Jellyfin: account policies and display preferences (2026-09-22)
+
+Three shell units on the host write into Jellyfin per account, on a timer:
+one sets `AuthenticationProviderId` to the LDAP plugin, one sets four
+permissions (`EnableAllFolders` false, `EnableSubtitleManagement` true,
+`EnableLiveTvAccess` true, `EnableLiveTvManagement` false), one sets the
+custom pref `livetv-favoritechannelsattop` to `"false"`. Every value is a
+constant in a shell script, and nothing reads them back. `IsAdministrator` is
+the field none of them touches: who is an administrator is whatever somebody
+once clicked, and the recorded answer shows it -- one of nine accounts, and no
+file in the host repository says so.
+
+| task | read | write |
+|---|---|---|
+| `user-policies` | `GET /Users` (`UserDto` with `Policy` embedded) | `POST /Users/{userId}/Policy` with the whole `UserPolicy`, per differing account |
+| `display-preferences` | `GET /Users`, then `GET /DisplayPreferences/usersettings?userId={id}&client={client}` per account | `POST` of the same path with the whole `DisplayPreferencesDto` |
+
+**Both write the whole document, because Jellyfin replaces it.**
+`UpdateUserPolicy` declares a required body of one `UserPolicy` and answers
+`204`; there is no partial body and nothing it could merge into. A write that
+carried only the named fields would
+therefore reset the other thirty-six to their defaults -- which folders an
+account may see, its device list, its bitrate limit. So the task reads the
+policy, changes the named fields in it and sends it back as it came, the way
+`server-configuration` does with the configuration document (§6). The same
+holds for the display preferences: the document carries sort order, image
+sizes and the sidebar switch next to `CustomPrefs`.
+
+**`all` and `accounts`, because both questions are real.** Four of the five
+fields the host sets are the same for everybody, and writing them nine times
+into a spec would be nine chances to mistype one. `IsAdministrator` is the
+opposite: exactly one account carries `true` and the rest `false` -- and
+saying it that way is the point, because a spec that named only the
+administrator would leave a second one, added by hand in the web interface,
+standing. `all` says what everybody carries, `accounts` overrides it by the
+account's `Name`, and the two together make "one administrator" a statement
+converge can hold.
+
+**An account name the answer does not hold is a note, not an error.** It was
+an error at first, and on the host that would have been wrong: the
+administrators are derived from the authentik group `Verwaltung`, but a
+Jellyfin account does not exist until its owner has signed in once. A new
+member of that group would therefore have kept the unit red -- every run, for
+every account -- until the day they first logged in, and the one thing such a
+red says nothing about is whether the eight accounts that *are* there still
+carry what the spec names. So the name is skipped, `converge` says
+`account <name>: not on the service yet — skipped`, nothing is written for it,
+and the outcome is whatever the accounts the service does hold make it. The
+price is that a misspelled name is now quiet as well; the trade is deliberate,
+because the other kind of silence was worse. `all` is untouched by this: it
+names no account, so it has no name that could be absent.
+
+**A policy field the answer does not carry is an error; a custom pref it does
+not carry is a change.** The difference is in the two documents.
+`UserPolicy` is a C# class: Jellyfin serialises every property, so a name that
+is not in the answer is a misspelling -- `EnableAllFoldrs` would otherwise be
+added to the policy and written back forever. `CustomPrefs` is a string map a
+client fills as it goes; on the recorded instance it holds eleven keys, two of
+them `null`, and an account that has never opened the Live TV page simply has
+no `livetv-favoritechannelsattop`. That is `(missing) -> "false"`, the case
+the host's own unit was written for.
+
+**The values are strings, all of them.** `CustomPrefs` is
+`additionalProperties: {type: string, nullable: true}`, and the web client
+stores `"false"`, `"true"`, `"10000"`. A spec that wrote `false` would be a
+spec that never converges, so `custom_prefs` takes strings and a boolean is a
+spec error. For the same reason `schema-check` says nothing about these keys:
+they are not properties, and no description can know them. A `user-policies`
+spec's fields *are* properties, and are checked against `UserPolicy` for
+existence, type and enum, as `server-configuration`'s are (§3).
+
+**The trap is that there are two writers.** The host's `jellyfin-gruppenabgleich`
+runs every fifteen minutes and writes each account's policy **whole** as well
+-- it has to, for the same reason converge does. Two writers on one document
+is the pattern that cost the most here before (two authentik files describing
+one membership, two Jellyfin plugins setting one folder list): each write is
+correct on its own, and the one that ran last wins. Converge cannot be the only
+writer, and it does not try: it changes the fields a spec names and carries
+every other one back as it read it, so its write is a no-op for everything the
+group sync owns. **What the two must not do is disagree about a named field.**
+As long as the constants in the host's units and the spec say the same thing,
+the order of the two writers does not matter; the moment they differ, the
+symptom is a value that flips every fifteen minutes and a `plan` that is red
+whenever it happens to run in the wrong half of the cycle. The host's units
+are what a spec replaces, one at a time -- not what it runs beside.
+
+The recorded answers are `tests/fixtures/jellyfin-10.11.11/users.json` (masked:
+the nine account names are `konto1` … `konto9`, and what says when somebody
+last watched something is removed) and
+`displaypreferences-usersettings.json`. `auth-providers.json` is recorded with
+them: it is what turns the provider id of a policy into a name.
+`GET /Users` carries no credential, but nothing from a body ever reaches an
+error here either -- a refused write says the status, the account's id in the
+path, and which of the two refusals it was.
+
 ## 20. Not in the pilot
 
 

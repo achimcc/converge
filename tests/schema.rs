@@ -306,6 +306,37 @@ fn null_needs_a_nullable_property() {
     );
 }
 
+/// The fields of a `user-policies` spec are top-level properties of
+/// `UserPolicy` (design §40): a misspelt name, a wrong type and a value
+/// outside an enum are all build errors.
+#[test]
+fn account_policy_fields_are_checked_against_user_policy() {
+    let found = paths(
+        converge::services::jellyfin::USER_POLICY,
+        serde_json::json!({
+            "AuthenticationProviderId": "Jellyfin.Plugin.LDAP_Auth.LdapAuthenticationProviderPlugin",
+            "EnableAllFolders": false,
+            "EnableSubtitleManagement": true,
+            "EnableLiveTvAccess": true,
+            "EnableLiveTvManagement": false,
+            "IsAdministrator": true
+        }),
+    );
+    assert_eq!(found, Vec::<String>::new());
+    assert_eq!(
+        paths("UserPolicy", serde_json::json!({"IsAdminstrator": true})),
+        ["UserPolicy.IsAdminstrator: UserPolicy has no property IsAdminstrator"]
+    );
+    assert_eq!(
+        paths("UserPolicy", serde_json::json!({"IsAdministrator": "yes"})),
+        ["UserPolicy.IsAdministrator: expects boolean, the spec has a string"]
+    );
+    assert_eq!(
+        paths("UserPolicy", serde_json::json!({"SyncPlayAccess": "Everything"})),
+        ["UserPolicy.SyncPlayAccess: \"Everything\" is not one of CreateAndJoinGroups, JoinGroups, None"]
+    );
+}
+
 #[test]
 fn the_jellyfin_endpoints_and_wire_types_match() {
     let found = check(

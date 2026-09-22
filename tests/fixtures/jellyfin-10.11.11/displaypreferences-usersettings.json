@@ -1,0 +1,26 @@
+{
+  "Client": "emby",
+  "CustomPrefs": {
+    "43cfe12fe7d9d8d21251e0964e0232e2-series": "{\"SortBy\":\"SortName\",\"SortOrder\":\"Ascending\"}",
+    "7a2175bccb1f1a94152cbd2b2bae8f6d-movies": "{\"SortBy\":\"CriticRating,SortName,ProductionYear\",\"SortOrder\":\"Descending\"}",
+    "8a05b0252259a1dbd62df97522638439-musicalbums": "{\"SortBy\":\"SortName\",\"SortOrder\":\"Ascending\"}",
+    "chromecastVersion": "stable",
+    "dashboardTheme": null,
+    "enableNextVideoInfoOverlay": "False",
+    "livetv-favoritechannelsattop": "false",
+    "skipBackLength": "10000",
+    "skipForwardLength": "30000",
+    "tvhome": null,
+    "useModularHome": "true"
+  },
+  "Id": "3ce5b65d-e116-d731-65d1-efc4a30ec35c",
+  "PrimaryImageHeight": 250,
+  "PrimaryImageWidth": 250,
+  "RememberIndexing": false,
+  "RememberSorting": false,
+  "ScrollDirection": "Horizontal",
+  "ShowBackdrop": true,
+  "ShowSidebar": false,
+  "SortBy": "SortName",
+  "SortOrder": "Ascending"
+}

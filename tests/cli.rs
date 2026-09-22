@@ -103,7 +103,7 @@ fn schema_check_reads_jellyfin_specs_and_rejects_a_trigger_type_outside_the_enum
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("jellyfin: 12 endpoints and their wire types match"),
+        stdout.contains("jellyfin: 16 endpoints and their wire types match"),
         "{stdout}"
     );
     assert!(
@@ -186,6 +186,85 @@ fn schema_check_checks_a_named_configuration_against_the_component_of_its_key() 
     assert!(
         stderr.contains("NetworkConfiguration.LoginDisclaimer: NetworkConfiguration has no property LoginDisclaimer"),
         "{stderr}"
+    );
+}
+
+/// The account maps of a `user-policies` spec are checked field by field
+/// against `UserPolicy`, and a finding names the account it came from.
+#[test]
+fn schema_check_counts_both_account_maps_and_names_the_account_of_a_finding() {
+    let openapi = format!(
+        "{}/openapi/jellyfin-10.11.11.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let spec = |name: &str, desired: &str| {
+        let path = dir.path().join(name);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"service":"jellyfin","base_url":"http://localhost:8096","api_key_credential":"k","task":"user-policies","desired":{desired}}}"#
+            ),
+        )
+        .unwrap();
+        path
+    };
+    let check = |path: &std::path::Path| {
+        converge()
+            .args([
+                "schema-check",
+                "--service",
+                "jellyfin",
+                "--openapi",
+                &openapi,
+                "--spec",
+            ])
+            .arg(path)
+            .output()
+            .unwrap()
+    };
+
+    let good = spec(
+        "good.json",
+        r#"{"all":{"EnableAllFolders":false,"EnableLiveTvAccess":true,"IsAdministrator":false},
+            "accounts":{"konto1":{"IsAdministrator":true}}}"#,
+    );
+    let out = check(&good);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("4 spec field(s) in 1 spec(s) match"),
+        "{stdout}"
+    );
+
+    let misspelt = spec(
+        "misspelt.json",
+        r#"{"accounts":{"konto1":{"IsAdminstrator":true}}}"#,
+    );
+    let out = check(&misspelt);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(
+            "account konto1: UserPolicy.IsAdminstrator: UserPolicy has no property IsAdminstrator"
+        ),
+        "{stderr}"
+    );
+
+    // A display-preferences spec has no field a schema knows -- but its
+    // endpoints are checked, so the run still says something.
+    let prefs = dir.path().join("prefs.json");
+    std::fs::write(
+        &prefs,
+        r#"{"service":"jellyfin","base_url":"http://localhost:8096","api_key_credential":"k","task":"display-preferences","desired":{"client":"emby","all":{"custom_prefs":{"livetv-favoritechannelsattop":"false"}}}}"#,
+    )
+    .unwrap();
+    let out = check(&prefs);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("jellyfin: 16 endpoints and their wire types match"),
+        "{stdout}"
     );
 }
 

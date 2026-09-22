@@ -98,7 +98,36 @@ pub const PLUGIN_CONFIGURATION_WRITE: Endpoint = Endpoint {
     request: None,
     response: None,
 };
-pub const ENDPOINTS: [Endpoint; 12] = [
+pub const USERS: Endpoint = Endpoint {
+    method: "GET",
+    path: "/Users",
+    request: None,
+    response: Some(Shape::List("UserDto")),
+};
+/// The whole policy of one account: Jellyfin replaces it, it does not merge
+/// (design §40).
+pub const USER_POLICY_WRITE: Endpoint = Endpoint {
+    method: "POST",
+    path: "/Users/{userId}/Policy",
+    request: Some(Shape::Document("UserPolicy")),
+    response: None,
+};
+/// The display preferences of one account under one client. Both the account
+/// and the client are query parameters; `displayPreferencesId` is
+/// `usersettings` for the settings a client keeps per account.
+pub const DISPLAY_PREFERENCES_READ: Endpoint = Endpoint {
+    method: "GET",
+    path: "/DisplayPreferences/{displayPreferencesId}",
+    request: None,
+    response: Some(Shape::Document("DisplayPreferencesDto")),
+};
+pub const DISPLAY_PREFERENCES_WRITE: Endpoint = Endpoint {
+    method: "POST",
+    path: "/DisplayPreferences/{displayPreferencesId}",
+    request: Some(Shape::Document("DisplayPreferencesDto")),
+    response: None,
+};
+pub const ENDPOINTS: [Endpoint; 16] = [
     SYSTEM_INFO,
     CONFIGURATION_READ,
     CONFIGURATION_WRITE,
@@ -111,12 +140,17 @@ pub const ENDPOINTS: [Endpoint; 12] = [
     PLUGINS,
     PLUGIN_CONFIGURATION_READ,
     PLUGIN_CONFIGURATION_WRITE,
+    USERS,
+    USER_POLICY_WRITE,
+    DISPLAY_PREFERENCES_READ,
+    DISPLAY_PREFERENCES_WRITE,
 ];
 
 /// The component each task's spec paths are checked against.
 pub const SERVER_CONFIGURATION: &str = "ServerConfiguration";
 pub const LIBRARY_OPTIONS: &str = "LibraryOptions";
 pub const TASK_TRIGGER_INFO: &str = "TaskTriggerInfo";
+pub const USER_POLICY: &str = "UserPolicy";
 
 pub fn wire_types() -> Vec<schemars::Schema> {
     vec![
@@ -126,6 +160,7 @@ pub fn wire_types() -> Vec<schemars::Schema> {
         schemars::schema_for!(TaskInfo),
         schemars::schema_for!(TaskTriggerInfo),
         schemars::schema_for!(PluginInfo),
+        schemars::schema_for!(UserDto),
     ]
 }
 
@@ -157,6 +192,24 @@ pub struct VirtualFolderInfo {
     #[serde(default)]
     #[schemars(skip)]
     pub library_options: Option<Value>,
+}
+
+/// One account, as `GET /Users` answers. Only these three fields are kept:
+/// everything else the answer carries says when somebody last watched
+/// something or which picture they picked, and a change about an account
+/// names nothing but its name and the fields the spec asked for.
+///
+/// `Policy` is a document whose fields a spec names, so it stays a `Value`
+/// and is written back as it was read.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "PascalCase")]
+pub struct UserDto {
+    #[serde(default)]
+    pub name: Option<String>,
+    pub id: String,
+    #[serde(default)]
+    #[schemars(skip)]
+    pub policy: Option<Value>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -976,6 +1029,348 @@ impl Task for PluginConfigurations {
     }
 }
 
+// --- accounts: policies and display preferences (design §40) ---------------
+
+/// `displayPreferencesId` of the settings a client keeps per account.
+pub const USER_SETTINGS: &str = "usersettings";
+
+/// The key of the string map inside a display preferences document.
+const CUSTOM_PREFS: &str = "CustomPrefs";
+
+/// Shown where a `CustomPrefs` key is not there at all. Jellyfin's map is
+/// sparse by design, so this is a change, not an error -- unlike a policy
+/// field, which every policy carries.
+const MISSING: &str = "(missing)";
+
+impl UserDto {
+    /// How a change and an error name the account. An account whose `Name`
+    /// the answer omits cannot be named by a spec, but a change about it
+    /// must still say which one it is.
+    fn label(&self) -> String {
+        format!("account {}", self.name.as_deref().unwrap_or(&self.id))
+    }
+
+    /// The account's policy as an object. Jellyfin declares it nullable, and
+    /// a spec's fields have nothing to be compared against without it.
+    fn policy(&self) -> Result<&Map<String, Value>, Error> {
+        self.policy
+            .as_ref()
+            .and_then(Value::as_object)
+            .ok_or_else(|| Error::MissingField(vec![format!("{}: Policy", self.label())]))
+    }
+}
+
+/// A status these two tasks do not accept. Nothing from the body reaches the
+/// message: every answer here is a document about accounts.
+fn refuse_account(method: &'static str, path: &str, status: u16) -> Error {
+    Error::Status {
+        method,
+        path: path.to_string(),
+        status,
+        validation: match status {
+            401 => vec!["the API key was refused".to_string()],
+            403 => vec!["the key's account may not do this".to_string()],
+            _ => Vec::new(),
+        },
+    }
+}
+
+/// Every account the service holds. An empty list is an error: a check over
+/// no account would be green for the wrong reason.
+fn read_users(t: &dyn Transport) -> Result<Vec<UserDto>, Error> {
+    let reply = t.get(USERS.path)?;
+    if reply.status != 200 {
+        return Err(refuse_account(USERS.method, USERS.path, reply.status));
+    }
+    let users: Vec<UserDto> = decode(USERS.path, &reply.body)?;
+    if users.is_empty() {
+        return Err(Error::EmptyList {
+            path: USERS.path.to_string(),
+        });
+    }
+    Ok(users)
+}
+
+/// The names an `accounts` map holds that the service does not hold yet, in
+/// the order the spec names them. Not an error: the host derives the
+/// administrators from an authentik group, and a Jellyfin account comes into
+/// being at its owner's first sign-in -- a new member would otherwise keep
+/// the unit red until then. Nothing is written for such a name, and every
+/// other account is reconciled as usual (design §40).
+fn absent_accounts<'a>(users: &[UserDto], named: impl Iterator<Item = &'a String>) -> Vec<String> {
+    let have: Vec<&str> = users.iter().filter_map(|u| u.name.as_deref()).collect();
+    named
+        .filter(|n| !have.contains(&n.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// How a note names an account the service does not hold yet.
+fn absent_note(name: &str) -> String {
+    format!("account {name}: not on the service yet — skipped")
+}
+
+/// `all` with the account's own entries on top.
+fn merged<T: Clone>(
+    all: &BTreeMap<String, T>,
+    accounts: &BTreeMap<String, BTreeMap<String, T>>,
+    user: &UserDto,
+) -> BTreeMap<String, T> {
+    let mut set = all.clone();
+    if let Some(own) = user.name.as_deref().and_then(|n| accounts.get(n)) {
+        set.extend(own.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+    set
+}
+
+// --- user-policies ----------------------------------------------------------
+
+/// The policy fields every account must carry, and the ones single accounts
+/// carry instead. Jellyfin replaces the whole policy on a write, so every
+/// field converge does not name goes back as it was read (design §40).
+pub struct UserPolicies {
+    pub all: BTreeMap<String, Value>,
+    pub accounts: BTreeMap<String, BTreeMap<String, Value>>,
+}
+
+impl UserPolicies {
+    fn set_for(&self, user: &UserDto) -> BTreeMap<String, Value> {
+        merged(&self.all, &self.accounts, user)
+    }
+}
+
+impl Task for UserPolicies {
+    type Current = Vec<UserDto>;
+
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        probe(t)
+    }
+
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        read_users(t)
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        let mut changes = Vec::new();
+        let mut missing = Vec::new();
+        for user in current {
+            let set = self.set_for(user);
+            if set.is_empty() {
+                continue;
+            }
+            let policy = user.policy()?;
+            for (field, desired) in &set {
+                match policy.get(field) {
+                    // Unlike a custom pref, a policy field is one Jellyfin
+                    // always answers with: a name it does not know is a
+                    // misspelling, not something to add.
+                    None => missing.push(format!("{}: Policy.{field}", user.label())),
+                    Some(now) if now != desired => changes.push(Change {
+                        subject: user.label(),
+                        field: format!("Policy.{field}"),
+                        current: shortened(now),
+                        desired: shortened(desired),
+                    }),
+                    Some(_) => {}
+                }
+            }
+        }
+        if missing.is_empty() {
+            Ok(changes)
+        } else {
+            Err(Error::MissingField(missing))
+        }
+    }
+
+    fn notes(&self, current: &Self::Current) -> Vec<String> {
+        absent_accounts(current, self.accounts.keys())
+            .iter()
+            .map(|name| absent_note(name))
+            .collect()
+    }
+
+    /// One POST per account that differs, each with that account's whole
+    /// policy as it was read and only the named fields changed.
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        for user in current {
+            let set = self.set_for(user);
+            let policy = user.policy()?;
+            if set.is_empty() || set.iter().all(|(f, d)| policy.get(f) == Some(d)) {
+                continue;
+            }
+            let mut updated = policy.clone();
+            for (field, value) in &set {
+                if !updated.contains_key(field) {
+                    return Err(Error::MissingField(vec![format!(
+                        "{}: Policy.{field}",
+                        user.label()
+                    )]));
+                }
+                updated.insert(field.clone(), value.clone());
+            }
+            let path = USER_POLICY_WRITE.path.replace("{userId}", &user.id);
+            let body = serialize(USER_POLICY_WRITE.method, &path, &Value::Object(updated))?;
+            let reply = t.post_json(&path, &body)?;
+            if !matches!(reply.status, 200 | 204) {
+                return Err(refuse_account(
+                    USER_POLICY_WRITE.method,
+                    &path,
+                    reply.status,
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+// --- display-preferences ----------------------------------------------------
+
+/// The path one account's display preferences live under. Both parameters
+/// are checked by the spec (`client`) or are ids the service handed out
+/// (`user_id`), so neither needs escaping here.
+fn preferences_path(user_id: &str, client: &str) -> String {
+    format!(
+        "{}?userId={user_id}&client={client}",
+        DISPLAY_PREFERENCES_READ
+            .path
+            .replace("{displayPreferencesId}", USER_SETTINGS)
+    )
+}
+
+/// One account and the display preferences document it answered with.
+pub struct AccountPreferences {
+    user: UserDto,
+    document: Value,
+}
+
+/// What `read` found: the accounts the spec has something to say about, and
+/// the names it names that the service does not hold yet. The second list is
+/// kept because `read` asks for no document for such a name, so nothing
+/// later could tell it apart from an account the spec is silent about.
+pub struct AccountDocuments {
+    accounts: Vec<AccountPreferences>,
+    absent: Vec<String>,
+}
+
+/// `CustomPrefs` keys every account must carry, and the ones single accounts
+/// carry instead. The document is written as a whole, like a policy.
+pub struct DisplayPreferences {
+    pub client: String,
+    pub all: BTreeMap<String, String>,
+    pub accounts: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+impl DisplayPreferences {
+    fn set_for(&self, user: &UserDto) -> BTreeMap<String, String> {
+        merged(&self.all, &self.accounts, user)
+    }
+}
+
+impl Task for DisplayPreferences {
+    type Current = AccountDocuments;
+
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        probe(t)
+    }
+
+    /// The accounts first, then one request per account the spec has
+    /// something to say about.
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        let users = read_users(t)?;
+        let absent = absent_accounts(&users, self.accounts.keys());
+        let mut accounts = Vec::new();
+        for user in users {
+            if self.set_for(&user).is_empty() {
+                continue;
+            }
+            let path = preferences_path(&user.id, &self.client);
+            let reply = t.get(&path)?;
+            if reply.status != 200 {
+                return Err(refuse_account(
+                    DISPLAY_PREFERENCES_READ.method,
+                    &path,
+                    reply.status,
+                ));
+            }
+            let document: Value = decode(&path, &reply.body)?;
+            if !document.is_object() {
+                return Err(Error::Decode {
+                    path,
+                    reason: "not an object".to_string(),
+                });
+            }
+            accounts.push(AccountPreferences { user, document });
+        }
+        Ok(AccountDocuments { accounts, absent })
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        let mut changes = Vec::new();
+        for account in &current.accounts {
+            let prefs = account.document.get(CUSTOM_PREFS);
+            for (key, desired) in &self.set_for(&account.user) {
+                let desired = Value::String(desired.clone());
+                let now = prefs.and_then(|p| p.get(key));
+                if now == Some(&desired) {
+                    continue;
+                }
+                changes.push(Change {
+                    subject: account.user.label(),
+                    field: format!("{CUSTOM_PREFS}.{key}"),
+                    // A key the map does not carry is normal: Jellyfin
+                    // stores only what a client has written.
+                    current: now.map_or_else(|| MISSING.to_string(), shortened),
+                    desired: shortened(&desired),
+                });
+            }
+        }
+        Ok(changes)
+    }
+
+    fn notes(&self, current: &Self::Current) -> Vec<String> {
+        current.absent.iter().map(|n| absent_note(n)).collect()
+    }
+
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        for account in &current.accounts {
+            let set = self.set_for(&account.user);
+            let prefs = account.document.get(CUSTOM_PREFS);
+            if set
+                .iter()
+                .all(|(k, v)| prefs.and_then(|p| p.get(k)) == Some(&Value::String(v.clone())))
+            {
+                continue;
+            }
+            let mut updated = account.document.clone();
+            let map = updated
+                .as_object_mut()
+                .expect("read refuses a document that is not an object")
+                .entry(CUSTOM_PREFS)
+                .or_insert_with(|| Value::Object(Map::new()));
+            let Some(map) = map.as_object_mut() else {
+                return Err(Error::Decode {
+                    path: preferences_path(&account.user.id, &self.client),
+                    reason: format!("{CUSTOM_PREFS} is not an object"),
+                });
+            };
+            for (key, value) in &set {
+                map.insert(key.clone(), Value::String(value.clone()));
+            }
+            let path = preferences_path(&account.user.id, &self.client);
+            let body = serialize(DISPLAY_PREFERENCES_WRITE.method, &path, &updated)?;
+            let reply = t.post_json(&path, &body)?;
+            if !matches!(reply.status, 200 | 204) {
+                return Err(refuse_account(
+                    DISPLAY_PREFERENCES_WRITE.method,
+                    &path,
+                    reply.status,
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1764,5 +2159,304 @@ mod tests {
         let task = targets("<masked>");
         let t = plugins_transport(&plugin_file(OSCARS), &plugin_file(MEDIATHEK));
         assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
+    }
+
+    // --- user-policies and display-preferences (design §40) ----------------
+
+    const USERS_JSON: &str = include_str!("../../tests/fixtures/jellyfin-10.11.11/users.json");
+    const PREFERENCES: &str =
+        include_str!("../../tests/fixtures/jellyfin-10.11.11/displaypreferences-usersettings.json");
+
+    const LDAP_PROVIDER: &str = "Jellyfin.Plugin.LDAP_Auth.LdapAuthenticationProviderPlugin";
+
+    /// What the host's three shell units set on every account, plus the one
+    /// field nobody set: one administrator, everybody else not.
+    fn host_policies() -> UserPolicies {
+        UserPolicies {
+            all: fields(&[
+                ("AuthenticationProviderId", json!(LDAP_PROVIDER)),
+                ("EnableAllFolders", json!(false)),
+                ("EnableSubtitleManagement", json!(true)),
+                ("EnableLiveTvAccess", json!(true)),
+                ("EnableLiveTvManagement", json!(false)),
+                ("IsAdministrator", json!(false)),
+            ]),
+            accounts: [(
+                "konto1".to_string(),
+                fields(&[("IsAdministrator", json!(true))]),
+            )]
+            .into_iter()
+            .collect(),
+        }
+    }
+
+    fn recorded_users() -> Vec<Value> {
+        serde_json::from_str(USERS_JSON).unwrap()
+    }
+
+    fn account(name: &str) -> Value {
+        recorded_users()
+            .into_iter()
+            .find(|u| u["Name"] == json!(name))
+            .expect("the fixture holds that account")
+    }
+
+    fn account_id(name: &str) -> String {
+        account(name)["Id"].as_str().unwrap().to_string()
+    }
+
+    fn users_transport(body: &str) -> FakeTransport {
+        FakeTransport::default()
+            .on_get(USERS.path, vec![ok(body)])
+            .on_put(vec![Step::Answer(204, String::new())])
+    }
+
+    fn demoted() -> String {
+        with(USERS_JSON, |v| {
+            for user in v.as_array_mut().unwrap() {
+                if user["Name"] == json!("konto1") {
+                    user["Policy"]["IsAdministrator"] = json!(false);
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn user_policies_recorded_state_is_already_desired() {
+        let task = host_policies();
+        let t = users_transport(USERS_JSON);
+        let current = task.read(&t).unwrap();
+        assert_eq!(current.len(), 9);
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn user_policies_write_the_whole_policy_of_the_account_that_differs() {
+        let task = host_policies();
+        let t = users_transport(&demoted());
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            changes[0].to_string(),
+            "account konto1: Policy.IsAdministrator false -> true"
+        );
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1, "one POST, for the one account");
+        assert_eq!(
+            written[0].0,
+            format!("/Users/{}/Policy", account_id("konto1"))
+        );
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(
+            sent,
+            account("konto1")["Policy"],
+            "the whole policy as read, with only IsAdministrator different"
+        );
+    }
+
+    /// The host derives its administrators from an authentik group, and a
+    /// Jellyfin account exists only after its owner has signed in once. Such
+    /// a name is a note, not an error: nothing is written for it, and every
+    /// other account is reconciled as before (design §40).
+    #[test]
+    fn an_account_the_answer_does_not_hold_is_a_note_and_nothing_is_written_for_it() {
+        let mut task = host_policies();
+        task.accounts
+            .insert("konto99".to_string(), fields(&[("IsHidden", json!(false))]));
+        let t = users_transport(USERS_JSON);
+        let current = task.read(&t).unwrap();
+        assert_eq!(current.len(), 9, "the nine accounts the service holds");
+        assert_eq!(
+            task.notes(&current),
+            vec!["account konto99: not on the service yet — skipped".to_string()]
+        );
+        // The other accounts are as desired, so the run is unchanged -- the
+        // note has not turned into a change either.
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+        task.write(&t, &current).unwrap();
+        assert!(t.written.borrow().is_empty());
+    }
+
+    /// The same name, next to an account that really differs: the absent one
+    /// is skipped and the present one is still written.
+    #[test]
+    fn an_absent_account_does_not_stop_the_accounts_the_service_does_hold() {
+        let mut task = host_policies();
+        task.accounts
+            .insert("konto99".to_string(), fields(&[("IsHidden", json!(false))]));
+        let t = users_transport(&demoted());
+        let current = task.read(&t).unwrap();
+        assert_eq!(
+            task.notes(&current),
+            vec!["account konto99: not on the service yet — skipped".to_string()]
+        );
+        let changes = task.diff(&current).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            changes[0].to_string(),
+            "account konto1: Policy.IsAdministrator false -> true"
+        );
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1, "one POST, for the account that is there");
+        assert_eq!(
+            written[0].0,
+            format!("/Users/{}/Policy", account_id("konto1"))
+        );
+    }
+
+    /// `all` is unchanged by this: it says nothing about single accounts, so
+    /// there is no name in it that could be absent.
+    #[test]
+    fn display_preferences_name_the_service_does_not_hold_is_a_note_without_a_write() {
+        let mut task = favourites_off();
+        task.accounts.insert(
+            "konto99".to_string(),
+            [(
+                "livetv-favoritechannelsattop".to_string(),
+                "true".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let t = preferences_transport(PREFERENCES);
+        let current = task.read(&t).unwrap();
+        assert_eq!(current.accounts.len(), 9);
+        assert_eq!(
+            task.notes(&current),
+            vec!["account konto99: not on the service yet — skipped".to_string()]
+        );
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+        task.write(&t, &current).unwrap();
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_policy_field_the_answer_does_not_carry_is_an_error_before_the_write() {
+        let task = UserPolicies {
+            all: BTreeMap::new(),
+            accounts: [(
+                "konto1".to_string(),
+                fields(&[("EnableAllFoldrs", json!(false))]),
+            )]
+            .into_iter()
+            .collect(),
+        };
+        let t = users_transport(USERS_JSON);
+        let current = task.read(&t).unwrap();
+        let err = task.diff(&current).err().unwrap().to_string();
+        assert_eq!(
+            err,
+            "the answer has no such field: account konto1: Policy.EnableAllFoldrs"
+        );
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_refused_policy_write_says_nothing_from_the_body() {
+        const FROM_THE_BODY: &str = "ERFUNDENES-GEHEIMNIS-XYZ";
+        for status in [401u16, 403] {
+            let task = host_policies();
+            let t = FakeTransport::default()
+                .on_get(USERS.path, vec![ok(&demoted())])
+                .on_put(vec![Step::Answer(
+                    status,
+                    format!(r#"[{{"errorMessage":"{FROM_THE_BODY}"}}]"#),
+                )]);
+            let current = task.read(&t).unwrap();
+            let err = task.write(&t, &current).err().unwrap().to_string();
+            assert!(!err.contains(FROM_THE_BODY), "{err}");
+            assert!(err.contains(&format!("HTTP {status}")), "{err}");
+            assert!(err.contains(&account_id("konto1")), "{err}");
+        }
+    }
+
+    fn favourites_off() -> DisplayPreferences {
+        DisplayPreferences {
+            client: "emby".to_string(),
+            all: [(
+                "livetv-favoritechannelsattop".to_string(),
+                "false".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+            accounts: BTreeMap::new(),
+        }
+    }
+
+    fn preferences_transport(document: &str) -> FakeTransport {
+        let mut t = FakeTransport::default().on_get(USERS.path, vec![ok(USERS_JSON)]);
+        for user in recorded_users() {
+            t = t.on_get(
+                &preferences_path(user["Id"].as_str().unwrap(), "emby"),
+                vec![ok(document)],
+            );
+        }
+        t.on_put(vec![Step::Answer(204, String::new())])
+    }
+
+    #[test]
+    fn display_preferences_recorded_state_is_already_desired() {
+        let task = favourites_off();
+        let t = preferences_transport(PREFERENCES);
+        let current = task.read(&t).unwrap();
+        assert_eq!(current.accounts.len(), 9);
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn a_custom_pref_the_account_does_not_carry_is_added_to_the_whole_document() {
+        let without = with(PREFERENCES, |v| {
+            v["CustomPrefs"]
+                .as_object_mut()
+                .unwrap()
+                .remove("livetv-favoritechannelsattop");
+        });
+        let task = favourites_off();
+        let t = preferences_transport(&without);
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        assert_eq!(changes.len(), 9, "every account, the one key each");
+        assert_eq!(
+            changes[0].to_string(),
+            r#"account konto1: CustomPrefs.livetv-favoritechannelsattop (missing) -> "false""#
+        );
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 9);
+        assert_eq!(
+            written[0].0,
+            preferences_path(&account_id("konto1"), "emby")
+        );
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(
+            sent,
+            serde_json::from_str::<Value>(PREFERENCES).unwrap(),
+            "the whole document, with the key back"
+        );
+    }
+
+    #[test]
+    fn a_display_preference_of_one_account_overrides_the_one_for_all() {
+        let mut task = favourites_off();
+        task.accounts.insert(
+            "konto2".to_string(),
+            [(
+                "livetv-favoritechannelsattop".to_string(),
+                "true".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let t = preferences_transport(PREFERENCES);
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        assert_eq!(changes.len(), 1, "only the account with its own value");
+        assert_eq!(
+            changes[0].to_string(),
+            r#"account konto2: CustomPrefs.livetv-favoritechannelsattop "false" -> "true""#
+        );
     }
 }

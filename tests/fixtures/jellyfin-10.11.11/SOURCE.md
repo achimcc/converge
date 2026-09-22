@@ -99,3 +99,41 @@ Two things these answers show that the XML files on disk do not:
 `OidConfigs` is an object keyed by provider name (`authentik`), and the role
 mapping is `FolderRoleMapping` (singular, the property name) — the XML file
 calls it `FolderRoleMappings`. `PortOverride` is null and therefore absent.
+
+## Accounts and display preferences (recorded 2026-09-22)
+
+- `users.json` — `GET /Users`
+- `displaypreferences-usersettings.json` —
+  `GET /DisplayPreferences/usersettings?userId=<the account of users.json[0]>&client=emby`
+- `auth-providers.json` — `GET /Auth/Providers`
+
+Recorded the same way as the answers above (the key passed to `curl` with
+`-K` from a process substitution instead of `-H`, so it is not in `argv`) and
+written with `jq -S`, so keys are sorted.
+
+**`users.json` is masked, the other two are verbatim.** `GET /Users` names the
+people who use the server: on the host every `Name` was replaced with
+`konto1` … `konto9`, and the fields that say when somebody last watched
+something or which picture they picked (`LastLoginDate`, `LastActivityDate`,
+`PrimaryImageTag`, `PrimaryImageAspectRatio`) were removed. What the committed
+file carries is eight keys per account — `Name`, `Id`, `Policy`,
+`Configuration`, `EnableAutoLogin`, `HasPassword`, `HasConfiguredPassword`,
+`HasConfiguredEasyPassword` — the last four booleans, the `Policy` and the
+`Configuration` as recorded. The answer holds no password, key or token;
+checked on the host before it left: the long values are account ids and the
+library ids of `EnabledFolders` (the same ids as `virtual-folders.json`), and
+the two provider ids are class names.
+
+Nine accounts, each with the same 42 policy fields. What they show is what the
+host's three shell units set by hand, per account: `AuthenticationProviderId`
+on the LDAP plugin for all nine, `EnableAllFolders` false,
+`EnableSubtitleManagement` true, `EnableLiveTvAccess` true,
+`EnableLiveTvManagement` false. `IsAdministrator` is true for `konto1` alone —
+and no unit sets it. `auth-providers.json` is what makes that provider id a
+name (`LDAP-Authentication`) rather than a string to be remembered.
+
+`displaypreferences-usersettings.json` is the first account's. `CustomPrefs`
+is a sparse string map: it carries `livetv-favoritechannelsattop` as the
+string `"false"`, two keys whose value is `null` (`dashboardTheme`, `tvhome`),
+and three whose key is a library id and a view name. No key of it names a
+credential.

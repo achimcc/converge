@@ -114,6 +114,8 @@ enum TaskName {
     ScheduledTaskTriggers,
     PluginConfigurations,
     NamedConfiguration,
+    UserPolicies,
+    DisplayPreferences,
     Connections,
     TrailerProfiles,
     AccountSubscriptions,
@@ -157,7 +159,9 @@ impl TaskName {
             | TaskName::LibraryOptions
             | TaskName::ScheduledTaskTriggers
             | TaskName::PluginConfigurations
-            | TaskName::NamedConfiguration => service == Service::Jellyfin,
+            | TaskName::NamedConfiguration
+            | TaskName::UserPolicies
+            | TaskName::DisplayPreferences => service == Service::Jellyfin,
             TaskName::Connections | TaskName::TrailerProfiles => service == Service::Trailarr,
             TaskName::AccountSubscriptions => service == Service::Ntfy,
             TaskName::Naming
@@ -325,6 +329,42 @@ impl NamedKey {
             NamedKey::LiveTv => "LiveTvOptions",
         }
     }
+}
+
+/// Jellyfin account policies (design §40). `all` holds what every account
+/// must carry, `accounts` what single accounts carry on top of it, by the
+/// `Name` of the account. Each key is a top-level field of `UserPolicy`; a
+/// policy is written as a whole, so a field converge does not name travels
+/// back as it was read.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UserPolicySettings {
+    #[serde(default)]
+    pub all: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub accounts: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+}
+
+/// The `CustomPrefs` of one scope. Jellyfin stores them as string -> string,
+/// so `"false"` is a value and `false` is a spec error.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CustomPrefs {
+    #[serde(default)]
+    pub custom_prefs: BTreeMap<String, String>,
+}
+
+/// One client's display preferences (design §40), for every account and for
+/// single ones. `client` is the name the client stores them under (`emby`
+/// for the web interface), and it goes into the query of every request.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DisplayPreferencesSettings {
+    pub client: String,
+    #[serde(default)]
+    pub all: CustomPrefs,
+    #[serde(default)]
+    pub accounts: BTreeMap<String, CustomPrefs>,
 }
 
 /// The complete trigger list of every scheduled task whose key starts with
@@ -615,6 +655,8 @@ pub enum Desired {
     ScheduledTaskTriggers(TaskTriggers),
     PluginConfigurations(BTreeMap<String, PluginSettings>),
     NamedConfiguration(NamedConfigurationSettings),
+    UserPolicies(UserPolicySettings),
+    DisplayPreferences(DisplayPreferencesSettings),
     Connections(TrailarrConnections),
     TrailerProfiles(TrailerProfileSettings),
     AccountSubscriptions(AccountSubscriptions),
@@ -884,6 +926,17 @@ fn kavita_paths(map: &BTreeMap<String, serde_json::Value>) -> Result<(), String>
 fn credential_name(name: &str, what: &str) -> Result<(), String> {
     if name.is_empty() || name == "." || name == ".." || name.contains('/') {
         Err(format!("{what}: {name:?} is not a credential name"))
+    } else {
+        Ok(())
+    }
+}
+
+/// The name of an account, as the service's answer spells it. Only its
+/// emptiness can be judged here -- whether the service holds it is a question
+/// for the answer, and the task asks it before it writes anything.
+fn account_name(name: &str, what: &str) -> Result<(), String> {
+    if name.trim().is_empty() {
+        Err(format!("{what}: an account has no name"))
     } else {
         Ok(())
     }
@@ -1598,6 +1651,57 @@ impl Spec {
                 field_paths(&settings.set, "desired.set").map_err(invalid)?;
                 Desired::NamedConfiguration(settings)
             }
+            TaskName::UserPolicies => {
+                let settings: UserPolicySettings = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if settings.all.is_empty() && settings.accounts.is_empty() {
+                    return Err(invalid("desired names no field".to_string()));
+                }
+                // Every key is a top-level field of `UserPolicy`: a policy
+                // has no nested document a path could reach into.
+                if !settings.all.is_empty() {
+                    plain_fields(&settings.all, "desired.all", &[]).map_err(invalid)?;
+                }
+                for (name, set) in &settings.accounts {
+                    account_name(name, "desired.accounts").map_err(invalid)?;
+                    plain_fields(set, &format!("desired.accounts.{name}"), &[]).map_err(invalid)?;
+                }
+                Desired::UserPolicies(settings)
+            }
+            TaskName::DisplayPreferences => {
+                let settings: DisplayPreferencesSettings = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                // The client travels in the query of every request, so it
+                // stays within what needs no escaping there.
+                if settings.client.is_empty()
+                    || !settings
+                        .client
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
+                {
+                    return Err(invalid(format!(
+                        "desired.client: {:?} is not a client name",
+                        settings.client
+                    )));
+                }
+                if settings.all.custom_prefs.is_empty() && settings.accounts.is_empty() {
+                    return Err(invalid("desired names no custom pref".to_string()));
+                }
+                let mut scopes = vec![("desired.all".to_string(), &settings.all)];
+                for (name, prefs) in &settings.accounts {
+                    account_name(name, "desired.accounts").map_err(invalid)?;
+                    scopes.push((format!("desired.accounts.{name}"), prefs));
+                }
+                for (at, prefs) in scopes {
+                    if at != "desired.all" && prefs.custom_prefs.is_empty() {
+                        return Err(invalid(format!("{at}.custom_prefs names no key")));
+                    }
+                    if prefs.custom_prefs.keys().any(String::is_empty) {
+                        return Err(invalid(format!("{at}.custom_prefs: a key is empty")));
+                    }
+                }
+                Desired::DisplayPreferences(settings)
+            }
             TaskName::LibraryOptions => {
                 let settings: LibrarySettings = serde_json::from_value(raw.desired)
                     .map_err(|e| invalid(format!("desired: {e}")))?;
@@ -1930,6 +2034,8 @@ impl Spec {
             Desired::ScheduledTaskTriggers(_) => "scheduled-task-triggers",
             Desired::PluginConfigurations(_) => "plugin-configurations",
             Desired::NamedConfiguration(_) => "named-configuration",
+            Desired::UserPolicies(_) => "user-policies",
+            Desired::DisplayPreferences(_) => "display-preferences",
             Desired::Connections(_) => "connections",
             Desired::TrailerProfiles(_) => "trailer-profiles",
             Desired::AccountSubscriptions(_) => "account-subscriptions",
@@ -2446,6 +2552,98 @@ mod tests {
                 assert_eq!(s.key.path_segment(), "livetv");
             }
             other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_the_account_policies_of_all_and_of_one_account() {
+        let spec = jellyfin(
+            "user-policies",
+            r#"{"all":{"EnableAllFolders":false,"IsAdministrator":false},
+                "accounts":{"konto1":{"IsAdministrator":true}}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "user-policies");
+        match &spec.desired {
+            Desired::UserPolicies(s) => {
+                assert_eq!(s.all["IsAdministrator"], serde_json::json!(false));
+                assert_eq!(
+                    s.accounts["konto1"]["IsAdministrator"],
+                    serde_json::json!(true)
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        // Either map alone is enough.
+        assert!(jellyfin("user-policies", r#"{"all":{"IsHidden":true}}"#).is_ok());
+        assert!(
+            jellyfin("user-policies", r#"{"accounts":{"k":{"IsHidden":true}}}"#).is_ok(),
+            "accounts alone"
+        );
+    }
+
+    #[test]
+    fn user_policy_specs_are_strict() {
+        for (desired, why) in [
+            (r#"{}"#, "neither map"),
+            (r#"{"all":{},"accounts":{}}"#, "both maps empty"),
+            (
+                r#"{"accounts":{"konto1":{}}}"#,
+                "an account without a field",
+            ),
+            (
+                r#"{"all":{"Policy.IsHidden":true}}"#,
+                "a path, not a top-level field",
+            ),
+            (r#"{"all":{"IsHidden":true},"extra":1}"#, "an unknown key"),
+        ] {
+            assert!(jellyfin("user-policies", desired).is_err(), "{why}");
+        }
+    }
+
+    #[test]
+    fn parses_the_display_preferences_of_a_client() {
+        let spec = jellyfin(
+            "display-preferences",
+            r#"{"client":"emby",
+                "all":{"custom_prefs":{"livetv-favoritechannelsattop":"false"}},
+                "accounts":{"konto1":{"custom_prefs":{"useModularHome":"true"}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "display-preferences");
+        match &spec.desired {
+            Desired::DisplayPreferences(s) => {
+                assert_eq!(s.client, "emby");
+                assert_eq!(s.all.custom_prefs["livetv-favoritechannelsattop"], "false");
+                assert_eq!(s.accounts["konto1"].custom_prefs["useModularHome"], "true");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn display_preferences_specs_are_strict() {
+        for (desired, why) in [
+            (
+                r#"{"client":"","all":{"custom_prefs":{"a":"b"}}}"#,
+                "an empty client",
+            ),
+            (
+                r#"{"client":"em by","all":{"custom_prefs":{"a":"b"}}}"#,
+                "a client that would have to be escaped in the query",
+            ),
+            (r#"{"all":{"custom_prefs":{"a":"b"}}}"#, "no client at all"),
+            (r#"{"client":"emby"}"#, "no key anywhere"),
+            (
+                r#"{"client":"emby","accounts":{"konto1":{"custom_prefs":{}}}}"#,
+                "an account without a key",
+            ),
+            (
+                r#"{"client":"emby","all":{"custom_prefs":{"a":false}}}"#,
+                "a value that is not a string",
+            ),
+        ] {
+            assert!(jellyfin("display-preferences", desired).is_err(), "{why}");
         }
     }
 

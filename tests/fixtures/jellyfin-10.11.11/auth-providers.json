@@ -1,0 +1,10 @@
+[
+  {
+    "Id": "Jellyfin.Server.Implementations.Users.DefaultAuthenticationProvider",
+    "Name": "Default"
+  },
+  {
+    "Id": "Jellyfin.Plugin.LDAP_Auth.LdapAuthenticationProviderPlugin",
+    "Name": "LDAP-Authentication"
+  }
+]
