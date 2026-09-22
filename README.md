@@ -21,9 +21,9 @@ script should have been:
 
 Early. **v0.33.1** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11),
-**SuggestArr** (2.14), **Kavita** (0.9), **Audiobookshelf** (2.36) and
-**Dispatcharr** (0.31), each replacing a shell unit or an OpenTofu resource on
-the host it was written for:
+**SuggestArr** (2.14), **Kavita** (0.9), **Audiobookshelf** (2.36),
+**Dispatcharr** (0.31) and **authentik** (2026.5), each replacing a shell unit
+or an OpenTofu resource on the host it was written for:
 
 | service | task | desired state |
 |---|---|---|
@@ -62,6 +62,7 @@ the host it was written for:
 | Dispatcharr | `m3u-accounts`, `epg-sources` | accounts and sources by name: a missing one is added, the named fields are set; an account's `server_url`, `username` and `password` and a source's `url` may come from credentials (`secret_fields`: compared unseen, the write-only password handed over on every apply); every task logs in as a service account, once per run |
 | Dispatcharr | `m3u-groups` | the settings of channel groups within an account, among them the stream profile the group's channels get (by name) and the name filters that pick and rename them; each group is written whole, so what the spec does not name stays; readiness waits until the account's playlist has been read |
 | Dispatcharr | `channel-epg` | per channel (by the name the sync gives it): the guide entry -- a source by name and a tvg-id --, a display name and a logo by URL (created when missing), written as the channel's override, which the channel sync leaves alone; and fallback streams by name, played after the channel's own when it fails -- only from the same group, since another group's sync would delete the channel |
+| authentik | `settings` | fields of the tenant settings (`/admin/settings/`), by name — those outside the blueprint schema; `PATCH` carries only what differs |
 | SuggestArr | `configuration` | the whole flat configuration: plain fields by name, secret fields from credentials (never shown), and the Jellyfin libraries derived from what the service reports, minus the collection types named |
 
 ## A spec
@@ -225,13 +226,33 @@ leave out are named; a rule that would leave nothing is an error
 }
 ```
 
+Authentik keeps a handful of tenant settings that its blueprints do not
+describe — among them whether an administrator may impersonate a user, and how
+low a client's reputation may sink. They live behind `/api/v3/admin/settings/`;
+`PATCH` changes exactly the fields its body names, so converge sends only what
+differs. Each field is a top-level field of `Settings`: `flags` and
+`footer_links` may be set whole, but no path reaches into them. The credential
+holds a bearer token of an account that is an administrator — the probe
+(`/api/v3/admin/version/`) says so at once rather than at the first write
+(`docs/design.md` §37):
+
+```json
+{
+  "service": "authentik",
+  "base_url": "http://10.0.10.10:9000",
+  "api_key_credential": "authentik-converge-token",
+  "task": "settings",
+  "desired": { "set": { "impersonation": false, "reputation_lower_limit": -10 } }
+}
+```
+
 ## Commands
 
 | command | does | exit |
 |---|---|---|
 | `converge apply [--deadline <s>] <spec>...` | reconcile, write, read back | 0 done, 1 any spec failed |
 | `converge plan [--deadline <s>] <spec>...` | show what `apply` would change | 0 equal, 2 differs, 1 error |
-| `converge schema-check --service <radarr\|sonarr\|lidarr\|prowlarr\|jellyfin\|trailarr\|kavita> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
+| `converge schema-check --service <radarr\|sonarr\|lidarr\|prowlarr\|jellyfin\|trailarr\|kavita\|dispatcharr\|authentik> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
 | `converge schema-check --service <ntfy\|bindery\|seerr\|koel\|suggestarr\|audiobookshelf> [--spec <spec>]...` | ntfy and bindery publish no OpenAPI description, Seerr's misnames its fields, Koel's describes a long-gone version, SuggestArr's covers only its public `/api/v1`: only validate the specs (`--openapi` is refused) | 0 / 1 |
 
 Several specs are processed in order; one failing does not skip the next.

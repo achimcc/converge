@@ -771,3 +771,68 @@ fn a_kavita_library_field_must_be_in_the_update_and_in_the_answer() {
         1
     );
 }
+
+fn authentik() -> Value {
+    doc("authentik-2026.5.6")
+}
+
+/// Authentik's description comes from drf-spectacular, like Dispatcharr's --
+/// but it names a server (`/api/v3`) and leaves that prefix out of every
+/// path, while Dispatcharr's names no server and spells each path in full.
+/// An endpoint here always carries the path a request is sent to.
+#[test]
+fn the_authentik_endpoints_and_wire_types_match_behind_the_server_prefix() {
+    let found = check(
+        &authentik(),
+        &converge::services::authentik::ENDPOINTS,
+        &converge::services::authentik::wire_types(),
+    );
+    assert_eq!(found, Vec::<String>::new());
+    // The same endpoints against a description that names no server: the
+    // prefix is part of the path there, so none of the three is found.
+    let mut without = authentik();
+    without.as_object_mut().unwrap().remove("servers");
+    assert_eq!(
+        check(
+            &without,
+            &converge::services::authentik::ENDPOINTS,
+            &converge::services::authentik::wire_types(),
+        )
+        .len(),
+        3
+    );
+}
+
+/// What the host sets, checked against the answer it is compared with and
+/// the body it is written with.
+#[test]
+fn the_hosts_two_settings_are_fields_of_the_answer_and_of_the_patch() {
+    use converge::services::authentik::{SETTINGS, SETTINGS_PATCH};
+    let desired = serde_json::json!({"reputation_lower_limit": -10, "impersonation": false});
+    let map: std::collections::BTreeMap<String, Value> =
+        desired.as_object().unwrap().clone().into_iter().collect();
+    for component in [SETTINGS, SETTINGS_PATCH] {
+        assert_eq!(
+            converge::schema::check_paths(&authentik(), component, &map),
+            Vec::<String>::new(),
+            "{component}"
+        );
+    }
+    // A misspelt field and a value of the wrong type, one finding each.
+    let wrong = serde_json::json!({"impersonaton": false, "reputation_lower_limit": "-10"});
+    let map: std::collections::BTreeMap<String, Value> =
+        wrong.as_object().unwrap().clone().into_iter().collect();
+    for component in [SETTINGS, SETTINGS_PATCH] {
+        let found = converge::schema::check_paths(&authentik(), component, &map);
+        assert_eq!(found.len(), 2, "{component}: {found:?}");
+    }
+    // `footer_links` is a list the description leaves untyped; it may be set
+    // whole, and a path into it is not a field of the component.
+    let links = serde_json::json!({"footer_links": [{"name": "Hilfe", "href": "https://x/"}]});
+    let map: std::collections::BTreeMap<String, Value> =
+        links.as_object().unwrap().clone().into_iter().collect();
+    assert_eq!(
+        converge::schema::check_paths(&authentik(), SETTINGS, &map),
+        Vec::<String>::new()
+    );
+}

@@ -2269,7 +2269,8 @@ mod tests {
     #[test]
     fn a_missing_logo_shared_by_two_channels_is_created_once() {
         let mut task = look("SKY CINEMA ACTION", None, Some(NEW_LOGO));
-        task.channels.extend(look("Das Erste", None, Some(NEW_LOGO)).channels);
+        task.channels
+            .extend(look("Das Erste", None, Some(NEW_LOGO)).channels);
         let t = look_transport(vec![created_logo(), Step::Answer(200, "{}".to_string())]);
         let current = task.read(&t).unwrap();
         task.write(&t, &current).unwrap();

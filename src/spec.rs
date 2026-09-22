@@ -25,6 +25,7 @@ pub enum Service {
     Kavita,
     Audiobookshelf,
     Dispatcharr,
+    Authentik,
 }
 
 impl Service {
@@ -44,6 +45,7 @@ impl Service {
             Service::Kavita => "kavita",
             Service::Audiobookshelf => "audiobookshelf",
             Service::Dispatcharr => "dispatcharr",
+            Service::Authentik => "authentik",
         }
     }
 
@@ -63,21 +65,23 @@ impl Service {
             | Service::Koel
             | Service::SuggestArr
             | Service::Audiobookshelf
-            | Service::Dispatcharr => "Authorization",
+            | Service::Dispatcharr
+            | Service::Authentik => "Authorization",
         }
     }
 
-    /// The header's value. The credential holds the bare key; ntfy and Koel
-    /// want it as a bearer token, and for SuggestArr and Dispatcharr the value
-    /// is the JWT a login returned (the credential there holds a password,
-    /// never a key).
+    /// The header's value. The credential holds the bare key; ntfy, Koel and
+    /// authentik want it as a bearer token, and for SuggestArr and Dispatcharr
+    /// the value is the JWT a login returned (the credential there holds a
+    /// password, never a key).
     pub fn key_value(self, key: Secret) -> Secret {
         match self {
             Service::Ntfy
             | Service::Koel
             | Service::SuggestArr
             | Service::Audiobookshelf
-            | Service::Dispatcharr => Secret::new(format!("Bearer {}", key.expose())),
+            | Service::Dispatcharr
+            | Service::Authentik => Secret::new(format!("Bearer {}", key.expose())),
             _ => key,
         }
     }
@@ -166,9 +170,11 @@ impl TaskName {
                 service.is_servarr() || service == Service::Prowlarr || service == Service::Bindery
             }
             TaskName::Notifications => service.is_servarr() || service == Service::Prowlarr,
-            TaskName::ProwlarrInstances | TaskName::Settings | TaskName::OidcProviders => {
-                service == Service::Bindery
-            }
+            TaskName::ProwlarrInstances | TaskName::OidcProviders => service == Service::Bindery,
+            // `settings` means two different things, as `indexers` does
+            // below: bindery's settings by key (§14), and authentik's tenant
+            // settings by field (§37). The parse arm tells them apart.
+            TaskName::Settings => service == Service::Bindery || service == Service::Authentik,
             // `indexers` means two different things: Prowlarr's own indexer
             // providers (§13), and the switch over the ones bindery has synced
             // from Prowlarr (§23). The arm below tells them apart by service.
@@ -623,6 +629,7 @@ pub enum Desired {
     AudiobookshelfAuthSettings(AudiobookshelfAuth),
     AudiobookshelfAdminPermissions(AbsPermissions),
     Dispatcharr(DispatcharrDesired),
+    AuthentikSettings(BTreeMap<String, serde_json::Value>),
 }
 
 /// A Dispatcharr task (design §29). Every task logs in as `username`, a
@@ -1079,6 +1086,19 @@ impl Spec {
             // and the guarded arm above takes it there.
             TaskName::ProwlarrInstances => {
                 return Err(invalid("prowlarr-instances is a bindery task".to_string()))
+            }
+            // Authentik's tenant settings (design §37): fields of `Settings`
+            // by name, never a path into `flags` or `footer_links`.
+            TaskName::Settings if raw.service == Service::Authentik => {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Raw {
+                    set: BTreeMap<String, serde_json::Value>,
+                }
+                let desired: Raw = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                plain_fields(&desired.set, "desired.set", &[]).map_err(invalid)?;
+                Desired::AuthentikSettings(desired.set)
             }
             TaskName::Settings => {
                 #[derive(Deserialize)]
@@ -1813,6 +1833,7 @@ impl Spec {
                 DispatcharrTask::Groups(_) => "m3u-groups",
                 DispatcharrTask::ChannelEpg(_) => "channel-epg",
             },
+            Desired::AuthentikSettings(_) => "settings",
         }
     }
 }
@@ -3329,5 +3350,37 @@ mod tests {
             r#"{"username":"c","accounts":{"X":{"account_type":"XC","secret_fields":["password"]}}}"#,
         );
         assert!(not_a_map.contains("secret_fields"), "{not_a_map}");
+    }
+
+    fn authentik(desired: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"authentik","base_url":"http://10.0.10.10:9000","api_key_credential":"authentik-converge-token","task":"settings","desired":{desired}}}"#
+        ))
+    }
+
+    #[test]
+    fn authentik_settings_are_plain_field_names_behind_a_bearer_token() {
+        let spec =
+            authentik(r#"{"set":{"reputation_lower_limit":-10,"impersonation":false}}"#).unwrap();
+        assert_eq!(spec.task_name(), "settings");
+        assert_eq!(spec.service.name(), "authentik");
+        assert_eq!(spec.service.key_header(), "Authorization");
+        assert_eq!(
+            spec.service.key_value(Secret::new("t0ken".into())).expose(),
+            "Bearer t0ken"
+        );
+        assert!(reason(authentik(r#"{"set":{}}"#)).contains("names no field"));
+        // Every field is a top-level one: authentik takes `flags` and
+        // `footer_links` whole, and a partial object would drop the rest.
+        assert!(reason(authentik(
+            r#"{"set":{"flags.core_default_app_access":true}}"#
+        ))
+        .contains("plain field name"));
+        assert!(reason(authentik(r#"{"settings":{"impersonation":false}}"#)).contains("unknown"));
+        // `settings` is bindery's task name too, and it keeps its own shape.
+        let bindery = r#"{"service":"bindery","base_url":"http://127.0.0.1:8080","api_key_credential":"k","task":"settings","desired":{"settings":{"BaseUrl":"http://x"}}}"#;
+        assert!(parse(bindery).is_ok());
+        let elsewhere = r#"{"service":"kavita","base_url":"http://127.0.0.1:5000","api_key_credential":"k","task":"settings","desired":{"set":{"a":1}}}"#;
+        assert!(reason(parse(elsewhere)).contains("does not belong"));
     }
 }

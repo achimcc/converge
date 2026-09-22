@@ -1,5 +1,6 @@
 pub mod arr;
 pub mod audiobookshelf;
+pub mod authentik;
 pub mod bindery;
 pub mod dispatcharr;
 pub mod jellyfin;

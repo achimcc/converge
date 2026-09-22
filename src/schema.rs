@@ -20,7 +20,7 @@ pub fn check(openapi: &Value, endpoints: &[Endpoint], wire: &[schemars::Schema])
     for ep in endpoints {
         let pointer = format!(
             "/paths/{}/{}",
-            escape(ep.path),
+            escape(described_path(openapi, ep.path)),
             ep.method.to_ascii_lowercase()
         );
         let Some(operation) = openapi.pointer(&pointer) else {
@@ -117,6 +117,26 @@ fn dedup(mut findings: Vec<String>) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     findings.retain(|f| seen.insert(f.clone()));
     findings
+}
+
+/// The path a description spells out for an endpoint. A description may name
+/// a server whose URL carries a prefix its own paths then leave out:
+/// authentik's is `/api/v3`, so it writes `/admin/settings/` for the endpoint
+/// a request goes to as `/api/v3/admin/settings/`. Dispatcharr's description,
+/// from the same generator, names no server and spells every path in full.
+/// An `Endpoint` here always carries the whole path, the one the requests of
+/// the task use, so the prefix comes off before the lookup -- and a path that
+/// does not start with it is left alone.
+fn described_path<'a>(openapi: &Value, path: &'a str) -> &'a str {
+    let prefix = openapi
+        .pointer("/servers/0/url")
+        .and_then(Value::as_str)
+        .map(|url| url.trim_end_matches('/'))
+        .filter(|url| url.starts_with('/'));
+    match prefix.and_then(|p| path.strip_prefix(p)) {
+        Some(rest) if rest.starts_with('/') => rest,
+        _ => path,
+    }
 }
 
 /// JSON pointer escaping (RFC 6901).

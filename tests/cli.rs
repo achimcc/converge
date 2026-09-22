@@ -1440,3 +1440,109 @@ fn schema_check_checks_dispatcharr_entries_against_create_and_update() {
     );
     assert!(stderr.contains("PatchedEPGSource.sourcetype"), "{stderr}");
 }
+
+#[test]
+fn schema_check_checks_authentik_settings_against_the_answer_and_the_patch() {
+    let openapi = format!(
+        "{}/openapi/authentik-2026.5.6.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let spec = |name: &str, desired: &str| {
+        let path = dir.path().join(name);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"service":"authentik","base_url":"http://10.0.10.10:9000","api_key_credential":"authentik-converge-token","task":"settings","desired":{desired}}}"#
+            ),
+        )
+        .unwrap();
+        path
+    };
+
+    let good = spec(
+        "settings.json",
+        r#"{"set":{"reputation_lower_limit":-10,"impersonation":false}}"#,
+    );
+    let out = schema_check("authentik", Some(&openapi), &[&good]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    // The endpoints live behind the description's server prefix (/api/v3).
+    assert!(stdout.contains("3 endpoints"), "{stdout}");
+    assert!(stdout.contains("2 spec field(s)"), "{stdout}");
+
+    // A misspelt field is found in the answer and in the body of the PATCH.
+    let typo = spec("typo.json", r#"{"set":{"impersonaton":false}}"#);
+    let out = schema_check("authentik", Some(&openapi), &[&typo]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("Settings.impersonaton: Settings has no property impersonaton"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("PatchedSettingsRequest.impersonaton"),
+        "{stderr}"
+    );
+}
+
+/// The whole way once, over HTTP: the token travels as a bearer token, both
+/// paths keep their trailing slash, and the one differing field is the plan.
+#[test]
+fn authentik_plan_over_http_sends_a_bearer_token_and_never_shows_it() {
+    const VERSION: &str = include_str!("fixtures/authentik-2026.5.6/version.json");
+    const SETTINGS: &str = include_str!("fixtures/authentik-2026.5.6/settings.json");
+    let mut on: serde_json::Value = serde_json::from_str(SETTINGS).unwrap();
+    on["impersonation"] = true.into();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("authentik-converge-token"), "t0ken-xyz\n").unwrap();
+    let server = Server::start(vec![
+        ("GET", "/api/v3/admin/version/", 200, VERSION.into()),
+        ("GET", "/api/v3/admin/settings/", 200, on.to_string()),
+    ]);
+    let spec = dir.path().join("settings.json");
+    std::fs::write(
+        &spec,
+        format!(
+            r#"{{"service":"authentik","base_url":"{}","api_key_credential":"authentik-converge-token","task":"settings","desired":{{"set":{{"impersonation":false,"reputation_lower_limit":-10}}}}}}"#,
+            server.base_url()
+        ),
+    )
+    .unwrap();
+    let out = converge()
+        .arg("plan")
+        .arg(&spec)
+        .env("CREDENTIALS_DIRECTORY", dir.path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("authentik settings: service version 2026.5.6"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("would change Settings: impersonation true -> false"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("1 field(s) differ"), "{stdout}");
+    assert!(!stdout.contains("t0ken"), "{stdout}");
+    let seen = server.requests();
+    assert_eq!(seen.len(), 2);
+    for request in &seen {
+        assert!(
+            request
+                .headers
+                .to_ascii_lowercase()
+                .contains("authorization: bearer t0ken-xyz"),
+            "{}",
+            request.headers
+        );
+        assert!(request.path.ends_with('/'), "{}", request.path);
+    }
+}

@@ -11,8 +11,8 @@ use converge::{
     error::Error,
     schema,
     services::{
-        arr, audiobookshelf, bindery, dispatcharr, jellyfin, kavita, koel, ntfy, providers, seerr,
-        servarr, suggestarr, trailarr,
+        arr, audiobookshelf, authentik, bindery, dispatcharr, jellyfin, kavita, koel, ntfy,
+        providers, seerr, servarr, suggestarr, trailarr,
     },
     spec::{Desired, DispatcharrTask, Service, Spec},
 };
@@ -20,7 +20,7 @@ use converge::{
 const USAGE: &str = "usage:
   converge apply [--deadline <seconds>] <spec.json>...
   converge plan [--deadline <seconds>] <spec.json>...
-  converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr|kavita|dispatcharr> --openapi <file> [--spec <spec.json>]...
+  converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr|kavita|dispatcharr|authentik> --openapi <file> [--spec <spec.json>]...
   converge schema-check --service ntfy|bindery|seerr|koel|suggestarr|audiobookshelf [--spec <spec.json>]...";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -167,6 +167,10 @@ fn reconcile_one(
         }
         Desired::KavitaServerSettings(set) => {
             let task = kavita::ServerSettings { set: set.clone() };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        Desired::AuthentikSettings(set) => {
+            let task = authentik::Settings { set: set.clone() };
             run(mode, &task, &transport, &SystemClock, timing)
         }
         Desired::KavitaLibraries(libraries) => {
@@ -665,6 +669,7 @@ fn schema_check(args: &[String]) -> ExitCode {
         "trailarr" => (trailarr::ENDPOINTS.to_vec(), trailarr::wire_types()),
         "kavita" => (kavita::ENDPOINTS.to_vec(), kavita::wire_types()),
         "dispatcharr" => (dispatcharr::ENDPOINTS.to_vec(), dispatcharr::wire_types()),
+        "authentik" => (authentik::ENDPOINTS.to_vec(), authentik::wire_types()),
         _ => return usage(Some(&format!("unknown service {service:?}"))),
     };
     let document = std::fs::read_to_string(&openapi)
@@ -709,6 +714,15 @@ fn schema_check(args: &[String]) -> ExitCode {
                 schema::check_paths(&document, kavita::SERVER_SETTINGS, set),
                 set.len(),
             ),
+            // Compared with the answer, written with the body of the PATCH:
+            // each field must be a property of both, as for a Kavita library.
+            Desired::AuthentikSettings(set) => {
+                let mut found = Vec::new();
+                for component in [authentik::SETTINGS, authentik::SETTINGS_PATCH] {
+                    found.extend(schema::check_paths(&document, component, set));
+                }
+                (found, set.len())
+            }
             // Written with the update's body, compared with the answer: each
             // field must be a property of both.
             Desired::KavitaLibraries(libraries) => {

@@ -1,0 +1,18 @@
+{
+  "avatars": "gravatar,initials",
+  "default_token_duration": "minutes=30",
+  "default_token_length": 60,
+  "default_user_change_email": false,
+  "default_user_change_name": true,
+  "default_user_change_username": false,
+  "event_retention": "days=365",
+  "flags": {},
+  "footer_links": [],
+  "gdpr_compliance": true,
+  "impersonation": false,
+  "impersonation_require_reason": true,
+  "pagination_default_page_size": 20,
+  "pagination_max_page_size": 100,
+  "reputation_lower_limit": -10,
+  "reputation_upper_limit": 5
+}

@@ -1852,10 +1852,66 @@ next to `override` and keeps the given order (`api_views.py`, `edit_bulk`);
 an entry now carries only what differs, since an empty `override` is a write,
 not nothing.
 
+## 37. Authentik: the tenant settings outside the blueprints (2026-09-22)
+
+Authentik is configured with blueprints, and this host declares flows,
+providers, groups and its brand in them. A handful of settings are not in
+that schema: they belong to `authentik_tenants.tenant`, which no blueprint
+model covers. The host therefore set two of them with a shell unit, hourly --
+`reputation_lower_limit` (-10, how far a client's reputation may sink before
+a policy stops trusting it) and `impersonation` (false, whether an
+administrator may take over a user's session).
+
+| task | read | write |
+|---|---|---|
+| `settings` | `GET /api/v3/admin/settings/` | `PATCH /api/v3/admin/settings/`, only the fields that differ |
+
+`PATCH` takes `PatchedSettingsRequest`, which requires nothing and changes
+exactly what its body names (measured on the host, 2026-09-18: HTTP 200, the
+fields the body left out unchanged). `PUT` would take `SettingsRequest`, the
+whole document -- the shape Kavita forces (§25) and the one that carries
+somebody else's field back with it. Here it is not needed.
+
+**Every field is a top-level field of `Settings`, named, not a path.** Two of
+them are containers: `flags` is an object and `footer_links` a list, and
+authentik stores each whole. A path into one of them would read a part and
+write a part, and the write would drop whatever the path did not name; the
+spec parser refuses a dotted key for that reason. `footer_links` as a whole
+may be set -- it is one value.
+
+**The token.** The credential holds a bearer token, as ntfy's and Koel's do.
+The host's unit creates a fifteen-minute token of a superuser service account
+for each run and hands converge that; converge sees a credential and nothing
+more, and never learns where it came from or how long it lives. The probe
+asks `GET /api/v3/admin/version/` for `version_current` -- an administrator's
+endpoint, so a token authentik does not know (401) and a token whose account
+is no administrator (403) both fail there, with a named reason, instead of at
+the first write.
+
+**Nothing of an answer is repeated.** A refused request answers
+`{"detail": …}`, a refused write DRF's validation shape -- an object from
+field names to messages, and a message may quote the value it refused. Only
+the field names travel into an error; the status says the rest. The settings
+themselves carry no secret, but that is not a licence to print a foreign body.
+
+**The paths keep their trailing slash.** Django answers a path without one
+with a redirect, and since v0.30.0 converge does not follow a redirect with
+the key on it.
+
+**The description's server prefix.** Authentik's OpenAPI file comes from
+drf-spectacular and names a server, `/api/v3`; its paths therefore read
+`/admin/settings/`. Dispatcharr's file, from the same generator, names no
+server and spells every path in full. An `Endpoint` here always carries the
+path a request goes to, so `schema::check` takes `servers[0].url` off before
+it looks a path up -- and leaves a path that does not start with it alone.
+A spec's fields are checked against `Settings`, which they are compared with,
+and against `PatchedSettingsRequest`, which they are written with, as a
+Kavita library's are checked against its two components (§26).
+
 ## 20. Not in the pilot
 
 
-- Other services and tasks (Authentik, Seerr, …).
+- Other services and tasks.
 - TLS, JSON output, a NixOS module.
 - Deleting things. `converge` only sets what the spec names, and appends
   list entries (§8), connections (§9), subscriptions (§10), root folders (§11, §14), providers (§12, §13), tags (§13), bindery's entries (§14), Seerr's servers
