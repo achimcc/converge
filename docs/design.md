@@ -1908,6 +1908,62 @@ A spec's fields are checked against `Settings`, which they are compared with,
 and against `PatchedSettingsRequest`, which they are written with, as a
 Kavita library's are checked against its two components (§26).
 
+## 38. Audiobookshelf: its libraries (2026-09-22)
+
+The host created its two libraries once, in the bootstrap, with a `curl`
+against `POST /api/libraries` -- and that worked only inside the window in
+which the local login was still on. Afterwards nobody looked again: a name,
+an icon or a metadata provider changed in the web interface stayed changed,
+and a third library was a hand's turn. With an access token of the root
+account (§27) both are a task.
+
+| task | read | write |
+|---|---|---|
+| `libraries` | `GET /api/libraries` | `POST /api/libraries` (missing), `PATCH /api/libraries/{id}` with the differing fields only (present) |
+
+**Found by the `fullPath` of a folder it holds**, as Kavita's libraries are
+(§26), and for the same two reasons: an id is a row a rebuilt instance hands
+out differently, and the name is one of the things the task sets. A folder two
+libraries hold is an error -- nothing says which one is meant. Libraries the
+spec does not name are notes; converge deletes nothing.
+
+**Unlike Kavita's task, this one creates.** Kavita's `POST /api/Library/create`
+would need a library type, a folder list and a field set converge has no
+answer to compare against; Audiobookshelf's `create` needs a name and a folder
+and defaults the rest (`book`, `database`, `google`). So a folder no library
+holds is a change, `(missing) -> (added)`, as with Koel's radio stations
+(§18) and bindery's root folders (§14) -- and `name` becomes required there.
+A spec that names a folder without a name fails in `diff`, before anything is
+written: the body is built there as well.
+
+**The fields are the ones `LibraryController.update` reads** (2.36.0, read on
+the host): `name`, `provider`, `mediaType` and `icon` as strings, each only
+when truthy -- so `""` is a spec error, since it would differ forever while
+Audiobookshelf reported nothing to change --, `displayOrder` as a number, and
+`settings` as an object it merges **key by key** into the stored settings,
+each key type-checked (`markAsFinishedPercentComplete` 0 to 100 or null,
+`markAsFinishedTimeRemaining` at least 0 or null, arrays and strings as such,
+everything else against the type of the default). `folders` it reads too; a
+spec cannot name them, they are what says which library is meant.
+
+`settings` is therefore compared and written per key, and a change names
+`settings.<key>`. A key the answer does not carry is an error, not an
+addition: `podcastSearchRegion` is a podcast library's setting, and on a book
+library Audiobookshelf would drop it.
+
+`GET /api/libraries` answers `{"libraries": [...]}`, each library with its
+`folders` as objects (`fullPath`, `id`, `libraryId`, `addedAt`). An empty list
+is a valid answer -- a fresh instance holds no library, and every library the
+spec names is then a creation. The recorded answer is
+`tests/fixtures/audiobookshelf-2.36.0/libraries.json`.
+
+Audiobookshelf publishes no OpenAPI description, so `schema-check` validates
+the spec and nothing else, as for `auth-settings` (§27) and
+`admin-permissions` (§28); the field names are checked against the recorded
+answer and at runtime. 403 says the token's account is no administrator, 401
+that the token was refused, and no error and no change carries anything from a
+body.
+
 ## 20. Not in the pilot
 
 
@@ -1915,6 +1971,6 @@ Kavita library's are checked against its two components (§26).
 - TLS, JSON output, a NixOS module.
 - Deleting things. `converge` only sets what the spec names, and appends
   list entries (§8), connections (§9), subscriptions (§10), root folders (§11, §14), providers (§12, §13), tags (§13), bindery's entries (§14), Seerr's servers
-  (§17) and Koel's radio stations (§18) it is responsible for. SuggestArr's
+  (§17), Koel's radio stations (§18) and Audiobookshelf's libraries (§38) it is responsible for. SuggestArr's
   configuration (§19) is a document, not a list: converge sets the named
   fields and carries every other one back unchanged.

@@ -53,12 +53,49 @@ pub const USER_UPDATE: Endpoint = Endpoint {
     request: None,
     response: None,
 };
-pub const ENDPOINTS: [Endpoint; 5] = [
+
+// --- libraries (design §38) ---
+/// Every library with its folders. A library is found by the `fullPath` of a
+/// folder it holds, never by its id or its name: an id is a row, and the name
+/// is one of the things a spec sets.
+pub const LIBRARIES: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/libraries",
+    request: None,
+    response: None,
+};
+/// `{name, folders: [{path}], mediaType?, icon?, provider?, settings?}`.
+/// `LibraryController.create` requires `name` and a non-empty `folders` of
+/// objects with a `path`; the rest it defaults (`book`, `database`,
+/// `google`).
+pub const LIBRARY_CREATE: Endpoint = Endpoint {
+    method: "POST",
+    path: "/api/libraries",
+    request: None,
+    response: None,
+};
+/// `/api/libraries/{id}`, with the differing fields only.
+/// `LibraryController.update` takes `name`, `provider`, `mediaType` and
+/// `icon` as strings (a string that is not truthy it ignores),
+/// `displayOrder` as a number and `settings` as an object it merges key by
+/// key into the stored settings. `folders` it takes too -- a spec cannot name
+/// them, they say which library is meant.
+pub const LIBRARY_UPDATE: Endpoint = Endpoint {
+    method: "PATCH",
+    path: "/api/libraries/{id}",
+    request: None,
+    response: None,
+};
+
+pub const ENDPOINTS: [Endpoint; 8] = [
     STATUS,
     AUTH_SETTINGS,
     AUTH_SETTINGS_WRITE,
     USERS,
     USER_UPDATE,
+    LIBRARIES,
+    LIBRARY_CREATE,
+    LIBRARY_UPDATE,
 ];
 
 /// The one key Audiobookshelf keeps an empty string for. Every other key it
@@ -102,9 +139,14 @@ pub fn probe(t: &dyn Transport) -> Result<String, Probe> {
 /// A status error that carries nothing from the body: the settings hold the
 /// client secret.
 fn refuse(ep: &Endpoint, reply: &Reply) -> Error {
+    refuse_at(ep.method, ep.path.to_string(), reply)
+}
+
+/// The same, for a path with an id in it.
+fn refuse_at(method: &'static str, path: String, reply: &Reply) -> Error {
     Error::Status {
-        method: ep.method,
-        path: ep.path.to_string(),
+        method,
+        path,
         status: reply.status,
         validation: match reply.status {
             401 => vec!["the token was refused".to_string()],
@@ -388,6 +430,259 @@ impl Task for AdminPermissions {
     }
 }
 
+// --- libraries (design §38) -------------------------------------------------
+
+/// Libraries by the `fullPath` of a folder they hold, with the fields to set
+/// on each. Unlike Kavita's task (§26) this one **creates** a library the
+/// answer does not hold: the host could add one only while its local login
+/// was still on, and after that it was a hand's turn in the web interface.
+///
+/// `settings` is compared and written key by key, as Audiobookshelf merges
+/// it (`LibraryController.update`); everything else is a field of the
+/// library itself.
+pub struct Libraries {
+    pub libraries: BTreeMap<String, BTreeMap<String, Value>>,
+}
+
+/// The one spec field that is an object of its own rather than a value.
+const SETTINGS: &str = "settings";
+
+fn has_folder(library: &Value, folder: &str) -> bool {
+    library
+        .get("folders")
+        .and_then(Value::as_array)
+        .is_some_and(|folders| {
+            folders
+                .iter()
+                .any(|f| f.get("fullPath").and_then(Value::as_str) == Some(folder))
+        })
+}
+
+/// A library the answer holds is named by its own name; one that is still to
+/// be created has none yet, so it is named by its folder.
+fn label(library: Option<&Value>, folder: &str) -> String {
+    match library.and_then(|l| l.get("name")).and_then(Value::as_str) {
+        Some(name) => format!("library {name}"),
+        None => format!("library {folder}"),
+    }
+}
+
+/// One field that differs: its name (`settings.<key>` for a settings key),
+/// the value now, the value wanted.
+type FieldDifference = (String, Value, Value);
+
+/// The fields of `set` the library does not already carry that way. A field
+/// -- or a settings key -- the answer does not have at all is an error, never
+/// an addition: Audiobookshelf would drop it (`podcastSearchRegion` on a book
+/// library) or store something nobody reads.
+fn differing(
+    library: &Value,
+    set: &BTreeMap<String, Value>,
+    subject: &str,
+    missing: &mut Vec<String>,
+) -> Vec<FieldDifference> {
+    let mut out = Vec::new();
+    for (field, desired) in set {
+        if field == SETTINGS {
+            let stored = library.get(SETTINGS);
+            for (key, want) in desired.as_object().into_iter().flatten() {
+                match stored.and_then(|s| s.get(key)) {
+                    None => missing.push(format!("{subject}: {SETTINGS}.{key}")),
+                    Some(now) if now != want => {
+                        out.push((format!("{SETTINGS}.{key}"), now.clone(), want.clone()))
+                    }
+                    Some(_) => {}
+                }
+            }
+            continue;
+        }
+        match library.get(field) {
+            None => missing.push(format!("{subject}: {field}")),
+            Some(now) if now != desired => out.push((field.clone(), now.clone(), desired.clone())),
+            Some(_) => {}
+        }
+    }
+    out
+}
+
+/// The `PATCH` body: the differing fields, the differing settings keys
+/// gathered back under `settings`.
+fn patch_body(diffs: &[FieldDifference]) -> Value {
+    let mut body = Map::new();
+    let mut settings = Map::new();
+    for (field, _, desired) in diffs {
+        match field.strip_prefix(&format!("{SETTINGS}.")) {
+            Some(key) => settings.insert(key.to_string(), desired.clone()),
+            None => body.insert(field.clone(), desired.clone()),
+        };
+    }
+    if !settings.is_empty() {
+        body.insert(SETTINGS.to_string(), Value::Object(settings));
+    }
+    Value::Object(body)
+}
+
+/// The `POST` body for a library that is not there yet. `name` is what a spec
+/// may leave out while the library exists, so its absence is an error here --
+/// raised in `diff`, before anything is written.
+fn create_body(folder: &str, set: &BTreeMap<String, Value>) -> Result<Value, Error> {
+    let name = set.get("name").ok_or_else(|| {
+        Error::Mismatch(vec![format!(
+            "{}: no library holds this folder, and the spec gives no name to create one with",
+            label(None, folder)
+        )])
+    })?;
+    let mut body = Map::new();
+    body.insert("name".to_string(), name.clone());
+    body.insert(
+        "folders".to_string(),
+        serde_json::json!([{ "path": folder }]),
+    );
+    for field in ["mediaType", "icon", "provider", "displayOrder", SETTINGS] {
+        if let Some(value) = set.get(field) {
+            body.insert(field.to_string(), value.clone());
+        }
+    }
+    Ok(Value::Object(body))
+}
+
+impl Libraries {
+    /// Each spec folder with the library that holds it, if any. Two libraries
+    /// over one folder is an error: nothing says which one is meant.
+    fn matched<'a>(
+        &'a self,
+        current: &'a [Value],
+    ) -> Result<Vec<(&'a str, Option<&'a Value>)>, Error> {
+        let mut found = Vec::new();
+        let mut ambiguous = Vec::new();
+        for folder in self.libraries.keys() {
+            let holders: Vec<&Value> = current.iter().filter(|l| has_folder(l, folder)).collect();
+            match holders.as_slice() {
+                [] => found.push((folder.as_str(), None)),
+                [one] => found.push((folder.as_str(), Some(*one))),
+                _ => ambiguous.push(format!(
+                    "{} libraries hold the folder {folder}",
+                    holders.len()
+                )),
+            }
+        }
+        if ambiguous.is_empty() {
+            Ok(found)
+        } else {
+            Err(Error::Mismatch(ambiguous))
+        }
+    }
+}
+
+impl Task for Libraries {
+    type Current = Vec<Value>;
+
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        probe(t)
+    }
+
+    /// An empty list is a valid answer: a fresh instance holds no library,
+    /// and every library the spec names then shows up as a change.
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        let reply = t.get(LIBRARIES.path)?;
+        if reply.status != 200 {
+            return Err(refuse(&LIBRARIES, &reply));
+        }
+        let answer: Value = serde_json::from_str(&reply.body).map_err(|e| Error::Decode {
+            path: LIBRARIES.path.to_string(),
+            reason: format!(
+                "not JSON ({:?} error at line {} column {})",
+                e.classify(),
+                e.line(),
+                e.column()
+            ),
+        })?;
+        match answer.get("libraries") {
+            Some(Value::Array(items)) if items.iter().all(Value::is_object) => Ok(items.clone()),
+            _ => Err(Error::Decode {
+                path: LIBRARIES.path.to_string(),
+                reason: "not a list of libraries under \"libraries\"".to_string(),
+            }),
+        }
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        let mut changes = Vec::new();
+        let mut missing = Vec::new();
+        for (folder, library) in self.matched(current)? {
+            let set = &self.libraries[folder];
+            let Some(library) = library else {
+                // Built here as well, so a spec that could not create the
+                // library fails before anything is written.
+                create_body(folder, set)?;
+                changes.push(Change {
+                    subject: label(None, folder),
+                    field: String::new(),
+                    current: "(missing)".to_string(),
+                    desired: "(added)".to_string(),
+                });
+                continue;
+            };
+            let subject = label(Some(library), folder);
+            for (field, now, desired) in differing(library, set, &subject, &mut missing) {
+                changes.push(Change {
+                    subject: subject.clone(),
+                    field,
+                    current: now.to_string(),
+                    desired: desired.to_string(),
+                });
+            }
+        }
+        if missing.is_empty() {
+            Ok(changes)
+        } else {
+            Err(Error::MissingField(missing))
+        }
+    }
+
+    fn notes(&self, current: &Self::Current) -> Vec<String> {
+        current
+            .iter()
+            .filter(|l| !self.libraries.keys().any(|f| has_folder(l, f)))
+            .filter_map(|l| l.get("name").and_then(Value::as_str))
+            .map(|name| format!("library {name} is not in the spec and stays as it is"))
+            .collect()
+    }
+
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        for (folder, library) in self.matched(current)? {
+            let set = &self.libraries[folder];
+            let Some(library) = library else {
+                let body = create_body(folder, set)?;
+                let reply = t.post_json(LIBRARY_CREATE.path, &body.to_string())?;
+                if reply.status != 200 {
+                    return Err(refuse(&LIBRARY_CREATE, &reply));
+                }
+                continue;
+            };
+            let subject = label(Some(library), folder);
+            let mut missing = Vec::new();
+            let diffs = differing(library, set, &subject, &mut missing);
+            if !missing.is_empty() {
+                return Err(Error::MissingField(missing));
+            }
+            if diffs.is_empty() {
+                continue;
+            }
+            let id = library
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| Error::MissingField(vec![format!("{subject}: id")]))?;
+            let path = LIBRARY_UPDATE.path.replace("{id}", id);
+            let reply = t.patch_json(&path, &patch_body(&diffs).to_string())?;
+            if reply.status != 200 {
+                return Err(refuse_at(LIBRARY_UPDATE.method, path, &reply));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -612,5 +907,187 @@ mod tests {
         let current = t2.read(&settings(SETTINGS_JSON)).unwrap();
         let err = t2.diff(&current).err().unwrap().to_string();
         assert!(err.contains("authOpenIDNoSuchKey"), "{err}");
+    }
+
+    // --- libraries (design §38) ---------------------------------------------
+
+    const LIBRARIES_JSON: &str =
+        include_str!("../../tests/fixtures/audiobookshelf-2.36.0/libraries.json");
+    const BOOKS: &str = "/tank/data/media/audiobooks";
+    const BOOKS_ID: &str = "5b3c35a3-d25d-45ac-bbdb-4cc57e7ffd21";
+
+    fn libraries(desired: Value) -> Libraries {
+        Libraries {
+            libraries: serde_json::from_value(desired).unwrap(),
+        }
+    }
+
+    fn library_answer(body: &str) -> FakeTransport {
+        FakeTransport::default()
+            .on_get(LIBRARIES.path, vec![ok(body)])
+            .on_put(vec![ok("{}")])
+    }
+
+    #[test]
+    fn the_recorded_libraries_already_match_and_nothing_is_written() {
+        let task = libraries(json!({
+            BOOKS: {
+                "name": "Hoerbuecher", "mediaType": "book", "icon": "audiobook",
+                "provider": "google", "displayOrder": 1,
+                "settings": { "markAsFinishedTimeRemaining": 10, "hideSingleBookSeries": false }
+            },
+            "/tank/data/media/podcasts": { "name": "Podcasts", "mediaType": "podcast" }
+        }));
+        let t = library_answer(LIBRARIES_JSON);
+        let current = task.read(&t).unwrap();
+        assert_eq!(current.len(), 2);
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+        assert_eq!(task.notes(&current), Vec::<String>::new());
+        task.write(&t, &current).unwrap();
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_changed_icon_is_one_patch_carrying_nothing_else() {
+        let task = libraries(json!({ BOOKS: { "icon": "book-1" } }));
+        let t = library_answer(LIBRARIES_JSON);
+        let current = task.read(&t).unwrap();
+        let changes: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(|c| c.to_string())
+            .collect();
+        assert_eq!(
+            changes,
+            [r#"library Hoerbuecher: icon "audiobook" -> "book-1""#]
+        );
+        assert_eq!(
+            task.notes(&current),
+            ["library Podcasts is not in the spec and stays as it is"]
+        );
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].0, format!("/api/libraries/{BOOKS_ID}"));
+        assert_eq!(
+            serde_json::from_str::<Value>(&written[0].1).unwrap(),
+            json!({ "icon": "book-1" })
+        );
+    }
+
+    #[test]
+    fn a_settings_key_travels_alone_and_the_other_settings_stay() {
+        // Audiobookshelf merges a settings body into the stored settings, so
+        // the keys the spec does not name keep their values.
+        let task = libraries(json!({
+            BOOKS: { "settings": { "markAsFinishedTimeRemaining": 30 } }
+        }));
+        let t = library_answer(LIBRARIES_JSON);
+        let current = task.read(&t).unwrap();
+        let changes: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(|c| c.to_string())
+            .collect();
+        assert_eq!(
+            changes,
+            ["library Hoerbuecher: settings.markAsFinishedTimeRemaining 10 -> 30"]
+        );
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1);
+        assert_eq!(
+            serde_json::from_str::<Value>(&written[0].1).unwrap(),
+            json!({ "settings": { "markAsFinishedTimeRemaining": 30 } })
+        );
+    }
+
+    #[test]
+    fn a_library_no_folder_holds_is_created_with_the_whole_body() {
+        let task = libraries(json!({
+            "/tank/data/media/comics": {
+                "name": "Comics", "mediaType": "book", "icon": "columns",
+                "provider": "google", "displayOrder": 3,
+                "settings": { "disableWatcher": true }
+            }
+        }));
+        let t = library_answer(LIBRARIES_JSON);
+        let current = task.read(&t).unwrap();
+        let changes: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(|c| c.to_string())
+            .collect();
+        assert_eq!(
+            changes,
+            ["library /tank/data/media/comics: (missing) -> (added)"]
+        );
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].0, "/api/libraries");
+        assert_eq!(
+            serde_json::from_str::<Value>(&written[0].1).unwrap(),
+            json!({
+                "name": "Comics",
+                "folders": [{ "path": "/tank/data/media/comics" }],
+                "mediaType": "book", "icon": "columns", "provider": "google",
+                "displayOrder": 3, "settings": { "disableWatcher": true }
+            })
+        );
+    }
+
+    #[test]
+    fn a_library_to_be_created_without_a_name_fails_before_any_write() {
+        let task = libraries(json!({ "/tank/data/media/comics": { "icon": "columns" } }));
+        let t = library_answer(LIBRARIES_JSON);
+        let current = task.read(&t).unwrap();
+        let err = task.diff(&current).err().unwrap().to_string();
+        assert!(
+            err.contains("/tank/data/media/comics") && err.contains("name"),
+            "{err}"
+        );
+        assert!(task.write(&t, &current).is_err());
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_settings_key_the_answer_does_not_carry_is_an_error() {
+        // `podcastSearchRegion` is a podcast library's setting; the book
+        // library has none, and Audiobookshelf would drop it.
+        let task = libraries(json!({ BOOKS: { "settings": { "podcastSearchRegion": "de" } } }));
+        let current = task.read(&library_answer(LIBRARIES_JSON)).unwrap();
+        let err = task.diff(&current).err().unwrap().to_string();
+        assert!(err.contains("settings.podcastSearchRegion"), "{err}");
+    }
+
+    #[test]
+    fn two_libraries_holding_one_folder_are_an_error_and_a_refusal_quotes_nothing() {
+        let mut recorded: Value = serde_json::from_str(LIBRARIES_JSON).unwrap();
+        recorded["libraries"][1]["folders"][0]["fullPath"] = json!(BOOKS);
+        let task = libraries(json!({ BOOKS: { "icon": "audiobook" } }));
+        let t = library_answer(&recorded.to_string());
+        let current = task.read(&t).unwrap();
+        let err = task.diff(&current).err().unwrap().to_string();
+        assert!(err.contains("2 libraries hold the folder"), "{err}");
+
+        let t = FakeTransport::default().on_get(
+            LIBRARIES.path,
+            vec![Step::Answer(403, "leaky-token".into())],
+        );
+        let err = task.read(&t).err().unwrap().to_string();
+        assert!(
+            err.contains("no administrator") && !err.contains("leaky"),
+            "{err}"
+        );
+        let err = task
+            .read(&library_answer("leaky-token"))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(!err.contains("leaky"), "{err}");
     }
 }

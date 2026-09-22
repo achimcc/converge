@@ -221,6 +221,12 @@ fn reconcile_one(
                 run(mode, &task, &transport, &SystemClock, timing)
             }
         },
+        Desired::AudiobookshelfLibraries(libraries) => {
+            let task = audiobookshelf::Libraries {
+                libraries: libraries.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
         Desired::AudiobookshelfAdminPermissions(desired) => {
             let task = audiobookshelf::AdminPermissions {
                 types: desired.types.clone(),
@@ -791,6 +797,7 @@ fn schema_check(args: &[String]) -> ExitCode {
             Desired::KoelRadioStations(_)
             | Desired::AudiobookshelfAuthSettings(_)
             | Desired::AudiobookshelfAdminPermissions(_)
+            | Desired::AudiobookshelfLibraries(_)
             | Desired::SuggestArrConfiguration(_)
             | Desired::AccountSubscriptions(_)
             | Desired::BinderyEntries(..)

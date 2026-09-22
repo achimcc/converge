@@ -1,0 +1,73 @@
+{
+  "libraries": [
+    {
+      "createdAt": 1788601707063,
+      "displayOrder": 1,
+      "folders": [
+        {
+          "addedAt": 1788601707068,
+          "fullPath": "/tank/data/media/audiobooks",
+          "id": "c77cecb7-a1ec-460f-9f6b-5397289ffda2",
+          "libraryId": "5b3c35a3-d25d-45ac-bbdb-4cc57e7ffd21"
+        }
+      ],
+      "icon": "audiobook",
+      "id": "5b3c35a3-d25d-45ac-bbdb-4cc57e7ffd21",
+      "lastScan": 1788981656463,
+      "lastScanVersion": "2.36.0",
+      "lastUpdate": 1788981656463,
+      "mediaType": "book",
+      "name": "Hoerbuecher",
+      "provider": "google",
+      "settings": {
+        "audiobooksOnly": false,
+        "autoScanCronExpression": null,
+        "coverAspectRatio": 1,
+        "disableWatcher": false,
+        "epubsAllowScriptedContent": false,
+        "hideSingleBookSeries": false,
+        "markAsFinishedPercentComplete": null,
+        "markAsFinishedTimeRemaining": 10,
+        "metadataPrecedence": [
+          "folderStructure",
+          "audioMetatags",
+          "nfoFile",
+          "txtFiles",
+          "opfFile",
+          "absMetadata"
+        ],
+        "onlyShowLaterBooksInContinueSeries": false,
+        "skipMatchingMediaWithAsin": false,
+        "skipMatchingMediaWithIsbn": false
+      }
+    },
+    {
+      "createdAt": 1788601707132,
+      "displayOrder": 2,
+      "folders": [
+        {
+          "addedAt": 1788601707141,
+          "fullPath": "/tank/data/media/podcasts",
+          "id": "a9e29362-018a-4b1a-bb2b-2fc1be54e21d",
+          "libraryId": "86a3e1c1-adb0-4e12-ac30-c44eb74b239f"
+        }
+      ],
+      "icon": "podcast",
+      "id": "86a3e1c1-adb0-4e12-ac30-c44eb74b239f",
+      "lastScan": null,
+      "lastScanVersion": null,
+      "lastUpdate": 1788601707132,
+      "mediaType": "podcast",
+      "name": "Podcasts",
+      "provider": "google",
+      "settings": {
+        "autoScanCronExpression": null,
+        "coverAspectRatio": 1,
+        "disableWatcher": false,
+        "markAsFinishedPercentComplete": null,
+        "markAsFinishedTimeRemaining": 10,
+        "podcastSearchRegion": "us"
+      }
+    }
+  ]
+}

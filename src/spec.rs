@@ -187,7 +187,11 @@ impl TaskName {
             | TaskName::Webhook => service == Service::Seerr,
             TaskName::RadioStations => service == Service::Koel,
             TaskName::Configuration => service == Service::SuggestArr,
-            TaskName::ServerSettings | TaskName::Libraries => service == Service::Kavita,
+            TaskName::ServerSettings => service == Service::Kavita,
+            // `libraries` means the same thing for both, and each service
+            // parses its own fields below: libraries found by a folder they
+            // hold (§26, §38).
+            TaskName::Libraries => service == Service::Kavita || service == Service::Audiobookshelf,
             TaskName::AuthSettings | TaskName::AdminPermissions => {
                 service == Service::Audiobookshelf
             }
@@ -626,6 +630,7 @@ pub enum Desired {
     SuggestArrConfiguration(SuggestArrConfiguration),
     KavitaServerSettings(BTreeMap<String, serde_json::Value>),
     KavitaLibraries(BTreeMap<String, BTreeMap<String, serde_json::Value>>),
+    AudiobookshelfLibraries(BTreeMap<String, BTreeMap<String, serde_json::Value>>),
     AudiobookshelfAuthSettings(AudiobookshelfAuth),
     AudiobookshelfAdminPermissions(AbsPermissions),
     Dispatcharr(DispatcharrDesired),
@@ -687,6 +692,68 @@ pub struct AudiobookshelfAuth {
 
 /// The fields of Audiobookshelf's auth settings that hold a secret.
 const ABS_SECRET_FIELDS: [&str; 1] = ["authOpenIDClientSecret"];
+
+/// The fields `LibraryController.update` reads, minus `folders` -- a folder
+/// is what names the library (design §38).
+const ABS_LIBRARY_FIELDS: [&str; 6] = [
+    "name",
+    "mediaType",
+    "icon",
+    "provider",
+    "displayOrder",
+    "settings",
+];
+
+/// The media types Audiobookshelf has (`Library.mediaTypes`).
+const ABS_MEDIA_TYPES: [&str; 2] = ["book", "podcast"];
+
+/// One library of an Audiobookshelf `libraries` spec. `name` is required
+/// only where the library has to be created, which the task decides against
+/// the answer; here every field that is given must have the type
+/// Audiobookshelf reads it as. A string that is not truthy it ignores, so
+/// `""` would differ forever while it reported nothing to change.
+fn abs_library(fields: &BTreeMap<String, serde_json::Value>, at: &str) -> Result<(), String> {
+    if fields.is_empty() {
+        return Err(format!("{at} names no field"));
+    }
+    for (field, value) in fields {
+        if !ABS_LIBRARY_FIELDS.contains(&field.as_str()) {
+            return Err(format!(
+                "{at}: {field:?} is no field of a library ({})",
+                ABS_LIBRARY_FIELDS.join(", ")
+            ));
+        }
+        match field.as_str() {
+            "displayOrder" => {
+                if !value.is_number() {
+                    return Err(format!("{at}.{field}: {value} is not a number"));
+                }
+            }
+            "settings" => match value.as_object() {
+                None => return Err(format!("{at}.{field}: this is not an object")),
+                Some(map) if map.is_empty() => return Err(format!("{at}.{field} names no key")),
+                Some(_) => {}
+            },
+            _ => {
+                let Some(text) = value.as_str() else {
+                    return Err(format!("{at}.{field}: {value} is not a string"));
+                };
+                if text.is_empty() {
+                    return Err(format!(
+                        "{at}.{field}: the value is empty, and Audiobookshelf ignores a string that is not truthy"
+                    ));
+                }
+                if field == "mediaType" && !ABS_MEDIA_TYPES.contains(&text) {
+                    return Err(format!(
+                        "{at}.{field}: {text:?} is neither {}",
+                        ABS_MEDIA_TYPES.join(" nor ")
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
 
 fn web_url(url: &str) -> bool {
     url.starts_with("http://") || url.starts_with("https://")
@@ -1424,7 +1491,8 @@ impl Spec {
                 }
                 Desired::AudiobookshelfAuthSettings(desired)
             }
-            // Kavita's libraries by a folder they hold (design §26).
+            // Libraries by a folder they hold: Kavita's (design §26) and
+            // Audiobookshelf's (§38). Same shape, different fields.
             TaskName::Libraries => {
                 #[derive(Deserialize)]
                 #[serde(deny_unknown_fields)]
@@ -1443,16 +1511,25 @@ impl Spec {
                             "{at}: a library is named by an absolute folder"
                         )));
                     }
-                    // The id and the folders say WHICH library is meant; the
-                    // file types travel under two names and are left alone.
-                    plain_fields(
-                        fields,
-                        &at,
-                        &["id", "folders", "fileGroupTypes", "libraryFileTypes"],
-                    )
-                    .map_err(invalid)?;
+                    if raw.service == Service::Audiobookshelf {
+                        abs_library(fields, &at).map_err(invalid)?;
+                    } else {
+                        // The id and the folders say WHICH library is meant;
+                        // the file types travel under two names and are left
+                        // alone.
+                        plain_fields(
+                            fields,
+                            &at,
+                            &["id", "folders", "fileGroupTypes", "libraryFileTypes"],
+                        )
+                        .map_err(invalid)?;
+                    }
                 }
-                Desired::KavitaLibraries(desired.libraries)
+                if raw.service == Service::Audiobookshelf {
+                    Desired::AudiobookshelfLibraries(desired.libraries)
+                } else {
+                    Desired::KavitaLibraries(desired.libraries)
+                }
             }
             TaskName::ServerConfiguration => {
                 let map: BTreeMap<String, serde_json::Value> = serde_json::from_value(raw.desired)
@@ -1815,7 +1892,7 @@ impl Spec {
             Desired::KoelRadioStations(_) => "radio-stations",
             Desired::SuggestArrConfiguration(_) => "configuration",
             Desired::KavitaServerSettings(_) => "server-settings",
-            Desired::KavitaLibraries(_) => "libraries",
+            Desired::KavitaLibraries(_) | Desired::AudiobookshelfLibraries(_) => "libraries",
             Desired::AudiobookshelfAuthSettings(_) => "auth-settings",
             Desired::AudiobookshelfAdminPermissions(_) => "admin-permissions",
             Desired::Dispatcharr(ref d) => match &d.task {
@@ -2626,6 +2703,48 @@ mod tests {
         assert!(reason(lib(r#"{"libraries":{"books":{"type":2}}}"#)).contains("absolute folder"));
         assert!(reason(lib(r#"{"libraries":{}}"#)).contains("names no library"));
         assert!(reason(lib(r#"{"libraries":{"/b":{}}}"#)).contains("names no field"));
+    }
+
+    #[test]
+    fn audiobookshelf_libraries_are_named_by_a_folder_and_carry_only_known_fields() {
+        let lib = |d: &str| {
+            parse(&format!(
+                r#"{{"service":"audiobookshelf","base_url":"http://10.0.90.10:8000","api_key_credential":"t","task":"libraries","desired":{d}}}"#
+            ))
+        };
+        let spec = lib(
+            r#"{"libraries":{"/tank/data/media/audiobooks":{"name":"Hoerbuecher","mediaType":"book","icon":"audiobook","provider":"google","displayOrder":1,"settings":{"markAsFinishedTimeRemaining":10}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "libraries");
+        assert_eq!(spec.service.key_header(), "Authorization");
+        let Desired::AudiobookshelfLibraries(libraries) = &spec.desired else {
+            panic!("not an Audiobookshelf library spec");
+        };
+        assert_eq!(libraries.len(), 1);
+
+        // The folders are the key itself, and `update` takes nothing else.
+        for field in ["id", "folders", "lastScan", "settings.icon"] {
+            let d = format!(r#"{{"libraries":{{"/b":{{"{field}":1}}}}}}"#);
+            assert!(
+                reason(lib(&d)).contains("is no field of a library"),
+                "{field}"
+            );
+        }
+        // `update` ignores a string that is not truthy, so "" would differ
+        // forever while Audiobookshelf reported nothing to change.
+        assert!(reason(lib(r#"{"libraries":{"/b":{"name":""}}}"#)).contains("is empty"));
+        assert!(reason(lib(r#"{"libraries":{"/b":{"icon":5}}}"#)).contains("a string"));
+        assert!(reason(lib(r#"{"libraries":{"/b":{"mediaType":"film"}}}"#)).contains("book"));
+        assert!(reason(lib(r#"{"libraries":{"/b":{"displayOrder":"1"}}}"#)).contains("a number"));
+        assert!(reason(lib(r#"{"libraries":{"/b":{"settings":[]}}}"#)).contains("an object"));
+        assert!(reason(lib(r#"{"libraries":{"/b":{"settings":{}}}}"#)).contains("names no key"));
+        assert!(reason(lib(r#"{"libraries":{"books":{"name":"B"}}}"#)).contains("absolute folder"));
+        assert!(reason(lib(r#"{"libraries":{}}"#)).contains("names no library"));
+        assert!(reason(lib(r#"{"libraries":{"/b":{}}}"#)).contains("names no field"));
+        // The task belongs to Kavita as well, and to nobody else.
+        let koel = r#"{"service":"koel","base_url":"http://x","api_key_credential":"k","task":"libraries","desired":{"libraries":{"/b":{"name":"B"}}}}"#;
+        assert!(reason(parse(koel)).contains("does not belong"));
     }
 
     #[test]
