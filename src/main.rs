@@ -268,6 +268,12 @@ fn reconcile_one(
                 };
                 run(mode, &task, &transport, &SystemClock, timing)
             }
+            DispatcharrTask::Profiles(accounts) => {
+                let task = dispatcharr::Profiles {
+                    accounts: accounts.clone(),
+                };
+                run(mode, &task, &transport, &SystemClock, timing)
+            }
             DispatcharrTask::ChannelEpg(channels) => {
                 let task = dispatcharr::ChannelEpg {
                     channels: channels.clone(),
@@ -1015,8 +1021,9 @@ fn schema_check(args: &[String]) -> ExitCode {
                     None => (vec![format!("{} has no such providers", service)], 0),
                 }
             }
-            // An account's and a source's fields are sent when they are added
-            // and when they are updated, so each must be a property of both;
+            // An account's, a profile's and a source's fields are sent when
+            // they are added and when they are updated, so each must be a
+            // property of both;
             // a group's fields are those of the membership the account answers
             // with (the endpoint's declared body is wrong, design §29).
             Desired::Dispatcharr(desired) => match &desired.task {
@@ -1073,6 +1080,26 @@ fn schema_check(args: &[String]) -> ExitCode {
                                     .into_iter()
                                     .map(|f| format!("{name}: {f}")),
                             );
+                        }
+                    }
+                    (found, count)
+                }
+                DispatcharrTask::Profiles(accounts) => {
+                    let mut found = Vec::new();
+                    let mut count = 0;
+                    for (account, profiles) in accounts {
+                        for (profile, fields) in profiles {
+                            count += fields.len();
+                            for component in [
+                                dispatcharr::PROFILE_CREATE_COMPONENT,
+                                dispatcharr::PROFILE_UPDATE_COMPONENT,
+                            ] {
+                                found.extend(
+                                    schema::check_paths(&document, component, fields)
+                                        .into_iter()
+                                        .map(|f| format!("{account}/{profile}: {f}")),
+                                );
+                            }
                         }
                     }
                     (found, count)

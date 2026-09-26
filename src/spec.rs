@@ -150,6 +150,7 @@ enum TaskName {
     StreamSettings,
     M3uAccounts,
     M3uGroups,
+    M3uProfiles,
     EpgSources,
     ChannelEpg,
 }
@@ -212,6 +213,7 @@ impl TaskName {
             TaskName::StreamSettings
             | TaskName::M3uAccounts
             | TaskName::M3uGroups
+            | TaskName::M3uProfiles
             | TaskName::EpgSources
             | TaskName::ChannelEpg => service == Service::Dispatcharr,
         }
@@ -778,6 +780,8 @@ pub enum DispatcharrTask {
     ),
     /// account name -> group name -> fields.
     Groups(BTreeMap<String, BTreeMap<String, BTreeMap<String, serde_json::Value>>>),
+    /// account name -> profile name -> fields (§44).
+    Profiles(BTreeMap<String, BTreeMap<String, BTreeMap<String, serde_json::Value>>>),
     /// channel name -> what it shows: guide entry, name, logo (§34, §35).
     ChannelEpg(BTreeMap<String, crate::services::dispatcharr::ChannelLook>),
 }
@@ -1723,6 +1727,7 @@ impl Spec {
             TaskName::StreamSettings
             | TaskName::M3uAccounts
             | TaskName::M3uGroups
+            | TaskName::M3uProfiles
             | TaskName::EpgSources
             | TaskName::ChannelEpg => {
                 Desired::Dispatcharr(dispatcharr_desired(raw.task, raw.desired).map_err(invalid)?)
@@ -2291,6 +2296,7 @@ impl Spec {
                     _,
                 ) => "epg-sources",
                 DispatcharrTask::Groups(_) => "m3u-groups",
+                DispatcharrTask::Profiles(_) => "m3u-profiles",
                 DispatcharrTask::ChannelEpg(_) => "channel-epg",
             },
             Desired::AuthentikSettings(_) => "settings",
@@ -2462,6 +2468,51 @@ fn dispatcharr_desired(
                 }
             }
             (d.username, DispatcharrTask::Groups(d.accounts))
+        }
+        TaskName::M3uProfiles => {
+            use crate::services::dispatcharr::PROFILE_FIELDS;
+            let d: Groups = serde_json::from_value(desired).map_err(parse_err)?;
+            if d.accounts.is_empty() {
+                return Err("desired.accounts names no account".to_string());
+            }
+            for (account, profiles) in &d.accounts {
+                if profiles.is_empty() {
+                    return Err(format!("desired.accounts.{account} names no profile"));
+                }
+                for (profile, fields) in profiles {
+                    let at = format!("desired.accounts.{account}.{profile}");
+                    if profile.is_empty() {
+                        return Err(format!(
+                            "desired.accounts.{account}: a profile name is empty"
+                        ));
+                    }
+                    if fields.is_empty() {
+                        return Err(format!("{at} names no field"));
+                    }
+                    for (field, value) in fields {
+                        let ok = match field.as_str() {
+                            "max_streams" => value.as_u64().is_some(),
+                            "is_active" => value.is_boolean(),
+                            "search_pattern" | "replace_pattern" => {
+                                value.as_str().is_some_and(|v| !v.is_empty())
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "{at}: {field} is not a profile field ({})",
+                                    PROFILE_FIELDS.join(", ")
+                                ))
+                            }
+                        };
+                        if !ok {
+                            return Err(format!(
+                                "{at}.{field}: max_streams is a whole number from 0, is_active \
+                                 true or false, a pattern non-empty text"
+                            ));
+                        }
+                    }
+                }
+            }
+            (d.username, DispatcharrTask::Profiles(d.accounts))
         }
         TaskName::ChannelEpg => {
             #[derive(Deserialize)]
@@ -3941,6 +3992,56 @@ mod tests {
             panic!("not a Dispatcharr spec")
         };
         assert_eq!(d.username, "converge");
+    }
+
+    #[test]
+    fn dispatcharr_profiles_parse_and_are_strict() {
+        let spec = dispatcharr(
+            "m3u-profiles",
+            r#"{"username":"converge","accounts":{"Xtream":{"Xtream Default":{"search_pattern":"^https?://[^/]+","replace_pattern":"http://10.88.0.1:9201"},"Xtream 2":{"max_streams":1,"is_active":true,"search_pattern":"^https?://[^/]+","replace_pattern":"http://10.88.0.1:9202"}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "m3u-profiles");
+        for (bad, why) in [
+            (r#"{"username":"c","accounts":{}}"#, "no account"),
+            (r#"{"username":"c","accounts":{"A":{}}}"#, "no profile"),
+            (r#"{"username":"c","accounts":{"A":{"P":{}}}}"#, "no field"),
+            (
+                r#"{"username":"c","accounts":{"A":{"":{"max_streams":1}}}}"#,
+                "",
+            ),
+            (
+                r#"{"username":"c","accounts":{"A":{"P":{"current_viewers":0}}}}"#,
+                "not a profile field",
+            ),
+            (
+                r#"{"username":"c","accounts":{"A":{"P":{"custom_properties":{}}}}}"#,
+                "not a profile field",
+            ),
+            (
+                r#"{"username":"c","accounts":{"A":{"P":{"max_streams":-1}}}}"#,
+                "max_streams",
+            ),
+            (
+                r#"{"username":"c","accounts":{"A":{"P":{"max_streams":1.5}}}}"#,
+                "max_streams",
+            ),
+            (
+                r#"{"username":"c","accounts":{"A":{"P":{"is_active":"yes"}}}}"#,
+                "is_active",
+            ),
+            (
+                r#"{"username":"c","accounts":{"A":{"P":{"search_pattern":3}}}}"#,
+                "search_pattern",
+            ),
+            (
+                r#"{"username":"c","accounts":{"A":{"P":{"replace_pattern":""}}}}"#,
+                "replace_pattern",
+            ),
+        ] {
+            let err = dispatcharr("m3u-profiles", bad).unwrap_err().to_string();
+            assert!(err.contains(why), "{bad}: {err}");
+        }
     }
 
     #[test]

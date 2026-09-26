@@ -1,6 +1,6 @@
 //! Dispatcharr: the IPTV proxy in front of a media server's Live TV (design
-//! §29). Four tasks: the default stream profile, M3U accounts, the channel
-//! groups of an account, and EPG sources.
+//! §29). The default stream profile, M3U accounts, the channel groups and the
+//! profiles of an account, EPG sources, and what a channel shows.
 //!
 //! Dispatcharr is a Django REST Framework application whose OpenAPI
 //! description drf-spectacular generates at runtime; the vendored copy was
@@ -95,6 +95,20 @@ pub const CHANNEL_GROUPS: Endpoint = Endpoint {
     request: None,
     response: Some(Shape::List("ChannelGroup")),
 };
+/// Answers 201; the schema check reads only 200 answers. The account is the
+/// path's, not the body's (`perform_create`).
+pub const PROFILE_CREATE: Endpoint = Endpoint {
+    method: "POST",
+    path: "/api/m3u/accounts/{account_id}/profiles/",
+    request: Some(Shape::Document("M3UAccountProfile")),
+    response: None,
+};
+pub const PROFILE_UPDATE: Endpoint = Endpoint {
+    method: "PATCH",
+    path: "/api/m3u/accounts/{account_id}/profiles/{id}/",
+    request: Some(Shape::Document("PatchedM3UAccountProfile")),
+    response: None,
+};
 pub const EPG_SOURCES: Endpoint = Endpoint {
     method: "GET",
     path: "/api/epg/sources/",
@@ -139,7 +153,7 @@ pub const EPG_DATA: Endpoint = Endpoint {
     response: Some(Shape::List("EPGData")),
 };
 
-pub const ENDPOINTS: [Endpoint; 19] = [
+pub const ENDPOINTS: [Endpoint; 21] = [
     TOKEN,
     VERSION,
     STREAM_PROFILES,
@@ -149,6 +163,8 @@ pub const ENDPOINTS: [Endpoint; 19] = [
     M3U_ACCOUNT_CREATE,
     M3U_ACCOUNT_UPDATE,
     GROUP_SETTINGS,
+    PROFILE_CREATE,
+    PROFILE_UPDATE,
     CHANNEL_GROUPS,
     EPG_SOURCES,
     EPG_SOURCE_CREATE,
@@ -167,6 +183,25 @@ pub const ENDPOINTS: [Endpoint; 19] = [
 pub const M3U_ACCOUNT_CREATE_COMPONENT: &str = "M3UAccount";
 pub const M3U_ACCOUNT_UPDATE_COMPONENT: &str = "PatchedM3UAccount";
 pub const GROUP_COMPONENT: &str = "ChannelGroupM3UAccount";
+/// A profile's fields are sent when it is added and when it is changed.
+pub const PROFILE_CREATE_COMPONENT: &str = "M3UAccountProfile";
+pub const PROFILE_UPDATE_COMPONENT: &str = "PatchedM3UAccountProfile";
+
+/// The fields a profile may name (design §44): its limit, its switch, and the
+/// pattern pair that rewrites the account's stream URLs.
+pub const PROFILE_FIELDS: [&str; 4] = [
+    "max_streams",
+    "is_active",
+    "search_pattern",
+    "replace_pattern",
+];
+/// Fields of the default profile that are not its own: the limit is the
+/// account's (`create_profile_for_m3u_account`), and the serializer refuses
+/// both on a default profile (`M3UAccountProfileSerializer.update`).
+const DEFAULT_PROFILE_FIXED: [&str; 2] = ["max_streams", "is_active"];
+/// What a profile Dispatcharr did not make must carry
+/// (`M3UAccountProfileSerializer.validate`).
+const PROFILE_PATTERNS: [&str; 2] = ["search_pattern", "replace_pattern"];
 pub const EPG_SOURCE_CREATE_COMPONENT: &str = "EPGSource";
 pub const EPG_SOURCE_UPDATE_COMPONENT: &str = "PatchedEPGSource";
 /// A channel's number goes into its override; the other fields of
@@ -216,6 +251,7 @@ pub fn wire_types() -> Vec<schemars::Schema> {
         schemars::schema_for!(StreamProfile),
         schemars::schema_for!(CoreSettings),
         schemars::schema_for!(M3UAccount),
+        schemars::schema_for!(M3UAccountProfile),
         schemars::schema_for!(ChannelGroup),
         schemars::schema_for!(EPGSource),
         schemars::schema_for!(Channel),
@@ -261,6 +297,23 @@ pub struct M3UAccount {
     #[serde(default)]
     #[schemars(skip)]
     pub channel_groups: Vec<GroupMembership>,
+    /// Its profiles, the default one among them (design §44).
+    #[serde(default)]
+    #[schemars(skip)]
+    pub profiles: Vec<M3UAccountProfile>,
+    #[serde(flatten)]
+    #[schemars(skip)]
+    pub rest: Map<String, Value>,
+}
+
+/// One entry of an account's `profiles`. Its other fields stay in `rest`,
+/// where a spec's four are looked up; `custom_properties` is among them and
+/// holds the provider's account information -- never compared, never shown.
+#[derive(Deserialize, JsonSchema)]
+pub struct M3UAccountProfile {
+    pub id: i64,
+    pub name: String,
+    pub is_default: bool,
     #[serde(flatten)]
     #[schemars(skip)]
     pub rest: Map<String, Value>,
@@ -977,6 +1030,195 @@ impl Task for Groups {
             )?;
             let reply = t.patch_json(&path, &body)?;
             expect_status_at(GROUP_SETTINGS.method, &path, &reply, &[200])?;
+        }
+        Ok(())
+    }
+}
+
+// --- m3u-profiles ----------------------------------------------------------
+
+/// The profiles of M3U accounts: account name -> profile name -> fields
+/// (design §44). A profile rewrites the account's stream URLs by a pattern
+/// and carries its own stream limit; Dispatcharr takes the default profile
+/// first, then the others, each up to its `max_streams`.
+///
+/// Profiles are found by name. The default one Dispatcharr names itself
+/// (`<account> Default`, made with the account); it takes its limit from the
+/// account and cannot be switched off, so a spec may give it patterns only.
+/// A missing profile is added; converge never removes one.
+pub struct Profiles {
+    pub accounts: BTreeMap<String, BTreeMap<String, BTreeMap<String, Value>>>,
+}
+
+impl Profiles {
+    fn account<'a>(current: &'a [M3UAccount], name: &str) -> Result<&'a M3UAccount, String> {
+        current
+            .iter()
+            .find(|a| a.name == name)
+            .ok_or_else(|| format!("M3U account {name} does not exist"))
+    }
+
+    fn subject(account: &str, profile: &str) -> String {
+        format!("profile {profile} of M3U account {account}")
+    }
+
+    /// What Dispatcharr would refuse or never save, as an error before any
+    /// write: a limit or a switch on the default profile, a new profile
+    /// without both patterns.
+    fn refusals(&self, current: &[M3UAccount]) -> Vec<String> {
+        let mut refusals = Vec::new();
+        for (account, profiles) in &self.accounts {
+            let Ok(a) = Self::account(current, account) else {
+                continue;
+            };
+            for (name, set) in profiles {
+                let subject = Self::subject(account, name);
+                match a.profiles.iter().find(|p| &p.name == name) {
+                    Some(p) if p.is_default => {
+                        for field in DEFAULT_PROFILE_FIXED {
+                            if set.contains_key(field) {
+                                refusals.push(format!(
+                                    "{subject} is the account's default profile: its {field} is not \
+                                     its own (set max_streams on the account (m3u-accounts); \
+                                     Dispatcharr copies it to the default profile, which stays active)"
+                                ));
+                            }
+                        }
+                    }
+                    Some(_) => {}
+                    None => {
+                        for field in PROFILE_PATTERNS {
+                            if !set.contains_key(field) {
+                                refusals.push(format!(
+                                    "{subject} is to be added and names no {field} \
+                                     (Dispatcharr requires both patterns for a profile it did not make)"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        refusals
+    }
+}
+
+impl Task for Profiles {
+    type Current = Vec<M3UAccount>;
+
+    /// Ready when the service answers AND every account the spec names
+    /// exists; its default profile exists with it (`post_save`).
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        let version = probe(t)?;
+        let current: Vec<M3UAccount> =
+            get_list(t, &M3U_ACCOUNTS).map_err(|e| Probe::NotYet(e.to_string()))?;
+        for account in self.accounts.keys() {
+            Self::account(&current, account).map_err(Probe::NotYet)?;
+        }
+        Ok(version)
+    }
+
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        get_list(t, &M3U_ACCOUNTS)
+    }
+
+    /// Only the four fields a spec may name are compared; a profile's
+    /// `custom_properties` hold the provider's account information and are
+    /// never read here.
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        let mut absent = Vec::new();
+        let mut missing = Vec::new();
+        let mut changes = Vec::new();
+        for (account, profiles) in &self.accounts {
+            let a = match Self::account(current, account) {
+                Ok(a) => a,
+                Err(why) => {
+                    absent.push(why);
+                    continue;
+                }
+            };
+            for (name, set) in profiles {
+                let subject = Self::subject(account, name);
+                match a.profiles.iter().find(|p| &p.name == name) {
+                    Some(p) => changes.extend(compare(&subject, &p.rest, set, &mut missing)),
+                    None => changes.push(Change {
+                        subject,
+                        field: String::new(),
+                        current: "(missing)".to_string(),
+                        desired: "(added)".to_string(),
+                    }),
+                }
+            }
+        }
+        if !absent.is_empty() {
+            return Err(Error::NotFound(absent));
+        }
+        let refusals = self.refusals(current);
+        if !refusals.is_empty() {
+            return Err(Error::Refused(refusals.join("; ")));
+        }
+        if missing.is_empty() {
+            Ok(changes)
+        } else {
+            Err(Error::MissingField(missing))
+        }
+    }
+
+    fn notes(&self, current: &Self::Current) -> Vec<String> {
+        let mut notes = Vec::new();
+        for (account, profiles) in &self.accounts {
+            let Ok(a) = Self::account(current, account) else {
+                continue;
+            };
+            let mut others: Vec<&str> = a
+                .profiles
+                .iter()
+                .filter(|p| !profiles.contains_key(&p.name))
+                .map(|p| p.name.as_str())
+                .collect();
+            others.sort_unstable();
+            notes.extend(
+                others
+                    .into_iter()
+                    .map(|p| format!("not in the spec: {}", Self::subject(account, p))),
+            );
+        }
+        notes
+    }
+
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        let refusals = self.refusals(current);
+        if !refusals.is_empty() {
+            return Err(Error::Refused(refusals.join("; ")));
+        }
+        for (account, profiles) in &self.accounts {
+            let a = Self::account(current, account).map_err(|why| Error::NotFound(vec![why]))?;
+            let account_id = a.id.to_string();
+            for (name, set) in profiles {
+                let mut body: Map<String, Value> = set.clone().into_iter().collect();
+                match a.profiles.iter().find(|p| &p.name == name) {
+                    None => {
+                        body.insert("name".to_string(), json!(name));
+                        let path = PROFILE_CREATE.path.replace("{account_id}", &account_id);
+                        let text = serialize(PROFILE_CREATE.method, &path, &body)?;
+                        let reply = t.post_json(&path, &text)?;
+                        expect_status_at(PROFILE_CREATE.method, &path, &reply, &[200, 201])?;
+                    }
+                    Some(p) => {
+                        let mut missing = Vec::new();
+                        if compare("", &p.rest, set, &mut missing).is_empty() {
+                            continue;
+                        }
+                        let path = PROFILE_UPDATE
+                            .path
+                            .replace("{account_id}", &account_id)
+                            .replace("{id}", &p.id.to_string());
+                        let text = serialize(PROFILE_UPDATE.method, &path, &body)?;
+                        let reply = t.patch_json(&path, &text)?;
+                        expect_status_at(PROFILE_UPDATE.method, &path, &reply, &[200])?;
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -2674,5 +2916,197 @@ mod tests {
             .on_get(M3U_ACCOUNTS.path, vec![ok(ACCOUNTS_JSON)])
             .on_get(CHANNEL_GROUPS.path, vec![ok(GROUPS_JSON)]);
         assert!(matches!(task.probe(&t), Ok(v) if v == "0.31.0"));
+    }
+
+    // --- m3u-profiles ---
+
+    const PROFILE_PATTERN: &str = "^https?://[^/]+";
+
+    /// The recorded account `Oeffentlich-rechtlich` (id 2) with a second
+    /// profile beside its default one, as the web UI would add it. Built
+    /// from the recorded answer; the second profile's fields are those the
+    /// recorded default profile carries.
+    fn accounts_with_profiles() -> String {
+        with(ACCOUNTS_JSON, |v| {
+            let profiles = v[1]["profiles"].as_array_mut().unwrap();
+            let mut second = profiles[0].clone();
+            second["id"] = json!(7);
+            second["name"] = json!("Oeffentlich-rechtlich 2");
+            second["is_default"] = json!(false);
+            second["max_streams"] = json!(1);
+            second["search_pattern"] = json!(PROFILE_PATTERN);
+            second["replace_pattern"] = json!("http://10.88.0.1:9202");
+            second["custom_properties"] = json!({"user_info": {"username": "never-print-user", "password": "never-print-pass"}});
+            profiles.push(second);
+        })
+    }
+
+    fn profiles_task(profiles: &[(&str, &[(&str, Value)])]) -> Profiles {
+        Profiles {
+            accounts: BTreeMap::from([(
+                "Oeffentlich-rechtlich".to_string(),
+                profiles
+                    .iter()
+                    .map(|(name, set)| (name.to_string(), fields(set)))
+                    .collect(),
+            )]),
+        }
+    }
+
+    fn profiles_transport() -> FakeTransport {
+        FakeTransport::default()
+            .on_get(VERSION.path, vec![ok(VERSION_JSON)])
+            .on_get(M3U_ACCOUNTS.path, vec![ok(&accounts_with_profiles())])
+            .on_put(vec![Step::Answer(200, "{}".to_string())])
+    }
+
+    #[test]
+    fn profiles_as_they_are_change_nothing() {
+        let task = profiles_task(&[
+            (
+                "Oeffentlich-rechtlich Default",
+                &[
+                    ("search_pattern", json!("^(.*)$")),
+                    ("replace_pattern", json!("$1")),
+                ],
+            ),
+            (
+                "Oeffentlich-rechtlich 2",
+                &[
+                    ("max_streams", json!(1)),
+                    ("is_active", json!(true)),
+                    ("search_pattern", json!(PROFILE_PATTERN)),
+                    ("replace_pattern", json!("http://10.88.0.1:9202")),
+                ],
+            ),
+        ]);
+        let t = profiles_transport();
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+        assert_eq!(task.notes(&current), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_changed_profile_is_patched_with_only_the_spec_fields() {
+        let task = profiles_task(&[
+            (
+                "Oeffentlich-rechtlich Default",
+                &[
+                    ("search_pattern", json!(PROFILE_PATTERN)),
+                    ("replace_pattern", json!("http://10.88.0.1:9201")),
+                ],
+            ),
+            ("Oeffentlich-rechtlich 2", &[("max_streams", json!(2))]),
+        ]);
+        let t = profiles_transport();
+        let current = task.read(&t).unwrap();
+        let lines: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                "profile Oeffentlich-rechtlich 2 of M3U account Oeffentlich-rechtlich: max_streams 1 -> 2",
+                "profile Oeffentlich-rechtlich Default of M3U account Oeffentlich-rechtlich: replace_pattern \"$1\" -> \"http://10.88.0.1:9201\"",
+                "profile Oeffentlich-rechtlich Default of M3U account Oeffentlich-rechtlich: search_pattern \"^(.*)$\" -> \"^https?://[^/]+\"",
+            ]
+        );
+        for line in &lines {
+            assert!(!line.contains("never-print"), "{line}");
+        }
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 2);
+        assert_eq!(written[0].0, "/api/m3u/accounts/2/profiles/7/");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(sent, json!({"max_streams": 2}));
+        assert_eq!(written[1].0, "/api/m3u/accounts/2/profiles/2/");
+        let sent: Value = serde_json::from_str(&written[1].1).unwrap();
+        assert_eq!(
+            sent,
+            json!({"search_pattern": PROFILE_PATTERN, "replace_pattern": "http://10.88.0.1:9201"})
+        );
+    }
+
+    #[test]
+    fn a_missing_profile_is_added_with_its_name() {
+        let set: &[(&str, Value)] = &[
+            ("max_streams", json!(1)),
+            ("search_pattern", json!(PROFILE_PATTERN)),
+            ("replace_pattern", json!("http://10.88.0.1:9203")),
+        ];
+        let task = profiles_task(&[("Oeffentlich-rechtlich 3", set)]);
+        let t = profiles_transport().on_put(vec![Step::Answer(201, "{}".to_string())]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(
+            task.diff(&current).unwrap()[0].to_string(),
+            "profile Oeffentlich-rechtlich 3 of M3U account Oeffentlich-rechtlich: (missing) -> (added)"
+        );
+        // The profile the spec does not name is a note, never a removal.
+        assert_eq!(
+            task.notes(&current),
+            [
+                "not in the spec: profile Oeffentlich-rechtlich 2 of M3U account Oeffentlich-rechtlich",
+                "not in the spec: profile Oeffentlich-rechtlich Default of M3U account Oeffentlich-rechtlich",
+            ]
+        );
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written[0].0, "/api/m3u/accounts/2/profiles/");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(
+            sent,
+            json!({
+                "name": "Oeffentlich-rechtlich 3",
+                "max_streams": 1,
+                "search_pattern": PROFILE_PATTERN,
+                "replace_pattern": "http://10.88.0.1:9203",
+            })
+        );
+    }
+
+    #[test]
+    fn a_new_profile_without_both_patterns_is_refused_before_a_write() {
+        let task = profiles_task(&[(
+            "Oeffentlich-rechtlich 3",
+            &[
+                ("max_streams", json!(1)),
+                ("search_pattern", json!(PROFILE_PATTERN)),
+            ],
+        )]);
+        let t = profiles_transport();
+        let current = task.read(&t).unwrap();
+        let err = task.diff(&current).unwrap_err().to_string();
+        assert!(err.contains("replace_pattern"), "{err}");
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn the_default_profile_takes_no_limit_and_no_switch() {
+        for field in ["max_streams", "is_active"] {
+            let task = profiles_task(&[("Oeffentlich-rechtlich Default", &[(field, json!(1))])]);
+            let t = profiles_transport();
+            let current = task.read(&t).unwrap();
+            let err = task.diff(&current).unwrap_err().to_string();
+            assert!(err.contains(field), "{err}");
+            assert!(err.contains("m3u-accounts"), "{err}");
+        }
+    }
+
+    #[test]
+    fn profiles_wait_until_their_account_exists() {
+        let task = profiles_task(&[("Xtream 2", &[("max_streams", json!(1))])]);
+        let mut task = task;
+        task.accounts = BTreeMap::from([(
+            "Xtream".to_string(),
+            BTreeMap::from([("Xtream 2".to_string(), fields(&[("max_streams", json!(1))]))]),
+        )]);
+        let t = profiles_transport();
+        assert!(matches!(task.probe(&t), Err(Probe::NotYet(why)) if why.contains("Xtream")));
+        let ready = profiles_task(&[("Oeffentlich-rechtlich 2", &[("max_streams", json!(1))])]);
+        assert!(matches!(ready.probe(&t), Ok(v) if v == "0.31.0"));
     }
 }

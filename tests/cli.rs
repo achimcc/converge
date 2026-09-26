@@ -1730,7 +1730,7 @@ fn schema_check_checks_dispatcharr_entries_against_create_and_update() {
     let out = check(&[&accounts, &groups]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("19 endpoints"), "{stdout}");
+    assert!(stdout.contains("21 endpoints"), "{stdout}");
 
     // A misspelt field is found in both bodies it would travel in.
     let typo = spec(
@@ -1746,6 +1746,18 @@ fn schema_check_checks_dispatcharr_entries_against_create_and_update() {
         "{stderr}"
     );
     assert!(stderr.contains("PatchedEPGSource.sourcetype"), "{stderr}");
+
+    // A profile's fields are sent when it is added and when it is changed;
+    // a field the description does not know fails the check.
+    let profiles = spec(
+        "profiles.json",
+        "m3u-profiles",
+        r#"{"username":"c","accounts":{"X":{"X Default":{"search_pattern":"^https?://[^/]+","replace_pattern":"http://10.88.0.1:9201"},"X 2":{"max_streams":1,"is_active":true,"search_pattern":"^https?://[^/]+","replace_pattern":"http://10.88.0.1:9202"}}}}"#,
+    );
+    let out = check(&[&profiles]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("6 spec field(s)"), "{stdout}");
 
     // A channel's number is a field of its override; the rest are names.
     let channels = spec(

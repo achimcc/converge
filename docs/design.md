@@ -2545,6 +2545,77 @@ names, or aliases (`epg_data`, `logo`) the bulk edit maps onto the override's
 Not measured on the host yet: that the next refresh of the account leaves
 the effective number where it is and moves the channel that showed it.
 
+## 44. Dispatcharr: the profiles of an account (v0.41.0, 2026-09-26)
+
+`m3u-profiles` sets the profiles of M3U accounts: account name -> profile
+name -> `max_streams`, `is_active`, `search_pattern`, `replace_pattern`. A
+missing profile is added; one the spec does not name is a note, never a
+removal.
+
+**Why the host needs it.** An Xtream provider that reports three
+connections counts "devices" by address AND user agent: a second stream from
+the same address with the same agent throws the first one out (measured on
+the host, 2026-09-26). Dispatcharr sends ONE agent per account
+(`M3UAccount.user_agent`). The host therefore runs a small forwarder with one
+local port per agent, and the account gets one profile per port, each
+limited to one stream, each rewriting the stream URL onto its port.
+
+What Dispatcharr v0.31.0 does with a profile, read in its source (tag
+`v0.31.0`):
+
+- **Which profile a stream gets.** `Channel.get_stream` takes the account's
+  ACTIVE profiles, the default one first and the others after it in the
+  order the database answers, and reserves the first with a free slot
+  (`apps/channels/models.py`, lines 694–800). Without an active default
+  profile the account is skipped altogether ("has no active default
+  profile"). A profile's limit is its own `max_streams`; 0 is unlimited.
+- **How the URL is rewritten.** For an Xtream Codes account the pattern is
+  not applied to a stream's URL but to a synthetic one,
+  `<server_url>/live/<user>/<password>/1234.ts`
+  (`get_transformed_credentials`, `apps/m3u/credentials.py`, lines 31–150);
+  from the result it takes user and password from the path and scheme, host
+  and any base path as the server, and builds the playback URL from those
+  (`_resolve_live_stream_url`, `apps/proxy/live_proxy/url_utils.py`,
+  line 21). A pattern that does not match fails the stream. So
+  `^https?://[^/]+` -> `http://10.88.0.1:9201` moves the server and keeps
+  the login -- no back-reference needed. Where one is, the replacement is
+  JavaScript-style: `$1` and `$<name>` become `\1` and `\g<name>`
+  (`_js_replace_to_python`, line 25). The same transform serves the account
+  information of each active profile (`refresh_account_profiles`,
+  `apps/m3u/tasks.py`, line 3127), so that request takes the rewritten way
+  too.
+- **Redirects.** The live proxy fetches with `requests` and its default,
+  `allow_redirects=True` (`http_streamer.py`, line 67). A forwarder that
+  passed a provider's `302` on would see the stream leave past it, with
+  Dispatcharr's own agent; it has to follow the redirect itself.
+- **The default profile is not the spec's to limit.** Dispatcharr makes it
+  with the account (`<account> Default`, `create_profile_for_m3u_account`,
+  `apps/m3u/models.py`, line 377) and copies the account's `max_streams` to
+  it on every save that changes it; the serializer refuses everything but
+  name, custom properties, expiry and the two patterns on it
+  (`M3UAccountProfileSerializer.update`, `apps/m3u/serializers.py`, line
+  94). A spec that names `max_streams` or `is_active` for it is refused
+  before anything is written -- it would be an endless difference -- and
+  the refusal says to set the limit on the account (`m3u-accounts`).
+- **A new profile needs both patterns** (`validate`, line 74); a spec that
+  would add one without them is refused before the write, with the field it
+  lacks.
+
+Read through `GET /api/m3u/accounts/`, where every account carries its
+profiles (recorded); written by `POST /api/m3u/accounts/{account_id}/profiles/`
+with the name and the spec's fields (`perform_create` takes the account from
+the path) and `PATCH .../profiles/{id}/` with the spec's fields only.
+Readiness waits until every named account exists; its default profile exists
+with it, made in the same transaction.
+
+Only the four fields are compared and shown. A profile's
+`custom_properties` hold what the provider answered about the account
+(`user_info`, with the login) and are never read here. `schema-check` checks
+the fields against `M3UAccountProfile` and `PatchedM3UAccountProfile`.
+
+Not measured on the host yet: three streams at once, one per profile, and a
+fourth refused.
+
 ## 20. Not in the pilot
 
 

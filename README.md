@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.40.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.41.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11),
 **SuggestArr** (2.14), **Kavita** (0.9), **Audiobookshelf** (2.36),
 **Dispatcharr** (0.31) and **authentik** (2026.5), each replacing a shell unit
@@ -68,6 +68,7 @@ or an OpenTofu resource on the host it was written for:
 | Dispatcharr | `stream-settings` | the default stream profile, by name |
 | Dispatcharr | `m3u-accounts`, `epg-sources` | accounts and sources by name: a missing one is added, the named fields are set; an account's `server_url`, `username` and `password` and a source's `url` may come from credentials (`secret_fields`: compared unseen, the write-only password handed over on every apply); every task logs in as a service account, once per run |
 | Dispatcharr | `m3u-groups` | the settings of channel groups within an account, among them the stream profile the group's channels get (by name) and the name filters that pick and rename them; each group is written whole, so what the spec does not name stays; readiness waits until the account's playlist has been read |
+| Dispatcharr | `m3u-profiles` | the profiles of an account by name: stream limit, switch and the pattern pair that rewrites its stream URLs; a missing profile is added (with both patterns), the account's default profile takes patterns only -- its limit is the account's |
 | Dispatcharr | `channel-epg` | per channel (by the name the sync gives it): the guide entry -- a source by name and a tvg-id --, a display name and a logo by URL (created when missing), written as the channel's override, which the channel sync leaves alone; fallback streams by name, played after the channel's own when it fails -- only from the same group, since another group's sync would delete the channel; and a fixed channel number, also in the override, which every numbering of the sync treats as taken |
 | authentik | `settings` | fields of the tenant settings (`/admin/settings/`), by name — those outside the blueprint schema; `PATCH` carries only what differs |
 | SuggestArr | `configuration` | the whole flat configuration: plain fields by name, secret fields from credentials (never shown), and the Jellyfin libraries derived from what the service reports, minus the collection types named |
