@@ -169,6 +169,10 @@ pub const M3U_ACCOUNT_UPDATE_COMPONENT: &str = "PatchedM3UAccount";
 pub const GROUP_COMPONENT: &str = "ChannelGroupM3UAccount";
 pub const EPG_SOURCE_CREATE_COMPONENT: &str = "EPGSource";
 pub const EPG_SOURCE_UPDATE_COMPONENT: &str = "PatchedEPGSource";
+/// A channel's number goes into its override; the other fields of
+/// `channel-epg` are names, or aliases (`epg_data`, `logo`) the bulk edit
+/// maps onto the override's `*_id` columns.
+pub const CHANNEL_OVERRIDE_COMPONENT: &str = "ChannelOverride";
 
 /// The fields a group setting may name: what the view reads
 /// (`update_group_settings`), and nothing it would drop.
@@ -294,6 +298,10 @@ pub struct Channel {
     pub effective_name: Option<String>,
     pub effective_epg_data_id: Option<i64>,
     pub effective_logo_id: Option<i64>,
+    /// A number, whole or not (`FloatField`). The description declares every
+    /// `effective_*` field a string; the answer is a number (recorded:
+    /// `313.0`), and so it is read.
+    pub effective_channel_number: Option<f64>,
     /// Stream ids in play order: the first is played, the rest are the
     /// fallbacks the proxy switches to when one fails.
     #[serde(default)]
@@ -995,6 +1003,10 @@ pub struct ChannelLook {
     /// §36). Only streams of the SAME group as the channel's own: the sync of
     /// any other group would count the channel as its own and delete it.
     pub fallback_streams: Vec<String>,
+    /// The number the channel keeps whatever the sync numbers (design §43):
+    /// the override's number is the effective one, and every numbering of
+    /// the sync treats it as taken.
+    pub channel_number: Option<f64>,
 }
 
 /// Channels by their OWN name -- the one the channel sync gives them, not the
@@ -1103,6 +1115,17 @@ struct Wanted {
     logo: Option<Result<i64, String>>,
     /// The whole stream list to write, when it differs.
     streams: Option<Vec<i64>>,
+    number: Option<f64>,
+}
+
+/// A channel number the way the output writes it: `5`, not `5.0`; `5.5`
+/// as it is.
+fn number_text(n: Option<f64>) -> String {
+    match n {
+        None => "(none)".to_string(),
+        Some(n) if n.fract() == 0.0 => format!("{n:.0}"),
+        Some(n) => n.to_string(),
+    }
 }
 
 pub struct ChannelEpgState {
@@ -1285,6 +1308,38 @@ impl ChannelEpg {
         format!("{source} {}", e.tvg_id.as_deref().unwrap_or("(no tvg-id)"))
     }
 
+    /// Every other channel that shows a number named here -- once this task
+    /// has written, so a channel it moves away counts with its new number.
+    /// Not refused: Dispatcharr allows a number twice, and the next sync of
+    /// an account moves its own auto-created channels off a number an
+    /// override holds (`apps/m3u/tasks.py`, `used_numbers`). A manual
+    /// channel, or one another override holds there, stays.
+    fn shared_numbers(&self, state: &ChannelEpgState) -> Vec<String> {
+        let pinned: Vec<(&String, f64)> = self
+            .channels
+            .iter()
+            .filter_map(|(name, l)| l.channel_number.map(|n| (name, n)))
+            .collect();
+        let mut out = Vec::new();
+        for (name, number) in pinned {
+            for other in state.channels.iter().filter(|c| &c.name != name) {
+                let shown = self
+                    .channels
+                    .get(&other.name)
+                    .and_then(|l| l.channel_number)
+                    .or(other.effective_channel_number);
+                if shown == Some(number) {
+                    out.push(format!(
+                        "channel {name}: channel {} shows number {} as well",
+                        other.effective_name.as_deref().unwrap_or(&other.name),
+                        number_text(Some(number))
+                    ));
+                }
+            }
+        }
+        out
+    }
+
     /// Every named channel with what differs, or what is missing.
     fn wanted(&self, state: &ChannelEpgState) -> Result<Vec<Wanted>, Vec<String>> {
         let mut out = Vec::new();
@@ -1303,6 +1358,7 @@ impl ChannelEpg {
                 display: None,
                 logo: None,
                 streams: None,
+                number: None,
             };
             if !look.fallback_streams.is_empty() {
                 let f = Self::fallbacks(state, channel, &look.fallback_streams);
@@ -1369,6 +1425,17 @@ impl ChannelEpg {
                     );
                 }
             }
+            if let Some(number) = look.channel_number {
+                if channel.effective_channel_number != Some(number) {
+                    w.changes.push(Change {
+                        subject: subject.clone(),
+                        field: "number".to_string(),
+                        current: number_text(channel.effective_channel_number),
+                        desired: number_text(Some(number)),
+                    });
+                    w.number = Some(number);
+                }
+            }
             out.push(w);
         }
         if absent.is_empty() {
@@ -1413,9 +1480,11 @@ impl Task for ChannelEpg {
         Ok(wanted.into_iter().flat_map(|w| w.changes).collect())
     }
 
-    /// Named fallbacks the provider does not list (any more).
+    /// Named fallbacks the provider does not list (any more), and numbers
+    /// another channel shows as well.
     fn notes(&self, current: &Self::Current) -> Vec<String> {
-        self.channels
+        let mut notes: Vec<String> = self
+            .channels
             .iter()
             .filter(|(_, l)| !l.fallback_streams.is_empty())
             .filter_map(|(name, l)| {
@@ -1423,7 +1492,9 @@ impl Task for ChannelEpg {
                     .map(|c| Self::fallbacks(current, c, &l.fallback_streams))
             })
             .flat_map(|f| f.missing)
-            .collect()
+            .collect();
+        notes.extend(self.shared_numbers(current));
+        notes
     }
 
     /// Missing logos first (one POST per URL, however many channels share
@@ -1441,6 +1512,9 @@ impl Task for ChannelEpg {
             }
             if let Some(display) = &w.display {
                 o.insert("name".to_string(), json!(display));
+            }
+            if let Some(number) = w.number {
+                o.insert("channel_number".to_string(), json!(number));
             }
             match w.logo {
                 Some(Ok(id)) => {
@@ -2089,6 +2163,7 @@ mod tests {
                             name: None,
                             logo_url: None,
                             fallback_streams: Vec::new(),
+                            channel_number: None,
                         },
                     )
                 })
@@ -2206,6 +2281,7 @@ mod tests {
                     name: name.map(str::to_string),
                     logo_url: logo.map(str::to_string),
                     fallback_streams: Vec::new(),
+                    channel_number: None,
                 },
             )]),
         }
@@ -2315,6 +2391,7 @@ mod tests {
                     name: None,
                     logo_url: None,
                     fallback_streams: names.iter().map(|n| n.to_string()).collect(),
+                    channel_number: None,
                 },
             )]),
         }
@@ -2446,6 +2523,110 @@ mod tests {
         let sent: Value = serde_json::from_str(&t.written.borrow()[0].1).unwrap();
         assert_eq!(sent[0]["override"], json!({"name": "Sky Sport Golf"}));
         assert_eq!(sent[0]["streams"].as_array().unwrap().len(), 2);
+    }
+
+    fn numbers(pairs: &[(&str, f64)]) -> ChannelEpg {
+        ChannelEpg {
+            channels: pairs
+                .iter()
+                .map(|(c, n)| {
+                    (
+                        c.to_string(),
+                        ChannelLook {
+                            epg: None,
+                            name: None,
+                            logo_url: None,
+                            fallback_streams: Vec::new(),
+                            channel_number: Some(*n),
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    /// The recorded channels answer `effective_channel_number` as a number
+    /// (`1.0`), not as the string the description declares.
+    #[test]
+    fn a_channel_on_its_number_is_unchanged() {
+        let task = numbers(&[("Das Erste", 1.0)]);
+        let t = epg_transport();
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+        assert_eq!(task.notes(&current), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_number_goes_into_the_override() {
+        let task = numbers(&[("SKY CINEMA ACTION", 71.0)]);
+        let t = epg_transport();
+        let current = task.read(&t).unwrap();
+        let lines: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(lines, ["channel SKY CINEMA ACTION: number 300 -> 71"]);
+        assert_eq!(task.notes(&current), Vec::<String>::new());
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].0, "/api/channels/channels/edit/bulk/");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(
+            sent,
+            json!([{
+                "id": channel_id(&current, "SKY CINEMA ACTION"),
+                "override": {"channel_number": 71.0}
+            }])
+        );
+    }
+
+    /// What the read-back sees after the write: the override's number is the
+    /// effective one, the channel's own still the sync's.
+    #[test]
+    fn an_override_holding_the_number_is_unchanged() {
+        let pinned = with(CHANNELS_JSON, |v| {
+            for c in v.as_array_mut().unwrap() {
+                if c["name"] == "SKY CINEMA ACTION" {
+                    c["override"] = json!({"channel_number": 71.5});
+                    c["effective_channel_number"] = json!(71.5);
+                }
+            }
+        });
+        let task = numbers(&[("SKY CINEMA ACTION", 71.5)]);
+        let t = FakeTransport::default()
+            .on_get(CHANNELS.path, vec![ok(&pinned)])
+            .on_get(EPG_SOURCES.path, vec![ok(&sources_with_provider())])
+            .on_get(EPG_DATA.path, vec![ok(EPGDATA_JSON)]);
+        assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
+        let moved = numbers(&[("SKY CINEMA ACTION", 72.0)]);
+        let lines: Vec<String> = moved
+            .diff(&moved.read(&t).unwrap())
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(lines, ["channel SKY CINEMA ACTION: number 71.5 -> 72"]);
+    }
+
+    /// Dispatcharr allows a number twice; the next sync moves an auto-created
+    /// channel of the syncing account off it. A note, not a refusal.
+    #[test]
+    fn a_number_another_channel_shows_is_a_note() {
+        let task = numbers(&[("SKY CINEMA ACTION", 2.0)]);
+        let t = epg_transport();
+        let current = task.read(&t).unwrap();
+        assert!(task.probe(&t).is_ok());
+        assert_eq!(
+            task.notes(&current),
+            ["channel SKY CINEMA ACTION: channel ZDF shows number 2 as well"]
+        );
+        assert_eq!(task.diff(&current).unwrap().len(), 1);
+        // Moved away in the same run: no longer shared.
+        let swapped = numbers(&[("SKY CINEMA ACTION", 2.0), ("ZDF", 300.0)]);
+        assert_eq!(swapped.notes(&current), Vec::<String>::new());
     }
 
     #[test]

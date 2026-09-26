@@ -2483,6 +2483,68 @@ Recorded answers: `tests/fixtures/lidarr-3.1.0.4875/{qualityprofile,metadataprof
 (re-recorded 2026-09-22 and byte-identical to the ones from 2026-09-13 apart
 from key order, so they stayed as they were).
 
+## 43. Dispatcharr: a fixed channel number, in the override (v0.40.0, 2026-09-26)
+
+Dispatcharr numbers the channels of an auto-synced group itself, in the order
+the provider lists their streams (`fixed` mode, from the group's start), and
+renumbers them on every refresh "to maintain sort order". A client tunes by
+that number. Replacing the provider would renumber 71 channels. So
+`channel-epg` takes, per channel, an optional `channel_number` and holds it
+where the sync does not write: the channel's **override**, like the guide
+entry, the name and the logo (§34, §35).
+
+What Dispatcharr v0.31.0 does with it, read in its source (tag `v0.31.0`):
+
+- **The override's number is the effective one.** `ChannelOverride` has a
+  nullable `channel_number` (`FloatField`, `apps/channels/models.py`, line
+  1039); `with_effective_values` coalesces every overridable field, the
+  number among them, override first (`apps/channels/managers.py`, lines
+  17–55). The M3U output reads `effective_channel_number` and writes it as
+  `tvg-chno` (`apps/output/views.py`, lines 340–379), and sorts by it (line
+  226); the Xtream Codes output reads the same annotation (`_xc_live_streams_setup`,
+  lines 686–746).
+- **The sync never writes the override.** It renumbers `Channel.channel_number`
+  only (`apps/m3u/tasks.py`, lines 2545–2598), and the model says so
+  ("Sync writes only to Channel.* fields and never to this table",
+  `models.py`, line 1027).
+- **The sync steps around a held number.** Before numbering, it adds every
+  override's `channel_number` to the numbers it will not hand out ("Override
+  pins are global reservations", `tasks.py`, lines 2107–2117) -- in each mode:
+  `fixed` and `next_available` take the next free number, `provider` falls
+  back into its range when the provider's number is held (`_pick_target_number`,
+  lines 1933–1961). Compact numbering does the same (`compact_numbering.py`,
+  `build_reserved_set`), and so does a channel created by hand
+  (`Channel.get_next_available_channel_number`, `models.py`, line 428).
+- **A number may be shown twice.** The override serializer's help text says so
+  ("Duplicate channel_number values across channels are permitted",
+  `serializers.py`, line 445), and nothing refuses it; only its lower bound is
+  checked (`min_value=0.0001`, line 349). `Channel.clean` asks for a unique
+  number per group, but neither the bulk edit nor the serializer calls it.
+- **The write.** The bulk edit already used here takes `channel_number` in
+  `override` as it is (`OVERRIDABLE_FIELDS`; `api_views.py`, `edit_bulk`,
+  lines 1370–1432) and changes nothing else of the override. A plain
+  `channel_number` next to `override` would be the channel's OWN number, the
+  one the next refresh renumbers.
+
+So the collision resolves itself only for the channels of an account that
+syncs: its next refresh moves them off every held number. A channel created
+by hand, or one another override holds on that number, stays where it is. A
+number held here that another channel shows is therefore a **note**, not a
+refusal -- once this task has written, so a channel the same run moves away
+does not count. Two channels of the same spec with the same number are
+refused when the spec is read, and so is a number below 0.0001.
+
+The number is compared as `effective_channel_number` -- a number in the
+answer (recorded: `313.0`), although the description declares every
+`effective_*` field a string -- and a change line writes it the way the
+output does: `300 -> 71`, `71.5`. `schema-check` checks a spec's numbers
+against `ChannelOverride.channel_number`; the other fields of the task are
+names, or aliases (`epg_data`, `logo`) the bulk edit maps onto the override's
+`*_id` columns and that no component carries.
+
+Not measured on the host yet: that the next refresh of the account leaves
+the effective number where it is and moves the channel that showed it.
+
 ## 20. Not in the pilot
 
 

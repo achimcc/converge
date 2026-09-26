@@ -1746,6 +1746,17 @@ fn schema_check_checks_dispatcharr_entries_against_create_and_update() {
         "{stderr}"
     );
     assert!(stderr.contains("PatchedEPGSource.sourcetype"), "{stderr}");
+
+    // A channel's number is a field of its override; the rest are names.
+    let channels = spec(
+        "channels.json",
+        "channel-epg",
+        r#"{"username":"c","channels":{"Das Erste":{"channel_number":1,"name":"Das Erste HD"},"ZDF":{"name":"ZDF HD"}}}"#,
+    );
+    let out = check(&[&channels]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("1 spec field(s)"), "{stdout}");
 }
 
 #[test]

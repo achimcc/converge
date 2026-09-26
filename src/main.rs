@@ -1021,8 +1021,31 @@ fn schema_check(args: &[String]) -> ExitCode {
             // with (the endpoint's declared body is wrong, design §29).
             Desired::Dispatcharr(desired) => match &desired.task {
                 DispatcharrTask::StreamSettings { .. } => (Vec::new(), 0),
-                // Names only: a channel, a source, a tvg-id -- no field of a body.
-                DispatcharrTask::ChannelEpg(_) => (Vec::new(), 0),
+                // Names for the rest -- a channel, a source, a tvg-id --, but
+                // a number is a field of the override the task writes.
+                DispatcharrTask::ChannelEpg(channels) => {
+                    let mut found = Vec::new();
+                    let mut count = 0;
+                    for (name, look) in channels {
+                        let Some(number) = look.channel_number else {
+                            continue;
+                        };
+                        count += 1;
+                        found.extend(
+                            schema::check_paths(
+                                &document,
+                                dispatcharr::CHANNEL_OVERRIDE_COMPONENT,
+                                &std::collections::BTreeMap::from([(
+                                    "channel_number".to_string(),
+                                    serde_json::json!(number),
+                                )]),
+                            )
+                            .into_iter()
+                            .map(|f| format!("{name}: {f}")),
+                        );
+                    }
+                    (found, count)
+                }
                 DispatcharrTask::Entries(kind, entries, secrets) => {
                     let components = match kind {
                         dispatcharr::EntryKind::M3uAccount => [

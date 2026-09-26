@@ -2472,6 +2472,7 @@ fn dispatcharr_desired(
                 name: Option<String>,
                 logo_url: Option<String>,
                 fallback_streams: Option<Vec<String>>,
+                channel_number: Option<f64>,
             }
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
@@ -2484,6 +2485,24 @@ fn dispatcharr_desired(
                 return Err("desired.channels names no channel".to_string());
             }
             let mut channels = BTreeMap::new();
+            // A number is one channel's: Dispatcharr would show both, and
+            // neither is the one a client tunes to.
+            let mut numbered: BTreeMap<String, &String> = BTreeMap::new();
+            for (name, l) in &d.channels {
+                if let Some(n) = l.channel_number {
+                    // The override's lower bound (`ChannelOverrideSerializer`).
+                    if n < 0.0001 {
+                        return Err(format!(
+                            "desired.channels.{name}.channel_number must be above 0"
+                        ));
+                    }
+                    if let Some(first) = numbered.insert(n.to_string(), name) {
+                        return Err(format!(
+                            "desired.channels: {first} and {name} both have channel_number {n}"
+                        ));
+                    }
+                }
+            }
             for (name, l) in d.channels {
                 let at = format!("desired.channels.{name}");
                 if name.is_empty() {
@@ -2529,6 +2548,7 @@ fn dispatcharr_desired(
                     && l.name.is_none()
                     && l.logo_url.is_none()
                     && l.fallback_streams.is_none()
+                    && l.channel_number.is_none()
                 {
                     return Err(format!("{at} names nothing to show"));
                 }
@@ -2539,6 +2559,7 @@ fn dispatcharr_desired(
                         name: l.name,
                         logo_url: l.logo_url,
                         fallback_streams: l.fallback_streams.unwrap_or_default(),
+                        channel_number: l.channel_number,
                     },
                 );
             }
@@ -4033,6 +4054,18 @@ mod tests {
             r#"{"username":"c","channels":{"SKY SPORT GOLF":{"fallback_streams":["SKYGO: SKY SPORT GOLF HD"]}}}"#,
         );
         assert!(fallback.is_ok(), "fallback streams alone: {fallback:?}");
+        let number = dispatcharr(
+            "channel-epg",
+            r#"{"username":"c","channels":{"Das Erste":{"channel_number":1},"ZDF":{"channel_number":2.5}}}"#,
+        );
+        assert!(number.is_ok(), "a number alone, whole or not: {number:?}");
+        let twice = dispatcharr(
+            "channel-epg",
+            r#"{"username":"c","channels":{"A":{"channel_number":7},"B":{"channel_number":7.0}}}"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(twice.contains("A and B"), "{twice}");
         for bad in [
             r#"{"username":"c","channels":{"X":{"fallback_streams":[]}}}"#,
             r#"{"username":"c","channels":{"X":{"fallback_streams":[""]}}}"#,
@@ -4044,6 +4077,9 @@ mod tests {
             r#"{"username":"c","channels":{"X":{"source":"s"}}}"#,
             r#"{"username":"c","channels":{"X":{}}}"#,
             r#"{"username":"c","channels":{"X":{"logo_url":"file:///x.png"}}}"#,
+            r#"{"username":"c","channels":{"X":{"channel_number":0}}}"#,
+            r#"{"username":"c","channels":{"X":{"channel_number":-3}}}"#,
+            r#"{"username":"c","channels":{"X":{"channel_number":"5"}}}"#,
         ] {
             assert!(dispatcharr("channel-epg", bad).is_err(), "{bad}");
         }
