@@ -1101,8 +1101,19 @@ fn exactly_turns_a_connection_outside_the_spec_into_a_removal_in_the_plan() {
     const SETTINGS: &str =
         include_str!("fixtures/trailarr-0.11.5/constructed-settings-version-only.json");
     const CONNECTIONS: &str = include_str!("fixtures/trailarr-0.11.5/connections.json");
-    // The spec names Radarr alone; the recording also holds Sonarr.
-    let only_radarr = r#"{"connections":{"Radarr":{"set":{"arr_type":"radarr","url":"http://127.0.0.1:7878","monitor_new_media":true,"external_url":"","path_mappings":[]},"api_key_credential":"radarr-api-key"}}}"#;
+    // The recording plus a constructed `Radarr 4K`, so that one surplus
+    // stays under the half the guard allows (design §45).
+    let three = {
+        let mut v: serde_json::Value = serde_json::from_str(CONNECTIONS).unwrap();
+        let mut four_k = v[0].clone();
+        four_k["id"] = 3.into();
+        four_k["name"] = "Radarr 4K".into();
+        four_k["url"] = "http://127.0.0.1:7879".into();
+        v.as_array_mut().unwrap().push(four_k);
+        v.to_string()
+    };
+    // The spec names both Radarr connections; the list also holds Sonarr.
+    let only_radarr = r#"{"connections":{"Radarr":{"set":{"arr_type":"radarr","url":"http://127.0.0.1:7878","monitor_new_media":true,"external_url":"","path_mappings":[]},"api_key_credential":"radarr-api-key"},"Radarr 4K":{"set":{"arr_type":"radarr","url":"http://127.0.0.1:7879","monitor_new_media":true,"external_url":"","path_mappings":[]},"api_key_credential":"radarr-api-key"}}}"#;
 
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("trailarr-api-key"), "trailarr-key\n").unwrap();
@@ -1111,7 +1122,7 @@ fn exactly_turns_a_connection_outside_the_spec_into_a_removal_in_the_plan() {
     for (exactly, expected_code) in [(true, 2), (false, 0)] {
         let server = Server::start(vec![
             ("GET", "/api/v1/settings/", 200, SETTINGS.into()),
-            ("GET", "/api/v1/connections/", 200, CONNECTIONS.into()),
+            ("GET", "/api/v1/connections/", 200, three.clone()),
         ]);
         let path = dir.path().join(format!("exactly-{exactly}.json"));
         std::fs::write(
@@ -2083,4 +2094,99 @@ fn an_indexer_app_profile_by_name_is_refused_by_name_and_nothing_is_written() {
         assert!(!stdout.contains("tnt-secret-never-print"), "{stdout}");
         assert!(!stderr.contains("tnt-secret-never-print"), "{stderr}");
     }
+}
+
+/// A name, a version or a validation message is a string the service chose.
+/// A line feed in it would forge a line of converge's own in the journal, an
+/// escape sequence would drive the terminal of whoever runs `plan`: every
+/// line is printed through one function that shows control characters as
+/// escapes (audit 3, B2-CV-2, design §45).
+#[test]
+fn control_characters_from_a_service_are_shown_as_escapes_on_stdout_and_stderr() {
+    const SETTINGS: &str =
+        include_str!("fixtures/trailarr-0.11.5/constructed-settings-version-only.json");
+    const CONNECTIONS: &str = include_str!("fixtures/trailarr-0.11.5/connections.json");
+    let forged = "X\u{1b}[2J\ntrailarr connections: unchanged";
+    let answer = {
+        let mut v: serde_json::Value = serde_json::from_str(CONNECTIONS).unwrap();
+        let mut third = v[0].clone();
+        third["id"] = 3.into();
+        third["name"] = forged.into();
+        v.as_array_mut().unwrap().push(third);
+        v.to_string()
+    };
+    let settings = SETTINGS.replace("v0.11.5", "v0.11.5\\u009b31m\\r");
+    assert_ne!(settings, SETTINGS);
+    let server = Server::start(vec![
+        ("GET", "/api/v1/settings/", 200, settings),
+        ("GET", "/api/v1/connections/", 200, answer),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("trailarr-api-key"), "trailarr-key\n").unwrap();
+    for name in ["radarr-api-key", "sonarr-api-key"] {
+        std::fs::write(dir.path().join(name), "<masked>\n").unwrap();
+    }
+    let spec = trailarr_spec(
+        dir.path(),
+        "c.json",
+        &server.base_url(),
+        "connections",
+        TRAILARR_CONNECTIONS,
+    );
+    let out = converge()
+        .arg("plan")
+        .arg(&spec)
+        .env("CREDENTIALS_DIRECTORY", dir.path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout:?}");
+    assert_eq!(
+        stdout.lines().collect::<Vec<_>>(),
+        [
+            r"trailarr connections: service version v0.11.5\u{9b}31m\x0d",
+            r"trailarr connections: note: not in the spec: connection X\x1b[2J\x0atrailarr connections: unchanged",
+            "trailarr connections: unchanged",
+        ],
+        "{stdout:?}"
+    );
+
+    // An error line: Koel's validation messages are quoted in a refusal.
+    let me = include_str!("fixtures/koel-9.11.3/me.json").replace(
+        r#""include_public_media": true"#,
+        r#""include_public_media": false"#,
+    );
+    let invalid = r#"{"message":"x","errors":{"url":["bad\n\u001b[1Akoel radio-stations: changed 0 field(s)"]}}"#;
+    let server = Server::start(vec![
+        ("GET", "/api/me", 200, me),
+        (
+            "GET",
+            "/api/radio/stations",
+            200,
+            include_str!("fixtures/koel-9.11.3/radio-stations.json").into(),
+        ),
+        ("POST", "/api/radio/stations", 422, invalid.into()),
+    ]);
+    std::fs::write(dir.path().join("koel-token"), "koel-token\n").unwrap();
+    let spec = koel_spec(
+        dir.path(),
+        "koel.json",
+        &server.base_url(),
+        r#"[{"name":"FSK","url":"https://streaming.fueralle.org/fsk.mp3","is_public":true}]"#,
+    );
+    let out = converge()
+        .arg("apply")
+        .arg(&spec)
+        .env("CREDENTIALS_DIRECTORY", dir.path())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{stderr:?}");
+    assert_eq!(
+        stderr.lines().collect::<Vec<_>>(),
+        [
+            r"koel radio-stations: error: POST /api/radio/stations answered HTTP 422: url: bad\x0a\x1b[1Akoel radio-stations: changed 0 field(s)"
+        ],
+        "{stderr:?}"
+    );
 }

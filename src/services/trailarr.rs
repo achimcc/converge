@@ -388,15 +388,28 @@ impl Task for Connections {
             .collect()
     }
 
+    /// The connections the spec does not name -- and never half the list or
+    /// more, the guard Koel's stations have (design §39, §45).
+    ///
+    /// A connection is found by its name, a string compared byte for byte:
+    /// another case or Unicode normalisation on either side after an update,
+    /// and no spec connection would match any of Trailarr's, making every
+    /// one of them look like a surplus. A spec that would take away half the
+    /// connections is therefore an error rather than a removal -- in `plan`
+    /// too, and before a single `DELETE`.
     fn surplus(&self, current: &Self::Current) -> Result<Vec<String>, Error> {
         if !self.exactly {
             return Ok(Vec::new());
         }
-        Ok(self
-            .not_in_the_spec(current)
-            .into_iter()
-            .map(|c| subject(&c.name))
-            .collect())
+        let surplus = self.not_in_the_spec(current);
+        if !surplus.is_empty() && 2 * surplus.len() >= current.len() {
+            return Err(Error::Refused(format!(
+                "would remove {} of {} connections (half or more) -- nothing removed",
+                surplus.len(),
+                current.len()
+            )));
+        }
+        Ok(surplus.into_iter().map(|c| subject(&c.name)).collect())
     }
 
     /// One `DELETE` per surplus connection. Trailarr answers with the API
@@ -406,6 +419,8 @@ impl Task for Connections {
         if !self.exactly {
             return Ok(());
         }
+        // Nothing is removed while the guard above says no.
+        self.surplus(current)?;
         for connection in self.not_in_the_spec(current) {
             let path = CONNECTION_DELETE
                 .path
@@ -794,19 +809,85 @@ mod tests {
 
     // --- exactly (design §39) ---------------------------------------------
 
-    /// The same spec with `exactly` on, and Sonarr dropped from it, so the
-    /// recorded Sonarr connection is the surplus.
+    /// The recording plus a third connection, `Radarr 4K` (constructed), so
+    /// that one surplus is under the half the guard allows.
+    fn three() -> String {
+        with(CONNECTIONS_JSON, |v| {
+            let mut four_k = v[0].clone();
+            four_k["id"] = json!(3);
+            four_k["name"] = json!("Radarr 4K");
+            four_k["url"] = json!("http://127.0.0.1:7879");
+            v.as_array_mut().unwrap().push(four_k);
+        })
+    }
+
+    /// The same spec with `exactly` on, `Radarr 4K` added and Sonarr dropped
+    /// from it, so the recorded Sonarr connection is the one surplus of
+    /// `three()`.
     fn only_radarr(exactly: bool) -> Connections {
         let mut task = host_connections("<masked>");
         task.connections.remove(1);
+        let mut set = task.connections[0].set.clone();
+        set.insert("url".to_string(), json!("http://127.0.0.1:7879"));
+        task.connections.push(ConnectionTarget {
+            name: "Radarr 4K".to_string(),
+            set,
+            api_key: Secret::new("<masked>".to_string()),
+        });
         task.exactly = exactly;
         task
+    }
+
+    /// If the spec's names and Trailarr's do not line up at all -- another
+    /// case or Unicode normalisation after an update, say -- every
+    /// connection looks like a surplus. Half or more is refused, in `plan`
+    /// too, before a single `DELETE` or write (audit 3, B2-CV-1).
+    #[test]
+    fn removing_half_or_more_is_refused_before_anything_is_removed() {
+        let mut task = host_connections("<masked>");
+        task.exactly = true;
+        let renamed = with(CONNECTIONS_JSON, |v| {
+            v[0]["name"] = json!("radarr");
+            v[1]["name"] = json!("sonarr");
+        });
+        for mode in [Mode::Plan, Mode::Apply] {
+            let t = FakeTransport::default()
+                .on_get(SETTINGS.path, vec![ok(SETTINGS_JSON)])
+                .on_get(CONNECTIONS.path, vec![ok(&renamed)])
+                .on_put(vec![Step::Answer(200, "{}".into())])
+                .on_delete(vec![Step::Answer(200, "{}".into())]);
+            let err = run(
+                mode,
+                &task,
+                &t,
+                &crate::testing::FakeClock::new(),
+                crate::engine::Timing::default(),
+            )
+            .err()
+            .unwrap()
+            .to_string();
+            assert_eq!(
+                err,
+                "refused: would remove 2 of 2 connections (half or more) -- nothing removed"
+            );
+            assert!(t.deleted.borrow().is_empty(), "{mode:?} removed something");
+            assert!(t.written.borrow().is_empty(), "{mode:?} wrote something");
+        }
+        // One of two is half as well.
+        let mut task = host_connections("<masked>");
+        task.connections.remove(1);
+        task.exactly = true;
+        let t = connections_transport(CONNECTIONS_JSON);
+        let current = task.read(&t).unwrap();
+        assert!(matches!(task.surplus(&current), Err(Error::Refused(_))));
+        assert!(matches!(task.remove(&t, &current), Err(Error::Refused(_))));
+        assert!(t.deleted.borrow().is_empty());
     }
 
     #[test]
     fn without_exactly_a_surplus_is_named_nowhere_and_removed_nowhere() {
         let task = only_radarr(false);
-        let t = connections_transport(CONNECTIONS_JSON).on_delete(vec![Step::Answer(
+        let t = connections_transport(&three()).on_delete(vec![Step::Answer(
             200,
             r#""Connection Deleted Successfully!""#.into(),
         )]);
@@ -821,7 +902,7 @@ mod tests {
     #[test]
     fn with_exactly_a_surplus_connection_is_a_removal_and_no_longer_a_note() {
         let task = only_radarr(true);
-        let t = connections_transport(CONNECTIONS_JSON);
+        let t = connections_transport(&three());
         let current = task.read(&t).unwrap();
         assert_eq!(task.surplus(&current).unwrap(), ["connection Sonarr"]);
         assert_eq!(task.notes(&current), Vec::<String>::new());
@@ -836,7 +917,7 @@ mod tests {
             .set
             .insert("url".to_string(), json!("http://10.0.20.11:7878"));
         let after: Value = {
-            let mut v: Value = serde_json::from_str(CONNECTIONS_JSON).unwrap();
+            let mut v: Value = serde_json::from_str(&three()).unwrap();
             let list = v.as_array_mut().unwrap();
             list.retain(|c| c["name"] != "Sonarr");
             list[0]["url"] = json!("http://10.0.20.11:7878");
@@ -844,10 +925,7 @@ mod tests {
         };
         let t = FakeTransport::default()
             .on_get(SETTINGS.path, vec![ok(SETTINGS_JSON)])
-            .on_get(
-                CONNECTIONS.path,
-                vec![ok(CONNECTIONS_JSON), ok(&after.to_string())],
-            )
+            .on_get(CONNECTIONS.path, vec![ok(&three()), ok(&after.to_string())])
             .on_put(vec![Step::Answer(
                 200,
                 r#""Connection Updated Successfully!""#.into(),
@@ -876,10 +954,7 @@ mod tests {
 
         let t = FakeTransport::default()
             .on_get(SETTINGS.path, vec![ok(SETTINGS_JSON)])
-            .on_get(
-                CONNECTIONS.path,
-                vec![ok(CONNECTIONS_JSON), ok(&after.to_string())],
-            )
+            .on_get(CONNECTIONS.path, vec![ok(&three()), ok(&after.to_string())])
             .on_put(vec![Step::Answer(
                 200,
                 r#""Connection Updated Successfully!""#.into(),
@@ -908,7 +983,7 @@ mod tests {
     #[test]
     fn a_refused_removal_names_the_connection_and_nothing_from_the_body() {
         let task = only_radarr(true);
-        let t = connections_transport(CONNECTIONS_JSON).on_delete(vec![Step::Answer(
+        let t = connections_transport(&three()).on_delete(vec![Step::Answer(
             409,
             r#"{"detail":"ERFUNDENER-SCHLUESSEL-XYZ"}"#.into(),
         )]);

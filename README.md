@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.41.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.42.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11),
 **SuggestArr** (2.14), **Kavita** (0.9), **Audiobookshelf** (2.36),
 **Dispatcharr** (0.31) and **authentik** (2026.5), each replacing a shell unit
@@ -48,7 +48,7 @@ or an OpenTofu resource on the host it was written for:
 | Jellyfin | `plugin-configurations` | fields of plugin configurations by path, keys from credentials, entries of shared lists by key, library ids by library name |
 | Jellyfin | `user-policies` | fields of `UserPolicy` every account must carry (`all`) and the ones single accounts carry instead (`accounts`, by the account's name). Jellyfin replaces a policy as a whole, so each differing account's policy is read, the named fields are changed and everything else travels back untouched; a field its answer does not carry is an error before anything is written, while an account name the service does not hold **yet** is a note and is skipped -- such an account comes into being at its owner's first sign-in |
 | Jellyfin | `display-preferences` | `CustomPrefs` of one client (`emby`, say), for every account and for single ones. The values are strings, as Jellyfin stores them; a key an account does not carry yet is `(missing)`, not an error -- the map is sparse. An account name the service does not hold yet is a note here too. The document is written whole, like a policy |
-| Trailarr | `connections` | connections to Radarr and Sonarr by name: top-level fields, key from a credential; missing ones are added, and with `exactly` the ones the spec does not name are removed |
+| Trailarr | `connections` | connections to Radarr and Sonarr by name: top-level fields, key from a credential; missing ones are added, and with `exactly` the ones the spec does not name are removed -- never half the list or more |
 | Trailarr | `trailer-profiles` | fields every trailer profile gets |
 | bindery | `download-clients`, `prowlarr-instances` | entries by name: top-level fields; secrets from credentials handed over on every `apply` in a `PUT` with only the secret (bindery answers them empty) |
 | bindery | `root-folders`, `settings` | root folders by path (added when missing); settings by key |
@@ -335,7 +335,11 @@ Three tasks take it — `connections` (Trailarr), `radio-stations` (Koel) and
 one that would do nothing -- `custom-formats` among them, and for a reason
 worth saying out loud: its collection has a second writer, and "the rest"
 there is Recyclarr's seventy formats. `"exactly": false` is what every task
-already means and is always allowed.
+already means and is always allowed. Trailarr's connections and Koel's
+stations are found by name, so both refuse to remove half their list or more
+(`would remove 2 of 2 connections (half or more) -- nothing removed`): a
+different spelling of every name after an update is a mismatch, not a
+request to empty the list.
 
 Within a run the removals come **first**, then the writes: a Koel station
 renamed in the spec but keeping its URL is a removal and an addition, and the

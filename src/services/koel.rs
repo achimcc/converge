@@ -17,6 +17,7 @@ use serde_json::{json, Map, Value};
 
 use crate::{
     client::{expect_status_at, Transport},
+    endpoint::is_path_segment,
     engine::{shortened, Change, Probe, Task},
     error::Error,
 };
@@ -112,8 +113,17 @@ pub fn decode_stations(path: &str, body: &str) -> Result<Vec<RadioStationResourc
                     index,
                 });
             };
-            serde_json::from_value(entry)
-                .map_err(|e| decode(format!("station {name}: {}", crate::error::shape(&e))))
+            let station: RadioStationResource = serde_json::from_value(entry)
+                .map_err(|e| decode(format!("station {name}: {}", crate::error::shape(&e))))?;
+            // The id goes into `DELETE` and `PUT` paths; a ULID is one
+            // segment, anything else could point them elsewhere. The id
+            // itself is never shown.
+            if !is_path_segment(&station.id) {
+                return Err(decode(format!(
+                    "station {name}: the id is not a plain path segment"
+                )));
+            }
+            Ok(station)
         })
         .collect()
 }
@@ -460,15 +470,6 @@ impl Task for RadioStations {
                 Some(station) => {
                     if Self::changes_of(target, station).is_empty() {
                         continue;
-                    }
-                    // A ULID; anything else would not be a path segment.
-                    if station.id.is_empty()
-                        || !station.id.chars().all(|c| c.is_ascii_alphanumeric())
-                    {
-                        return Err(Error::Decode {
-                            path: STATIONS.to_string(),
-                            reason: format!("{} has no usable id", subject(&target.name)),
-                        });
                     }
                     let path = format!("{STATIONS}/{}", station.id);
                     let body = Self::body(target, Self::logo_to_send(target, Some(station)));
@@ -942,6 +943,45 @@ mod tests {
                    "description": "Neu.", "is_public": true,
                    "homepage_url": "https://rdl.de/"})
         );
+    }
+
+    /// The id is the one string of an answer that becomes part of a request
+    /// path (`DELETE`/`PUT /api/radio/stations/{id}`). One that is not a
+    /// plain segment -- `../../users/1`, `1?x` -- would point the request
+    /// elsewhere on the same origin, with Koel's token; it is refused when
+    /// the list is decoded, before any request (audit 3, B2-CV-5).
+    #[test]
+    fn an_id_that_is_not_a_plain_path_segment_is_refused_before_any_request() {
+        for id in ["../../users/1", "1?x", "a/b", "%2e%2e", "", "01K 52"] {
+            let mut list: Vec<Value> = serde_json::from_str(CONSTRUCTED).unwrap();
+            // The surplus station: with `exactly` it would be deleted.
+            list[2]["id"] = json!(id);
+            let t = koel(&Value::Array(list).to_string())
+                .on_put(vec![ok("{}")])
+                .on_delete(vec![Step::Answer(204, String::new())]);
+            let err = run(
+                Mode::Apply,
+                &two_of_three(true),
+                &t,
+                &FakeClock::new(),
+                Timing::default(),
+            )
+            .err()
+            .unwrap_or_else(|| panic!("{id:?} was taken"))
+            .to_string();
+            assert_eq!(
+                err,
+                "/api/radio/stations: the answer does not have the expected shape: \
+                 station Somebody's own: the id is not a plain path segment",
+                "{id:?}"
+            );
+            assert!(!err.contains(id) || id.is_empty(), "{err}");
+            assert!(
+                t.calls.borrow().is_empty(),
+                "{id:?}: {:?}",
+                t.calls.borrow()
+            );
+        }
     }
 
     #[test]

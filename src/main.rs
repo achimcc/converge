@@ -7,7 +7,7 @@ use std::{
 use converge::{
     client::{read_credential, HttpTransport},
     clock::SystemClock,
-    engine::{run, Mode, Outcome, Timing},
+    engine::{printable, run, Mode, Outcome, Timing},
     error::Error,
     schema,
     services::{
@@ -107,9 +107,10 @@ fn reconcile_one(
     timing: Timing,
     tokens: &mut Tokens,
 ) -> Result<bool, ()> {
-    let spec = Spec::load(path).map_err(|e| eprintln!("{}: error: {e}", path.display()))?;
+    let spec =
+        Spec::load(path).map_err(|e| say_error(&format!("{}: error: {e}", path.display())))?;
     let label = format!("{} {}", spec.service.name(), spec.task_name());
-    let fail = |e: Error| eprintln!("{label}: error: {e}");
+    let fail = |e: Error| say_error(&format!("{label}: error: {e}"));
     let key = read_credential(credentials, &spec.api_key_credential).map_err(fail)?;
     // SuggestArr has no API key for its configuration endpoints: the
     // credential holds the password of a service account, and the value the
@@ -639,36 +640,47 @@ fn reconcile_one(
         }
     }
     .map_err(fail)?;
-    println!("{label}: service version {}", report.version);
+    say(&format!("{label}: service version {}", report.version));
     for note in &report.notes {
-        println!("{label}: note: {note}");
+        say(&format!("{label}: note: {note}"));
     }
     for line in &report.handed_over {
-        println!("{label}: {line}");
+        say(&format!("{label}: {line}"));
     }
     match report.outcome {
         Outcome::Unchanged => {
-            println!("{label}: unchanged");
+            say(&format!("{label}: unchanged"));
             Ok(false)
         }
         Outcome::Differs(changes) => {
             for change in &changes {
-                println!("{label}: would change {change}");
+                say(&format!("{label}: would change {change}"));
             }
-            println!("{label}: {} field(s) differ", changes.len());
+            say(&format!("{label}: {} field(s) differ", changes.len()));
             Ok(true)
         }
         Outcome::Changed(changes) => {
             for change in &changes {
-                println!("{label}: {change}");
+                say(&format!("{label}: {change}"));
             }
-            println!(
+            say(&format!(
                 "{label}: changed {} field(s), read back and confirmed",
                 changes.len()
-            );
+            ));
             Ok(false)
         }
     }
+}
+
+/// Every line a run prints goes through here: what a service answered is
+/// shown, never obeyed (`engine::printable`, design §45).
+fn say(line: &str) {
+    println!("{}", printable(line));
+}
+
+/// The same for a line on stderr.
+fn say_error(line: &str) {
+    eprintln!("{}", printable(line));
 }
 
 /// The spec parser only lets Servarr tasks through for Radarr, Sonarr and

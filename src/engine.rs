@@ -45,6 +45,48 @@ pub fn shortened(value: &serde_json::Value) -> String {
     format!("{start}… ({length} characters)")
 }
 
+/// One line as converge prints it. Names, versions and validation messages
+/// are strings a service chose: a line feed in one would forge a line of
+/// converge's own in the journal, an escape sequence would drive the
+/// terminal of whoever runs `plan` (audit 3, B2-CV-2). Control characters
+/// but the tab, the Unicode line and paragraph separators and the
+/// bidirectional controls are shown as escapes (`\x1b`, `\u{2028}`), and a
+/// line longer than [`PRINTABLE_MAX`] characters keeps its beginning and says
+/// how long it was. `main` sends every line of a run through this, so no
+/// task has to remember it.
+pub fn printable(text: &str) -> String {
+    let length = text.chars().count();
+    let mut out = String::with_capacity(text.len().min(PRINTABLE_MAX * 4));
+    for c in text.chars().take(PRINTABLE_MAX) {
+        let escaped = c.is_control() && c != '\t'
+            || matches!(
+                c,
+            '\u{061c}'
+                | '\u{200e}'
+                | '\u{200f}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202a}'..='\u{202e}'
+                | '\u{2066}'..='\u{2069}'
+            );
+        if !escaped {
+            out.push(c);
+        } else if c.is_ascii() {
+            out.push_str(&format!("\\x{:02x}", c as u32));
+        } else {
+            out.push_str(&format!("\\u{{{:x}}}", c as u32));
+        }
+    }
+    if length > PRINTABLE_MAX {
+        out.push_str(&format!("… ({length} characters)"));
+    }
+    out
+}
+
+/// Longer than any line converge writes of its own; a service's answer that
+/// makes one longer is cut there.
+pub const PRINTABLE_MAX: usize = 4096;
+
 /// Why a readiness probe did not return a version.
 pub enum Probe {
     /// Worth waiting for: refused, 5xx, no version yet.
@@ -276,6 +318,32 @@ mod tests {
     const STATUS: &str = include_str!("../tests/fixtures/radarr-6.3.0.10514/system-status.json");
     const LIST: &str = include_str!("../tests/fixtures/radarr-6.3.0.10514/qualitydefinition.json");
     const DESIRED: &str = include_str!("../tests/fixtures/radarr-6.3.0.10514/desired.json");
+
+    #[test]
+    fn printable_shows_control_characters_as_escapes_and_keeps_the_rest() {
+        assert_eq!(printable("Radarr 4K\tä €"), "Radarr 4K\tä €");
+        assert_eq!(
+            printable("a\nb\rc\u{1b}[2J\u{7f}"),
+            r"a\x0ab\x0dc\x1b[2J\x7f"
+        );
+        // C1, the line separator and a bidirectional override: none of them
+        // may reach a terminal or split a journal line.
+        assert_eq!(
+            printable("x\u{9b}y\u{2028}z\u{202e}w"),
+            r"x\u{9b}y\u{2028}z\u{202e}w"
+        );
+        let long = "a".repeat(PRINTABLE_MAX + 5);
+        let shown = printable(&long);
+        assert!(shown.starts_with(&"a".repeat(PRINTABLE_MAX)));
+        assert!(
+            shown.ends_with(&format!("a… ({} characters)", PRINTABLE_MAX + 5)),
+            "{shown}"
+        );
+        assert_eq!(
+            printable(&"a".repeat(PRINTABLE_MAX)),
+            "a".repeat(PRINTABLE_MAX)
+        );
+    }
 
     fn task(desired: &str) -> QualityDefinitions {
         let desired: BTreeMap<String, SizeLimits> = serde_json::from_str(desired).unwrap();

@@ -11,7 +11,7 @@ use serde_json::{json, Map, Value};
 
 use crate::{
     client::{expect_status, expect_status_at, Transport},
-    endpoint::{Endpoint, Shape},
+    endpoint::{is_path_segment, Endpoint, Shape},
     engine::{shortened, Change, Probe, Task, HIDDEN},
     error::Error,
     paths,
@@ -646,6 +646,12 @@ impl Task for ScheduledTaskTriggers {
                 .id
                 .clone()
                 .ok_or_else(|| Error::MissingField(vec![format!("{key}: Id")]))?;
+            if !is_path_segment(&id) {
+                return Err(Error::Decode {
+                    path: TASKS.path.to_string(),
+                    reason: format!("{key}: the id is not a plain path segment"),
+                });
+            }
             let path = TRIGGERS_WRITE.path.replace("{taskId}", &id);
             let body = serialize(TRIGGERS_WRITE.method, &path, &self.triggers)?;
             let reply = t.post_json(&path, &body)?;
@@ -1083,6 +1089,17 @@ fn read_users(t: &dyn Transport) -> Result<Vec<UserDto>, Error> {
         return Err(refuse_account(USERS.method, USERS.path, reply.status));
     }
     let users: Vec<UserDto> = decode(USERS.path, &reply.body)?;
+    // An id goes into the policy path and the display preferences' query;
+    // it is never shown.
+    if let Some(user) = users.iter().find(|u| !is_path_segment(&u.id)) {
+        return Err(Error::Decode {
+            path: USERS.path.to_string(),
+            reason: format!(
+                "account {}: the id is not a plain path segment",
+                user.name.as_deref().unwrap_or("without a name")
+            ),
+        });
+    }
     if users.is_empty() {
         return Err(Error::EmptyList {
             path: USERS.path.to_string(),
@@ -1634,6 +1651,34 @@ mod tests {
             .unwrap()
             .to_string();
         assert_eq!(err, "not found on the service: library Hörspiele");
+    }
+
+    /// A task id from the answer goes into the write path; one that is not
+    /// a plain segment is refused before the write (audit 3, B2-CV-5).
+    #[test]
+    fn a_task_id_that_is_not_a_plain_path_segment_is_refused_before_the_write() {
+        let changed = with(TASKS_JSON, |v| {
+            for task in v.as_array_mut().unwrap() {
+                if task["Key"] == "MergeMoviesTask" {
+                    task["Triggers"] = json!([]);
+                    task["Id"] = json!("../../Users/x");
+                }
+            }
+        });
+        let task = merge_triggers();
+        let t = FakeTransport::default()
+            .on_get(TASKS.path, vec![ok(&changed)])
+            .on_put(vec![Step::Answer(204, String::new())]);
+        let current = task.read(&t).unwrap();
+        let err = task.write(&t, &current).err().unwrap().to_string();
+        assert_eq!(
+            err,
+            format!(
+                "{}: the answer does not have the expected shape: MergeMoviesTask: the id is not a plain path segment",
+                TASKS.path
+            )
+        );
+        assert!(t.calls.borrow().is_empty(), "{:?}", t.calls.borrow());
     }
 
     #[test]
@@ -2228,6 +2273,34 @@ mod tests {
         let current = task.read(&t).unwrap();
         assert_eq!(current.len(), 9);
         assert_eq!(task.diff(&current).unwrap(), vec![]);
+    }
+
+    /// An account id goes into the policy path and the display preferences'
+    /// query; one that is not a plain segment (`../`, `?`, `&`) is refused
+    /// when the list is read, before any write (audit 3, B2-CV-5).
+    #[test]
+    fn an_account_id_that_is_not_a_plain_path_segment_is_refused_when_read() {
+        for id in ["../../Plugins/x", "x&client=y", "x?y"] {
+            let answer = with(&demoted(), |v| {
+                for user in v.as_array_mut().unwrap() {
+                    if user["Name"] == json!("konto1") {
+                        user["Id"] = json!(id);
+                    }
+                }
+            });
+            let task = host_policies();
+            let t = users_transport(&answer);
+            let err = task.read(&t).err().unwrap().to_string();
+            assert_eq!(
+                err,
+                format!(
+                    "{}: the answer does not have the expected shape: account konto1: the id is not a plain path segment",
+                    USERS.path
+                ),
+                "{id}"
+            );
+            assert!(t.calls.borrow().is_empty());
+        }
     }
 
     #[test]

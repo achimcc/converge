@@ -14,7 +14,7 @@ use serde_json::{Map, Value};
 
 use crate::{
     client::{Reply, Transport},
-    endpoint::Endpoint,
+    endpoint::{is_path_segment, Endpoint},
     engine::{Change, Probe, Task, HIDDEN},
     error::Error,
     secret::Secret,
@@ -375,6 +375,16 @@ impl Task for AdminPermissions {
                 e.column()
             ),
         })?;
+        // An id goes into `PATCH /api/users/{id}`; it is never shown.
+        if let Some(user) = users.users.iter().find(|u| !is_path_segment(&u.id)) {
+            return Err(Error::Decode {
+                path: USERS.path.to_string(),
+                reason: format!(
+                    "account {}: the id is not a plain path segment",
+                    user.username.as_deref().unwrap_or("without a name")
+                ),
+            });
+        }
         Ok(users.users)
     }
 
@@ -673,6 +683,12 @@ impl Task for Libraries {
                 .get("id")
                 .and_then(Value::as_str)
                 .ok_or_else(|| Error::MissingField(vec![format!("{subject}: id")]))?;
+            if !is_path_segment(id) {
+                return Err(Error::Decode {
+                    path: LIBRARIES.path.to_string(),
+                    reason: format!("{subject}: the id is not a plain path segment"),
+                });
+            }
             let path = LIBRARY_UPDATE.path.replace("{id}", id);
             let reply = t.patch_json(&path, &patch_body(&diffs).to_string())?;
             if reply.status != 200 {
@@ -865,6 +881,26 @@ mod tests {
         );
     }
 
+    /// An account id goes into `PATCH /api/users/{id}`; one that is not a
+    /// plain segment is refused when the list is read (audit 3, B2-CV-5).
+    #[test]
+    fn an_account_id_that_is_not_a_plain_path_segment_is_refused_when_read() {
+        let mut recorded: Value = serde_json::from_str(USERS_JSON).unwrap();
+        recorded["users"][2]["type"] = json!("admin");
+        recorded["users"][2]["id"] = json!("../libraries/x");
+        let task = admin_rights();
+        let t = users(&recorded.to_string());
+        let err = task.read(&t).err().unwrap().to_string();
+        assert_eq!(
+            err,
+            format!(
+                "{}: the answer does not have the expected shape: account konto3: the id is not a plain path segment",
+                USERS.path
+            )
+        );
+        assert!(t.calls.borrow().is_empty());
+    }
+
     #[test]
     fn no_account_of_the_types_is_a_note_and_a_refusal_names_nothing() {
         let task = admin_rights();
@@ -974,6 +1010,26 @@ mod tests {
             serde_json::from_str::<Value>(&written[0].1).unwrap(),
             json!({ "icon": "book-1" })
         );
+    }
+
+    /// A library id goes into `PATCH /api/libraries/{id}`; one that is not
+    /// a plain segment is refused before the write (audit 3, B2-CV-5).
+    #[test]
+    fn a_library_id_that_is_not_a_plain_path_segment_is_refused_before_the_write() {
+        let task = libraries(json!({ BOOKS: { "icon": "book-1" } }));
+        let answer = LIBRARIES_JSON.replace(BOOKS_ID, "../users/root");
+        assert_ne!(answer, LIBRARIES_JSON);
+        let t = library_answer(&answer);
+        let current = task.read(&t).unwrap();
+        let err = task.write(&t, &current).err().unwrap().to_string();
+        assert_eq!(
+            err,
+            format!(
+                "{}: the answer does not have the expected shape: library Hoerbuecher: the id is not a plain path segment",
+                LIBRARIES.path
+            )
+        );
+        assert!(t.calls.borrow().is_empty(), "{:?}", t.calls.borrow());
     }
 
     #[test]

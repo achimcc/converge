@@ -2033,7 +2033,9 @@ good. A refusal is an `Error::Status` with the method, the path, the status and
 one validation line naming the **connection** -- never the body, because
 Trailarr's answers carry the API keys of the Radarr and Sonarr it connects to
 (§9). The endpoint is in `ENDPOINTS`, so `schema-check` holds it against the
-deployed description like every other one.
+deployed description like every other one. Its shell predecessor had no
+guard, and until v0.42.0 neither had this task; since then it has Koel's
+(§45).
 
 **Koel `radio-stations`** (§18): surplus is every station of the **account's
 own** list the spec does not name. It can be nothing else: `read` already
@@ -2615,6 +2617,66 @@ the fields against `M3UAccountProfile` and `PatchedM3UAccountProfile`.
 
 Not measured on the host yet: three streams at once, one per profile, and a
 fourth refused.
+
+## 45. What an answer may not do: three findings of audit 3 (v0.42.0, 2026-09-29)
+
+The host's third security audit (B2, converge v0.41.0) found three low
+findings. Each is about a string or a count that comes from a **service's
+answer** and was trusted further than it had earned.
+
+**Trailarr's connections got Koel's guard (B2-CV-1).** Of the three tasks
+that can delete (§39), Trailarr was the one without a guard: every connection
+whose `name` the spec did not name byte for byte was removed. After an update
+that changes the case or the Unicode normalisation of the names, a green run
+would remove every connection and add them again -- the audit ran it: `radarr`
+and `sonarr` listed, `Radarr` and `Sonarr` in the spec, two removals and two
+additions. `Connections::surplus` now refuses half the list or more, exactly
+as Koel does: `would remove 2 of 2 connections (half or more) -- nothing
+removed`, in `plan` too and before the first `DELETE`; `remove` asks the guard
+again before it sends one.
+
+> **With two connections, one of them can no longer be removed by a spec.**
+> One of two is half. The host has two, Radarr and Sonarr, and its spec names
+> both, so nothing changes there; a Trailarr with three can lose one. The rule
+> stays as crude as Koel's -- it is there for a total mismatch, not for a
+> careful edit, and the one removal it blocks is a thing done once by hand.
+
+**Every line a run prints goes through `engine::printable` (B2-CV-2).** Names,
+the reported version and a refusal's validation messages are strings the
+service chose, and they went into `println!` as they came. A connection named
+`X\x1b[2J\ntrailarr connections: unchanged` cleared the terminal of whoever
+ran `plan` and wrote a line into the journal that converge never wrote. Exit
+code and stderr stayed right, so no deploy was fooled; the log was.
+`main` now prints each line through `say` or `say_error`, and both send it
+through `printable`: every control character but the tab, the Unicode line
+and paragraph separators and the bidirectional controls become escapes
+(`\x0a`, `\x1b`, `\u{9b}`, `\u{202e}`), and a line beyond 4096 characters
+keeps its beginning and says how long it was. **One place, not one per
+task**: a task that forgets would be the next finding, and there are
+thirty-odd of them. The price is that converge can print no line with a line
+feed in it; it never meant to.
+
+**An id from an answer must be one plain path segment (B2-CV-5).** Koel's
+station id is a string, and it went into `DELETE /api/radio/stations/{id}`
+unchecked: an answer with `../../users/1` or `1?x` would have pointed the
+`DELETE` at another path of the same origin, with Koel's token. The `PUT`
+already checked the id; the `DELETE` did not. `endpoint::is_path_segment` --
+letters, digits, `-` and `_`, 1 to 128 of them, which every ULID, UUID and
+integer is -- now decides for every string id an answer puts into a path:
+
+| service | where the id goes | checked |
+|---|---|---|
+| Koel | `DELETE`/`PUT /api/radio/stations/{id}` | when the list is decoded |
+| Audiobookshelf | `PATCH /api/users/{id}` | when the accounts are read |
+| Audiobookshelf | `PATCH /api/libraries/{id}` | before the write |
+| Jellyfin | `/Users/{userId}/Policy`, `?userId=` of the display preferences | when the accounts are read |
+| Jellyfin | `/ScheduledTasks/{taskId}/Triggers` | before the write |
+
+Every other id in a path is an integer in its wire type. A refused id is an
+`Error::Decode` naming the station, account, library or task -- never the id
+itself. Validating rather than percent-encoding: an id that needs encoding is
+no id these services hand out, and a run that stops says so where an encoded
+one would only have been sent somewhere odd more politely.
 
 ## 20. Not in the pilot
 
