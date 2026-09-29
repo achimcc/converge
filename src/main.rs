@@ -275,6 +275,18 @@ fn reconcile_one(
                 };
                 run(mode, &task, &transport, &SystemClock, timing)
             }
+            DispatcharrTask::VodCategories(accounts) => {
+                let task = dispatcharr::VodCategories {
+                    accounts: accounts.clone(),
+                };
+                run(mode, &task, &transport, &SystemClock, timing)
+            }
+            DispatcharrTask::NetworkAccess(access) => {
+                let task = dispatcharr::NetworkAccess {
+                    access: access.clone(),
+                };
+                run(mode, &task, &transport, &SystemClock, timing)
+            }
             DispatcharrTask::ChannelEpg(channels) => {
                 let task = dispatcharr::ChannelEpg {
                     channels: channels.clone(),
@@ -1039,7 +1051,48 @@ fn schema_check(args: &[String]) -> ExitCode {
             // a group's fields are those of the membership the account answers
             // with (the endpoint's declared body is wrong, design §29).
             Desired::Dispatcharr(desired) => match &desired.task {
-                DispatcharrTask::StreamSettings { .. } => (Vec::new(), 0),
+                // The setting's `value` is untyped in the description; the
+                // CIDRs are checked by the spec parser instead (design §46).
+                DispatcharrTask::StreamSettings { .. } | DispatcharrTask::NetworkAccess(_) => {
+                    (Vec::new(), 0)
+                }
+                // The two lists are values of VODCategory.category_type, and
+                // the write sets `enabled` of the account's relation; its
+                // body is not the one the description declares (design §46).
+                DispatcharrTask::VodCategories(accounts) => {
+                    let mut found = Vec::new();
+                    let mut count = 0;
+                    for account in accounts.keys() {
+                        for kind in dispatcharr::VOD_TYPES {
+                            count += 1;
+                            found.extend(
+                                schema::check_paths(
+                                    &document,
+                                    dispatcharr::VOD_CATEGORY_COMPONENT,
+                                    &std::collections::BTreeMap::from([(
+                                        "category_type".to_string(),
+                                        serde_json::json!(kind),
+                                    )]),
+                                )
+                                .into_iter()
+                                .map(|f| format!("{account}: {f}")),
+                            );
+                        }
+                        found.extend(
+                            schema::check_paths(
+                                &document,
+                                dispatcharr::VOD_RELATION_COMPONENT,
+                                &std::collections::BTreeMap::from([(
+                                    "enabled".to_string(),
+                                    serde_json::json!(true),
+                                )]),
+                            )
+                            .into_iter()
+                            .map(|f| format!("{account}: {f}")),
+                        );
+                    }
+                    (found, count)
+                }
                 // Names for the rest -- a channel, a source, a tvg-id --, but
                 // a number is a field of the override the task writes.
                 DispatcharrTask::ChannelEpg(channels) => {

@@ -56,3 +56,20 @@ carries the provider's user name and password in its `url`. The tests use
   `channel_group` of each. Everything else is dropped because an Xtream
   stream's `url` carries the provider's user name and password; `count`,
   `next` and `previous` are kept as answered.
+
+## Constructed (2026-09-29)
+
+- `constructed-vod-categories.json` — what `GET /api/vod/categories/?m3u_account=2`
+  answers, **built by hand**: no instance with an Xtream account and VOD
+  switched on was at hand to record from, and the host's categories are the
+  provider's. The shape is `VODCategorySerializer` of Dispatcharr v0.31.0
+  (`apps/vod/serializers.py`, lines 110-131): `id`, `name`,
+  `category_type`, `category_type_display` and `m3u_accounts`, the latter
+  `M3UVODCategoryRelationSerializer` (`category`, `m3u_account`,
+  `enabled`) over EVERY account's relation to the category -- the list
+  filter picks categories, not relations, so a category shared with account 3
+  carries that account's entry too. The view has no pagination
+  (`VODCategoryViewSet`, `apps/vod/api_views.py`, lines 740-820) and orders by
+  name. The two `Uncategorized` entries are the ones the list request itself
+  creates for an XC account with VOD on (lines 769-818). Names and ids are
+  invented.

@@ -1,14 +1,18 @@
 //! Dispatcharr: the IPTV proxy in front of a media server's Live TV (design
-//! §29). The default stream profile, M3U accounts, the channel groups and the
-//! profiles of an account, EPG sources, and what a channel shows.
+//! §29). The default stream profile, M3U accounts, the channel groups, the
+//! profiles and the VOD categories of an account, EPG sources, what a channel
+//! shows, and the network allowlists.
 //!
 //! Dispatcharr is a Django REST Framework application whose OpenAPI
 //! description drf-spectacular generates at runtime; the vendored copy was
 //! fetched from the running container. It is right about the resources and
-//! wrong about one action: `PATCH /api/m3u/accounts/{id}/group-settings/` is
+//! wrong about two actions: `PATCH /api/m3u/accounts/{id}/group-settings/` is
 //! declared with an `M3UAccount` body, while the view reads
-//! `{"group_settings": [...]}` (`apps/m3u/api_views.py`). That endpoint's
-//! body is therefore not checked against the description.
+//! `{"group_settings": [...], "category_settings": [...]}`, and
+//! `POST /api/m3u/accounts/{id}/refresh-vod/` with a required `M3UAccount`
+//! body and a 200 answer, while the view reads no body and answers 202
+//! (`apps/m3u/api_views.py`). Neither body is checked against the
+//! description (design §46).
 //!
 //! There is no API key a spec could hold: Dispatcharr generates keys itself
 //! and stores them per user. A task logs in as a service account instead
@@ -109,6 +113,26 @@ pub const PROFILE_UPDATE: Endpoint = Endpoint {
     request: Some(Shape::Document("PatchedM3UAccountProfile")),
     response: None,
 };
+/// A plain list, not a page (`VODCategoryViewSet` has no pagination). The
+/// list request itself makes the two `Uncategorized` categories and every XC
+/// account's relation to them (`list`, `apps/vod/api_views.py`, line 769).
+/// Asked with `?m3u_account=<id>`; the filter picks categories, and each
+/// carries the relations of EVERY account (`m3u_accounts`).
+pub const VOD_CATEGORIES: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/vod/categories/",
+    request: None,
+    response: Some(Shape::List("VODCategory")),
+};
+/// The description declares an `M3UAccount` body and a 200 answer; the view
+/// reads no body and answers 202 (`refresh_vod`, `apps/m3u/api_views.py`,
+/// line 444). So only the path is checked.
+pub const VOD_REFRESH: Endpoint = Endpoint {
+    method: "POST",
+    path: "/api/m3u/accounts/{id}/refresh-vod/",
+    request: None,
+    response: None,
+};
 pub const EPG_SOURCES: Endpoint = Endpoint {
     method: "GET",
     path: "/api/epg/sources/",
@@ -153,7 +177,7 @@ pub const EPG_DATA: Endpoint = Endpoint {
     response: Some(Shape::List("EPGData")),
 };
 
-pub const ENDPOINTS: [Endpoint; 21] = [
+pub const ENDPOINTS: [Endpoint; 23] = [
     TOKEN,
     VERSION,
     STREAM_PROFILES,
@@ -175,6 +199,8 @@ pub const ENDPOINTS: [Endpoint; 21] = [
     LOGOS,
     LOGO_CREATE,
     STREAMS,
+    VOD_CATEGORIES,
+    VOD_REFRESH,
 ];
 
 /// The components a spec's fields are checked against: an account's and a
@@ -202,6 +228,14 @@ const DEFAULT_PROFILE_FIXED: [&str; 2] = ["max_streams", "is_active"];
 /// What a profile Dispatcharr did not make must carry
 /// (`M3UAccountProfileSerializer.validate`).
 const PROFILE_PATTERNS: [&str; 2] = ["search_pattern", "replace_pattern"];
+/// What `vod-categories` checks a spec against: its two types are values of
+/// `VODCategory.category_type`, and it writes `enabled` of the relation.
+pub const VOD_CATEGORY_COMPONENT: &str = "VODCategory";
+pub const VOD_RELATION_COMPONENT: &str = "M3UVODCategoryRelation";
+/// The two kinds of VOD category (`VODCategory.CATEGORY_TYPE_CHOICES`).
+pub const VOD_TYPES: [&str; 2] = ["movie", "series"];
+/// The category Dispatcharr makes itself, per type, for titles without one.
+const UNCATEGORIZED: &str = "Uncategorized";
 pub const EPG_SOURCE_CREATE_COMPONENT: &str = "EPGSource";
 pub const EPG_SOURCE_UPDATE_COMPONENT: &str = "PatchedEPGSource";
 /// A channel's number goes into its override; the other fields of
@@ -245,6 +279,13 @@ const STREAM_PROFILE_ID: &str = "stream_profile_id";
 const STREAM_SETTINGS_KEY: &str = "stream_settings";
 const DEFAULT_STREAM_PROFILE: &str = "default_stream_profile";
 
+/// The core setting that holds the network allowlists (`NETWORK_ACCESS_KEY`,
+/// `core/models.py`, line 262), and the areas `network_access_allowed` is
+/// asked about (`dispatcharr/utils.py`, line 181): each a comma-separated
+/// CIDR list.
+const NETWORK_ACCESS_KEY: &str = "network_access";
+pub const NETWORK_ACCESS_AREAS: [&str; 4] = ["M3U_EPG", "STREAMS", "XC_API", "UI"];
+
 pub fn wire_types() -> Vec<schemars::Schema> {
     vec![
         schemars::schema_for!(TokenObtainPair),
@@ -258,6 +299,7 @@ pub fn wire_types() -> Vec<schemars::Schema> {
         schemars::schema_for!(EPGData),
         schemars::schema_for!(Logo),
         schemars::schema_for!(Stream),
+        schemars::schema_for!(VODCategory),
     ]
 }
 
@@ -1221,6 +1263,382 @@ impl Task for Profiles {
             }
         }
         Ok(())
+    }
+}
+
+// --- vod-categories --------------------------------------------------------
+
+/// Which VOD categories of an M3U account are on (design §46): exactly the
+/// named ones, per type, and every other category of the account off.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VodWanted {
+    pub movie: std::collections::BTreeSet<String>,
+    pub series: std::collections::BTreeSet<String>,
+}
+
+impl VodWanted {
+    fn of(&self, kind: &str) -> &std::collections::BTreeSet<String> {
+        if kind == "series" {
+            &self.series
+        } else {
+            &self.movie
+        }
+    }
+}
+
+/// A category as the list answers it. The provider's categories are shared by
+/// name between accounts; `m3u_accounts` holds every account's relation.
+#[derive(Deserialize, JsonSchema)]
+pub struct VODCategory {
+    pub id: i64,
+    pub name: String,
+    pub category_type: String,
+    pub m3u_accounts: Vec<M3UVODCategoryRelation>,
+}
+
+/// One account's relation to a category: whether its titles are read in.
+#[derive(Deserialize, JsonSchema)]
+pub struct M3UVODCategoryRelation {
+    pub m3u_account: i64,
+    pub enabled: bool,
+}
+
+/// One category of one account, as the task compares it.
+pub struct VodEntry {
+    pub id: i64,
+    pub name: String,
+    pub kind: String,
+    pub enabled: bool,
+}
+
+pub struct VodAccount {
+    pub id: i64,
+    /// By type, then name.
+    pub categories: Vec<VodEntry>,
+}
+
+/// M3U account name -> the categories it should read.
+pub struct VodCategories {
+    pub accounts: BTreeMap<String, VodWanted>,
+}
+
+impl VodCategories {
+    fn categories_path(account_id: i64) -> String {
+        format!("{}?m3u_account={account_id}", VOD_CATEGORIES.path)
+    }
+
+    fn subject(account: &str, kind: &str, name: &str) -> String {
+        format!("{kind} category {name} of M3U account {account}")
+    }
+
+    /// The account's categories and its switch for each. A list with nothing
+    /// but `Uncategorized` is empty: the request made those itself, and the
+    /// provider's arrive only with a VOD refresh.
+    fn read_account(t: &dyn Transport, account_id: i64) -> Result<VodAccount, Error> {
+        let path = Self::categories_path(account_id);
+        let reply = t.get(&path)?;
+        expect_status_at(VOD_CATEGORIES.method, &path, &reply, &[200])?;
+        let answer: Vec<VODCategory> = decode(&path, &reply.body)?;
+        if answer.iter().all(|c| c.name == UNCATEGORIZED) {
+            return Err(Error::EmptyList {
+                path: format!("{path} (Uncategorized aside)"),
+            });
+        }
+        let mut categories = Vec::new();
+        for c in answer {
+            if !VOD_TYPES.contains(&c.category_type.as_str()) {
+                return Err(Error::Decode {
+                    path: path.clone(),
+                    reason: format!(
+                        "category {} has a type that is neither movie nor series",
+                        c.id
+                    ),
+                });
+            }
+            let Some(relation) = c.m3u_accounts.iter().find(|r| r.m3u_account == account_id) else {
+                return Err(Error::Decode {
+                    path: path.clone(),
+                    reason: format!(
+                        "category {} carries no relation to account {account_id}",
+                        c.id
+                    ),
+                });
+            };
+            categories.push(VodEntry {
+                id: c.id,
+                enabled: relation.enabled,
+                name: c.name,
+                kind: c.category_type,
+            });
+        }
+        categories.sort_by(|a, b| (&a.kind, &a.name).cmp(&(&b.kind, &b.name)));
+        Ok(VodAccount {
+            id: account_id,
+            categories,
+        })
+    }
+
+    /// The categories whose switch differs, with the value each should get.
+    fn differing<'a>(wanted: &VodWanted, account: &'a VodAccount) -> Vec<(&'a VodEntry, bool)> {
+        account
+            .categories
+            .iter()
+            .filter_map(|c| {
+                let on = wanted.of(&c.kind).contains(&c.name);
+                (c.enabled != on).then_some((c, on))
+            })
+            .collect()
+    }
+}
+
+impl Task for VodCategories {
+    type Current = BTreeMap<String, VodAccount>;
+
+    /// Ready when the service answers and every named account exists. Its
+    /// categories are NOT waited for: without them `read` fails (design §46).
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        let version = probe(t)?;
+        let current: Vec<M3UAccount> =
+            get_list(t, &M3U_ACCOUNTS).map_err(|e| Probe::NotYet(e.to_string()))?;
+        for account in self.accounts.keys() {
+            Profiles::account(&current, account).map_err(Probe::NotYet)?;
+        }
+        Ok(version)
+    }
+
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        let accounts: Vec<M3UAccount> = get_list(t, &M3U_ACCOUNTS)?;
+        let mut current = BTreeMap::new();
+        for name in self.accounts.keys() {
+            let a = Profiles::account(&accounts, name).map_err(|why| Error::NotFound(vec![why]))?;
+            current.insert(name.clone(), Self::read_account(t, a.id)?);
+        }
+        Ok(current)
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        let mut absent = Vec::new();
+        let mut changes = Vec::new();
+        for (account, wanted) in &self.accounts {
+            let Some(a) = current.get(account) else {
+                absent.push(format!("M3U account {account} does not exist"));
+                continue;
+            };
+            for kind in VOD_TYPES {
+                let there: Vec<&str> = a
+                    .categories
+                    .iter()
+                    .filter(|c| c.kind == kind)
+                    .map(|c| c.name.as_str())
+                    .collect();
+                for name in wanted.of(kind) {
+                    if !there.contains(&name.as_str()) {
+                        absent.push(format!(
+                            "{} (there are: {})",
+                            Self::subject(account, kind, name),
+                            there.join(", ")
+                        ));
+                    }
+                }
+            }
+            changes.extend(
+                Self::differing(wanted, a)
+                    .into_iter()
+                    .map(|(c, on)| Change {
+                        subject: Self::subject(account, &c.kind, &c.name),
+                        field: "enabled".to_string(),
+                        current: c.enabled.to_string(),
+                        desired: on.to_string(),
+                    }),
+            );
+        }
+        if absent.is_empty() {
+            Ok(changes)
+        } else {
+            Err(Error::NotFound(absent))
+        }
+    }
+
+    fn notes(&self, _current: &Self::Current) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Per account one PATCH with `category_settings` alone -- the view
+    /// upserts every group named in `group_settings`, so that key stays out
+    /// -- and then a VOD refresh, which reads the titles of what is on now
+    /// and drops those of what is off.
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        for (account, wanted) in &self.accounts {
+            let a = current.get(account).ok_or_else(|| {
+                Error::NotFound(vec![format!("M3U account {account} does not exist")])
+            })?;
+            let settings: Vec<Value> = Self::differing(wanted, a)
+                .into_iter()
+                .map(|(c, on)| json!({"id": c.id, "enabled": on}))
+                .collect();
+            if settings.is_empty() {
+                continue;
+            }
+            let path = GROUP_SETTINGS.path.replace("{id}", &a.id.to_string());
+            let body = serialize(
+                GROUP_SETTINGS.method,
+                &path,
+                &json!({ "category_settings": settings }),
+            )?;
+            let reply = t.patch_json(&path, &body)?;
+            expect_status_at(GROUP_SETTINGS.method, &path, &reply, &[200])?;
+            let path = VOD_REFRESH.path.replace("{id}", &a.id.to_string());
+            let reply = t.post_json(&path, "{}")?;
+            expect_status_at(VOD_REFRESH.method, &path, &reply, &[202])?;
+        }
+        Ok(())
+    }
+}
+
+// --- network-access --------------------------------------------------------
+
+/// A CIDR the way Python's `ipaddress.ip_network` reads it -- strict, so a
+/// network with host bits set is an error -- in its canonical form
+/// (`10.0.30.10` -> `10.0.30.10/32`, IPv6 compressed). Surrounding blanks
+/// are dropped; Dispatcharr splits on `,` alone and would not.
+pub fn cidr(text: &str) -> Result<String, String> {
+    use std::net::IpAddr;
+    let text = text.trim();
+    let (address, prefix) = match text.split_once('/') {
+        Some((a, p)) => (a, Some(p)),
+        None => (text, None),
+    };
+    let address: IpAddr = address
+        .parse()
+        .map_err(|_| format!("{text:?} is not an IP address or a network"))?;
+    let bits: u8 = if address.is_ipv4() { 32 } else { 128 };
+    let prefix = match prefix {
+        None => bits,
+        Some(p) => p
+            .parse::<u8>()
+            .ok()
+            .filter(|p| *p <= bits)
+            .ok_or_else(|| format!("{text:?} has no prefix length from 0 to {bits}"))?,
+    };
+    let host_bits_set = match address {
+        IpAddr::V4(a) => u32::from(a).checked_shl(u32::from(prefix)).unwrap_or(0) != 0,
+        IpAddr::V6(a) => u128::from(a).checked_shl(u32::from(prefix)).unwrap_or(0) != 0,
+    };
+    if host_bits_set {
+        return Err(format!(
+            "{text:?} has host bits set (Dispatcharr reads networks strictly)"
+        ));
+    }
+    Ok(format!("{address}/{prefix}"))
+}
+
+/// Dispatcharr's network allowlists by area (design §46): `STREAMS`,
+/// `XC_API`, `M3U_EPG`, `UI`, each a list of CIDRs. Only the named areas are
+/// set; the others travel back as they are. The lists are canonical already
+/// (`spec.rs` runs every entry through `cidr`).
+pub struct NetworkAccess {
+    pub access: BTreeMap<String, Vec<String>>,
+}
+
+impl NetworkAccess {
+    /// A stored list as a sorted set; an entry `cidr` cannot read stays as
+    /// it is, so it differs from every spec.
+    fn normalised(stored: &str) -> Vec<String> {
+        let mut set: Vec<String> = stored
+            .split(',')
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(|c| cidr(c).unwrap_or_else(|_| c.to_string()))
+            .collect();
+        set.sort();
+        set.dedup();
+        set
+    }
+
+    fn wanted(list: &[String]) -> Vec<String> {
+        let mut set = list.to_vec();
+        set.sort();
+        set.dedup();
+        set
+    }
+
+    fn value(setting: &CoreSettings) -> Result<&Map<String, Value>, Error> {
+        setting.value.as_object().ok_or_else(|| Error::Decode {
+            path: SETTINGS.path.to_string(),
+            reason: format!("{NETWORK_ACCESS_KEY}.value is not an object"),
+        })
+    }
+}
+
+impl Task for NetworkAccess {
+    type Current = CoreSettings;
+
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        probe(t)
+    }
+
+    /// The setting is made by a migration (`core/migrations/0020_…`, line
+    /// 166) and never deleted, so a missing one is an error, not a POST.
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        let settings: Vec<CoreSettings> = get_list(t, &SETTINGS)?;
+        settings
+            .into_iter()
+            .find(|s| s.key == NETWORK_ACCESS_KEY)
+            .ok_or_else(|| Error::NotFound(vec![format!("core setting {NETWORK_ACCESS_KEY}")]))
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        let value = Self::value(current)?;
+        let mut changes = Vec::new();
+        for (area, list) in &self.access {
+            let wanted = Self::wanted(list);
+            let now = match value.get(area) {
+                None => None,
+                Some(Value::String(s)) if Self::normalised(s) == wanted => continue,
+                Some(Value::String(s)) => Some(s.clone()),
+                Some(other) => Some(shortened(other)),
+            };
+            changes.push(Change {
+                subject: NETWORK_ACCESS_KEY.to_string(),
+                field: area.clone(),
+                // Unset, an area falls back to Dispatcharr's default
+                // (`network_access_allowed`): M3U_EPG to the local networks,
+                // every other one to every address.
+                current: now.unwrap_or_else(|| {
+                    if area == "M3U_EPG" {
+                        "(not set: local networks)".to_string()
+                    } else {
+                        "(not set: every address)".to_string()
+                    }
+                }),
+                desired: list.join(","),
+            });
+        }
+        Ok(changes)
+    }
+
+    fn notes(&self, _current: &Self::Current) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// The whole `value` goes back with the named areas replaced, each joined
+    /// by a bare `,`: the PATCH replaces `value`, and every reader splits on
+    /// `,` without trimming (`dispatcharr/utils.py`, line 192).
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        let mut value = Self::value(current)?.clone();
+        for (area, list) in &self.access {
+            value.insert(area.clone(), json!(list.join(",")));
+        }
+        let path = SETTING_UPDATE.path.replace("{id}", &current.id.to_string());
+        let body = serialize(
+            SETTING_UPDATE.method,
+            &path,
+            &PatchedCoreSettings {
+                value: Value::Object(value),
+            },
+        )?;
+        let reply = t.patch_json(&path, &body)?;
+        expect_status_at(SETTING_UPDATE.method, &path, &reply, &[200])
     }
 }
 
@@ -3108,5 +3526,273 @@ mod tests {
         assert!(matches!(task.probe(&t), Err(Probe::NotYet(why)) if why.contains("Xtream")));
         let ready = profiles_task(&[("Oeffentlich-rechtlich 2", &[("max_streams", json!(1))])]);
         assert!(matches!(ready.probe(&t), Ok(v) if v == "0.31.0"));
+    }
+
+    // --- vod-categories ---
+
+    const VOD_JSON: &str =
+        include_str!("../../tests/fixtures/dispatcharr-0.31.0/constructed-vod-categories.json");
+    const VOD_PATH: &str = "/api/vod/categories/?m3u_account=2";
+
+    fn vod_task(movie: &[&str], series: &[&str]) -> VodCategories {
+        VodCategories {
+            accounts: BTreeMap::from([(
+                "Oeffentlich-rechtlich".to_string(),
+                VodWanted {
+                    movie: movie.iter().map(ToString::to_string).collect(),
+                    series: series.iter().map(ToString::to_string).collect(),
+                },
+            )]),
+        }
+    }
+
+    fn vod_transport(categories: Vec<Step>) -> FakeTransport {
+        FakeTransport::default()
+            .on_get(VERSION.path, vec![ok(VERSION_JSON)])
+            .on_get(M3U_ACCOUNTS.path, vec![ok(ACCOUNTS_JSON)])
+            .on_get(VOD_PATH, categories)
+    }
+
+    #[test]
+    fn vod_categories_as_they_are_change_nothing() {
+        let task = vod_task(&["Action", "Uncategorized"], &["Krimi", "Uncategorized"]);
+        let t = vod_transport(vec![ok(VOD_JSON)]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn exactly_the_named_vod_categories_are_on_and_every_other_is_switched_off() {
+        let task = vod_task(&["Action", "Dokumentation"], &["Krimi"]);
+        let t = vod_transport(vec![ok(VOD_JSON)]).on_put(vec![
+            Step::Answer(
+                200,
+                r#"{"message":"Group settings updated successfully"}"#.to_string(),
+            ),
+            Step::Answer(202, r#"{"message":"VOD refresh initiated"}"#.to_string()),
+        ]);
+        let current = task.read(&t).unwrap();
+        let lines: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        // Account 3's relation to Action (off) is not account 2's.
+        assert_eq!(
+            lines,
+            [
+                "movie category Dokumentation of M3U account Oeffentlich-rechtlich: enabled false -> true",
+                "movie category Uncategorized of M3U account Oeffentlich-rechtlich: enabled true -> false",
+                "series category Uncategorized of M3U account Oeffentlich-rechtlich: enabled true -> false",
+            ]
+        );
+        task.write(&t, &current).unwrap();
+        // Only the categories that differ, and no group_settings at all: the
+        // view would upsert every group named there (design §46).
+        let written = t.written.borrow();
+        assert_eq!(written[0].0, "/api/m3u/accounts/2/group-settings/");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(
+            sent,
+            json!({"category_settings": [
+                {"id": 12, "enabled": true},
+                {"id": 1, "enabled": false},
+                {"id": 2, "enabled": false},
+            ]})
+        );
+        // Then the refresh that brings the titles of what is now on.
+        assert_eq!(
+            *t.calls.borrow(),
+            [
+                ("PATCH", "/api/m3u/accounts/2/group-settings/".to_string()),
+                ("POST", "/api/m3u/accounts/2/refresh-vod/".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_apply_reads_the_switches_back_after_the_refresh() {
+        let task = vod_task(
+            &["Action", "Dokumentation", "Uncategorized"],
+            &["Krimi", "Uncategorized"],
+        );
+        let after = with(VOD_JSON, |v| {
+            v[1]["m3u_accounts"][0]["enabled"] = json!(true)
+        });
+        let t = vod_transport(vec![ok(VOD_JSON), ok(&after)]).on_put(vec![
+            Step::Answer(200, "{}".to_string()),
+            Step::Answer(202, "{}".to_string()),
+        ]);
+        let report = crate::engine::run(
+            crate::engine::Mode::Apply,
+            &task,
+            &t,
+            &crate::testing::FakeClock::new(),
+            crate::engine::Timing::default(),
+        )
+        .unwrap();
+        assert!(matches!(report.outcome, crate::engine::Outcome::Changed(ref c) if c.len() == 1));
+    }
+
+    #[test]
+    fn a_vod_category_the_account_does_not_have_names_the_ones_it_has() {
+        let task = vod_task(&["Actoin"], &[]);
+        let t = vod_transport(vec![ok(VOD_JSON)]);
+        let current = task.read(&t).unwrap();
+        let err = task.diff(&current).unwrap_err().to_string();
+        assert!(err.contains("movie category Actoin"), "{err}");
+        assert!(
+            err.contains("Action, Dokumentation, Uncategorized"),
+            "{err}"
+        );
+        assert!(!err.contains("Krimi"), "{err}");
+    }
+
+    #[test]
+    fn an_account_without_its_own_vod_categories_is_an_error() {
+        // Before the first VOD refresh the list holds only the two
+        // Uncategorized entries its own request made; for an account without
+        // VOD it is empty.
+        let only_uncategorized = with(VOD_JSON, |v| {
+            v.as_array_mut()
+                .unwrap()
+                .retain(|c| c["name"] == "Uncategorized");
+        });
+        for answer in [only_uncategorized, "[]".to_string()] {
+            let task = vod_task(&[], &[]);
+            let t = vod_transport(vec![ok(&answer)]);
+            let err = task.read(&t).err().expect("an error").to_string();
+            assert!(err.contains("empty list"), "{err}");
+            assert!(err.contains("m3u_account=2"), "{err}");
+        }
+    }
+
+    #[test]
+    fn vod_categories_wait_until_their_account_exists() {
+        let mut task = vod_task(&[], &[]);
+        let t = vod_transport(vec![ok(VOD_JSON)]);
+        assert!(matches!(task.probe(&t), Ok(v) if v == "0.31.0"));
+        let wanted = task.accounts.remove("Oeffentlich-rechtlich").unwrap();
+        task.accounts.insert("Xtream".to_string(), wanted);
+        assert!(matches!(task.probe(&t), Err(Probe::NotYet(why)) if why.contains("Xtream")));
+    }
+
+    // --- network-access ---
+
+    fn access_task(pairs: &[(&str, &[&str])]) -> NetworkAccess {
+        NetworkAccess {
+            access: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.iter().map(ToString::to_string).collect()))
+                .collect(),
+        }
+    }
+
+    fn access_transport(settings: &str) -> FakeTransport {
+        FakeTransport::default()
+            .on_get(VERSION.path, vec![ok(VERSION_JSON)])
+            .on_get(SETTINGS.path, vec![ok(settings)])
+            .on_put(vec![Step::Answer(200, "{}".to_string())])
+    }
+
+    fn settings_with_access(value: Value) -> String {
+        with(SETTINGS_JSON, |v| {
+            for s in v.as_array_mut().unwrap() {
+                if s["key"] == "network_access" {
+                    s["value"] = value.clone();
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn an_unset_area_is_set_as_dispatcharr_stores_it() {
+        // Recorded: the setting exists and holds nothing.
+        let task = access_task(&[("STREAMS", &["10.0.30.10/32", "fd00:30::/64"])]);
+        let t = access_transport(SETTINGS_JSON);
+        let current = task.read(&t).unwrap();
+        assert_eq!(
+            task.diff(&current).unwrap()[0].to_string(),
+            "network_access: STREAMS (not set: every address) -> 10.0.30.10/32,fd00:30::/64"
+        );
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written[0].0, "/api/core/settings/6/");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(
+            sent,
+            json!({"value": {"STREAMS": "10.0.30.10/32,fd00:30::/64"}})
+        );
+    }
+
+    #[test]
+    fn areas_are_compared_as_sets_and_the_others_travel_back_untouched() {
+        let stored = json!({"UI": "0.0.0.0/0,::/0", "STREAMS": "192.168.0.0/16,10.0.30.10"});
+        let same = access_task(&[("STREAMS", &["10.0.30.10/32", "192.168.0.0/16"])]);
+        let t = access_transport(&settings_with_access(stored.clone()));
+        let current = same.read(&t).unwrap();
+        assert_eq!(same.diff(&current).unwrap(), vec![]);
+
+        let task = access_task(&[
+            ("M3U_EPG", &["10.0.30.10/32"]),
+            ("STREAMS", &["10.0.30.10/32"]),
+        ]);
+        let current = task.read(&t).unwrap();
+        let lines: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                "network_access: M3U_EPG (not set: local networks) -> 10.0.30.10/32",
+                "network_access: STREAMS 192.168.0.0/16,10.0.30.10 -> 10.0.30.10/32",
+            ]
+        );
+        task.write(&t, &current).unwrap();
+        let sent: Value = serde_json::from_str(&t.written.borrow()[0].1).unwrap();
+        assert_eq!(
+            sent,
+            json!({"value": {"UI": "0.0.0.0/0,::/0", "STREAMS": "10.0.30.10/32", "M3U_EPG": "10.0.30.10/32"}})
+        );
+    }
+
+    #[test]
+    fn a_missing_network_access_setting_is_an_error_not_a_creation() {
+        let without = with(SETTINGS_JSON, |v| {
+            v.as_array_mut()
+                .unwrap()
+                .retain(|s| s["key"] != "network_access");
+        });
+        let task = access_task(&[("STREAMS", &["10.0.30.10/32"])]);
+        let t = access_transport(&without);
+        let err = task.read(&t).err().expect("an error").to_string();
+        assert!(err.contains("network_access"), "{err}");
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_cidr_is_read_the_way_python_reads_it() {
+        assert_eq!(cidr("10.0.30.10").unwrap(), "10.0.30.10/32");
+        assert_eq!(cidr(" 10.0.0.0/8 ").unwrap(), "10.0.0.0/8");
+        assert_eq!(cidr("FD00:0030:0::/64").unwrap(), "fd00:30::/64");
+        assert_eq!(cidr("::1").unwrap(), "::1/128");
+        assert_eq!(cidr("0.0.0.0/0").unwrap(), "0.0.0.0/0");
+        // ipaddress.ip_network is strict: host bits set is a ValueError, and
+        // Dispatcharr would refuse the whole setting.
+        for bad in [
+            "10.0.30.10/24",
+            "10.0.0.0/33",
+            "fd00::1/64",
+            "10.0.0/8",
+            "",
+            "a/8",
+            "10.0.0.0/",
+        ] {
+            assert!(cidr(bad).is_err(), "{bad:?}");
+        }
     }
 }

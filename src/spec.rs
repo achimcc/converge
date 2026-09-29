@@ -151,6 +151,8 @@ enum TaskName {
     M3uAccounts,
     M3uGroups,
     M3uProfiles,
+    VodCategories,
+    NetworkAccess,
     EpgSources,
     ChannelEpg,
 }
@@ -214,6 +216,8 @@ impl TaskName {
             | TaskName::M3uAccounts
             | TaskName::M3uGroups
             | TaskName::M3uProfiles
+            | TaskName::VodCategories
+            | TaskName::NetworkAccess
             | TaskName::EpgSources
             | TaskName::ChannelEpg => service == Service::Dispatcharr,
         }
@@ -782,6 +786,10 @@ pub enum DispatcharrTask {
     Groups(BTreeMap<String, BTreeMap<String, BTreeMap<String, serde_json::Value>>>),
     /// account name -> profile name -> fields (§44).
     Profiles(BTreeMap<String, BTreeMap<String, BTreeMap<String, serde_json::Value>>>),
+    /// account name -> the VOD categories that are on, per type (§46).
+    VodCategories(BTreeMap<String, crate::services::dispatcharr::VodWanted>),
+    /// area -> canonical CIDRs (§46).
+    NetworkAccess(BTreeMap<String, Vec<String>>),
     /// channel name -> what it shows: guide entry, name, logo (§34, §35).
     ChannelEpg(BTreeMap<String, crate::services::dispatcharr::ChannelLook>),
 }
@@ -1728,6 +1736,8 @@ impl Spec {
             | TaskName::M3uAccounts
             | TaskName::M3uGroups
             | TaskName::M3uProfiles
+            | TaskName::VodCategories
+            | TaskName::NetworkAccess
             | TaskName::EpgSources
             | TaskName::ChannelEpg => {
                 Desired::Dispatcharr(dispatcharr_desired(raw.task, raw.desired).map_err(invalid)?)
@@ -2297,6 +2307,8 @@ impl Spec {
                 ) => "epg-sources",
                 DispatcharrTask::Groups(_) => "m3u-groups",
                 DispatcharrTask::Profiles(_) => "m3u-profiles",
+                DispatcharrTask::VodCategories(_) => "vod-categories",
+                DispatcharrTask::NetworkAccess(_) => "network-access",
                 DispatcharrTask::ChannelEpg(_) => "channel-epg",
             },
             Desired::AuthentikSettings(_) => "settings",
@@ -2513,6 +2525,90 @@ fn dispatcharr_desired(
                 }
             }
             (d.username, DispatcharrTask::Profiles(d.accounts))
+        }
+        TaskName::VodCategories => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Lists {
+                movie: Vec<String>,
+                series: Vec<String>,
+            }
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Vod {
+                username: String,
+                accounts: BTreeMap<String, Lists>,
+            }
+            let d: Vod = serde_json::from_value(desired).map_err(parse_err)?;
+            if d.accounts.is_empty() {
+                return Err("desired.accounts names no account".to_string());
+            }
+            let mut accounts = BTreeMap::new();
+            for (account, lists) in d.accounts {
+                if account.is_empty() {
+                    return Err("desired.accounts: an account name is empty".to_string());
+                }
+                let mut sets = Vec::new();
+                for (kind, names) in [("movie", lists.movie), ("series", lists.series)] {
+                    let mut set = std::collections::BTreeSet::new();
+                    for name in names {
+                        let at = format!("desired.accounts.{account}.{kind}");
+                        if name.is_empty() {
+                            return Err(format!("{at}: a category name is empty"));
+                        }
+                        if !set.insert(name.clone()) {
+                            return Err(format!("{at}: {name} is named twice"));
+                        }
+                    }
+                    sets.push(set);
+                }
+                let series = sets.pop().unwrap_or_default();
+                let movie = sets.pop().unwrap_or_default();
+                accounts.insert(
+                    account,
+                    crate::services::dispatcharr::VodWanted { movie, series },
+                );
+            }
+            (d.username, DispatcharrTask::VodCategories(accounts))
+        }
+        TaskName::NetworkAccess => {
+            use crate::services::dispatcharr::{cidr, NETWORK_ACCESS_AREAS};
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Access {
+                username: String,
+                access: BTreeMap<String, Vec<String>>,
+            }
+            let d: Access = serde_json::from_value(desired).map_err(parse_err)?;
+            if d.access.is_empty() {
+                return Err("desired.access names no area".to_string());
+            }
+            let mut access = BTreeMap::new();
+            for (area, list) in d.access {
+                let at = format!("desired.access.{area}");
+                if !NETWORK_ACCESS_AREAS.contains(&area.as_str()) {
+                    return Err(format!(
+                        "{at}: not an area Dispatcharr asks about ({})",
+                        NETWORK_ACCESS_AREAS.join(", ")
+                    ));
+                }
+                // An empty list would be stored as "", which Dispatcharr's
+                // own check refuses as an invalid CIDR.
+                if list.is_empty() {
+                    return Err(format!(
+                        "{at} names no network (0.0.0.0/0 and ::/0 are every address)"
+                    ));
+                }
+                let mut canonical: Vec<String> = Vec::new();
+                for entry in &list {
+                    let c = cidr(entry).map_err(|why| format!("{at}: {why}"))?;
+                    if !canonical.contains(&c) {
+                        canonical.push(c);
+                    }
+                }
+                access.insert(area, canonical);
+            }
+            (d.username, DispatcharrTask::NetworkAccess(access))
         }
         TaskName::ChannelEpg => {
             #[derive(Deserialize)]
@@ -4040,6 +4136,77 @@ mod tests {
             ),
         ] {
             let err = dispatcharr("m3u-profiles", bad).unwrap_err().to_string();
+            assert!(err.contains(why), "{bad}: {err}");
+        }
+    }
+
+    #[test]
+    fn dispatcharr_vod_categories_parse_and_are_strict() {
+        let spec = dispatcharr(
+            "vod-categories",
+            r#"{"username":"c","accounts":{"Xtream":{"movie":["DE | Filme"],"series":[]}}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "vod-categories");
+        for (bad, why) in [
+            (r#"{"username":"c","accounts":{}}"#, "no account"),
+            (
+                r#"{"username":"c","accounts":{"X":{"movie":[]}}}"#,
+                "series",
+            ),
+            (
+                r#"{"username":"c","accounts":{"X":{"movie":[""],"series":[]}}}"#,
+                "empty",
+            ),
+            (
+                r#"{"username":"c","accounts":{"X":{"movie":["A","A"],"series":[]}}}"#,
+                "twice",
+            ),
+            (
+                r#"{"username":"c","accounts":{"X":{"movie":[],"series":[],"live":[]}}}"#,
+                "live",
+            ),
+        ] {
+            let err = dispatcharr("vod-categories", bad).unwrap_err().to_string();
+            assert!(err.contains(why), "{bad}: {err}");
+        }
+    }
+
+    #[test]
+    fn dispatcharr_network_access_parses_canonically_and_is_strict() {
+        let spec = dispatcharr(
+            "network-access",
+            r#"{"username":"c","access":{"STREAMS":["10.0.30.10"," 10.0.30.10/32","FD00::/8"]}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "network-access");
+        let Desired::Dispatcharr(d) = &spec.desired else {
+            panic!("not a Dispatcharr spec")
+        };
+        assert_eq!(
+            d.task,
+            DispatcharrTask::NetworkAccess(BTreeMap::from([(
+                "STREAMS".to_string(),
+                vec!["10.0.30.10/32".to_string(), "fd00::/8".to_string()]
+            )]))
+        );
+        for (bad, why) in [
+            (r#"{"username":"c","access":{}}"#, "no area"),
+            (
+                r#"{"username":"c","access":{"STREAM":["10.0.0.0/8"]}}"#,
+                "not an area",
+            ),
+            (r#"{"username":"c","access":{"UI":[]}}"#, "no network"),
+            (
+                r#"{"username":"c","access":{"UI":["10.0.30.10/24"]}}"#,
+                "host bits",
+            ),
+            (
+                r#"{"username":"c","access":{"UI":["10.0.30.10, 10.0.0.0/8"]}}"#,
+                "not an IP",
+            ),
+        ] {
+            let err = dispatcharr("network-access", bad).unwrap_err().to_string();
             assert!(err.contains(why), "{bad}: {err}");
         }
     }

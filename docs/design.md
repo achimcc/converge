@@ -2678,6 +2678,119 @@ itself. Validating rather than percent-encoding: an id that needs encoding is
 no id these services hand out, and a run that stops says so where an encoded
 one would only have been sent somewhere odd more politely.
 
+## 46. Dispatcharr: VOD categories and network access (v0.43.0, 2026-09-29)
+
+Two tasks, both read in Dispatcharr's v0.31.0 source (tag `v0.31.0`).
+
+### `vod-categories`
+
+Account name -> `movie` and `series`, each a list of category names. Exactly
+these are on for the account, every other category of it off. An Xtream
+account's categories are the provider's, and Dispatcharr switches every new
+one ON (`auto_enable_new_groups_vod` and `..._series` default to true,
+`batch_create_categories`, `apps/vod/tasks.py`, lines 293-361), so "every
+other one off" is the point, not a side effect.
+
+- **The switch is per account.** `M3UVODCategoryRelation(m3u_account,
+  category, enabled, custom_properties)` (`apps/vod/models.py`, lines
+  370-388); the category itself, `VODCategory(name, category_type)`, is
+  shared by name and type between accounts (lines 49-71).
+- **Read** through `GET /api/vod/categories/?m3u_account=<id>`
+  (`VODCategoryViewSet`, `apps/vod/api_views.py`, lines 740-820). The filter
+  (`m3u_relations__m3u_account__id`, line 733) picks categories; each answers
+  `m3u_accounts`, the relations of EVERY account (`VODCategorySerializer`,
+  `apps/vod/serializers.py`, lines 110-131: `category`, `m3u_account`,
+  `enabled`), and the account's own is the one with its id. No pagination:
+  the view sets none and the project has no default. A user whose
+  `vod_movies_enabled` or `vod_series_enabled` is off sees the other type
+  only (`get_queryset`), and a name of the hidden type is then "not found".
+- **The list request writes.** Before it answers, it makes the two
+  `Uncategorized` categories and, for every active XC account with VOD on,
+  their relations, switched on by the same default (lines 769-818). So the
+  list is never empty for such an account: one with nothing but
+  `Uncategorized` is treated as empty (`EmptyList`) -- the provider's
+  categories arrive only with a VOD refresh, and a spec against an account
+  that has not had one is an error, not "nothing to do". Dispatcharr's own
+  guard against an empty provider answer draws the same line
+  (`_empty_categories_should_abort`, `apps/vod/tasks.py`, line 20).
+  `Uncategorized` is a category like any other here: switched off unless
+  named, and titles without a category land in it.
+- **Written** through `PATCH /api/m3u/accounts/{id}/group-settings/` with
+  `{"category_settings": [{"id": <category id>, "enabled": <bool>}]}` --
+  only the categories that differ, as the web UI does
+  (`prepareCategorySettings`, `frontend/src/utils/forms/M3uGroupFilterUtils.js`).
+  The view (`update_group_settings`, `apps/m3u/api_views.py`, lines
+  481-577) upserts one relation per entry (`bulk_create`,
+  `update_conflicts`, fields `enabled` and `custom_properties`). The body has
+  NO `group_settings` key: the view reads it with a default of `[]`, and
+  with an empty list no `ChannelGroupM3UAccount` is touched -- live groups
+  stay exactly as `m3u-groups` left them. The PATCH triggers no refresh
+  itself. It sets the relation's `custom_properties` to `{}`, which is what
+  every path that makes one writes (`apps/vod/tasks.py`, lines 327-352; the
+  list, lines 800-816) and what the web UI sends.
+- **Then a refresh**: `POST /api/m3u/accounts/{id}/refresh-vod/`
+  (`refresh_vod`, lines 444-480), 202 and asynchronous. It reads the titles
+  of what is now on and, through the cleanup after the scan, drops those of
+  what is off (`refresh_vod_content`, `apps/vod/tasks.py`, line 52); it keeps
+  the switches (`bulk_create(..., ignore_conflicts=True)`, line 361). It
+  answers 400 for an account that is not XC or has VOD off -- such an account
+  has no categories and fails the read before.
+- **Read back** as for every task: the categories are read again until each
+  switch is what the spec says. The titles are not waited for.
+
+The description is wrong twice here, as for `m3u-groups` (§29): the
+group-settings PATCH is declared with a `PatchedM3UAccount` body, and
+`refresh-vod` with a required `M3UAccount` body and a 200 answer. Neither
+body is checked. `schema-check` compares the wire types `VODCategory` and
+`M3UVODCategoryRelation` with the list's answer, the spec's two types with
+the enum of `VODCategory.category_type` and `enabled` with the relation.
+
+### `network-access`
+
+Area -> a list of CIDRs. Dispatcharr asks `network_access_allowed(request,
+area)` (`dispatcharr/utils.py`, lines 181-223) in four areas: `STREAMS`
+(the live and VOD proxies, timeshift), `XC_API`, `M3U_EPG` (playlist, guide,
+HDHR) and `UI` (login and the admin permission -- the API converge uses).
+
+- **Where it is stored**: the core setting `network_access`
+  (`NETWORK_ACCESS_KEY`, `core/models.py`, line 262), its `value` an object
+  of area -> ONE string, the CIDRs joined by `,`
+  (`network_access[settings_key].split(",")`, line 192; the web UI's
+  `toStr`, `NetworkAccessForm.jsx`, line 25). Recorded on the throwaway
+  instance: the setting with id 6 and `value` `{}`.
+- **An area that is not set** falls back: `M3U_EPG` to the local networks
+  (`LOCAL_NETWORK_CIDRS`, line 15), every other area to `0.0.0.0/0,::/0`.
+  The plan says which.
+- **Strict CIDRs.** Every reader runs `ipaddress.ip_network(cidr)` over the
+  split string, strict and without trimming; the serializer refuses the
+  whole setting with 400 if one entry fails (`CoreSettingsSerializer.update`,
+  `core/serializers.py`, lines 63-87). So the spec parser takes each entry
+  the same way -- `10.0.30.10/24` is refused (host bits set), a bare address
+  becomes `/32` or `/128` -- and writes them joined by a bare `,`. An empty
+  list is refused too: it would be stored as `""`, which is an invalid CIDR.
+- **Compared** as sets of canonical CIDRs, so order, blanks and a bare
+  address against its `/32` are no difference.
+- **Written** as `stream-settings` is: the setting's whole `value` goes back
+  with the named areas replaced (`PATCH /api/core/settings/{id}/`, which
+  replaces `value`), so an area the spec does not name stays. The save
+  invalidates the settings cache (`core/signals.py`, line 69) -- the next
+  request is checked against the new lists.
+- **The setting is not created.** A migration makes it
+  (`0013_default_network_access_settings`, renamed and `get_or_create`d in
+  `0020_change_coresettings_value_to_jsonfield`, line 166) and nothing
+  deletes it; `reset_network_access` sets `value` back to `{}`. A missing
+  setting is an instance whose migrations did not run -- an error, not a
+  POST.
+- **`UI` locks converge out as well.** An allowlist that leaves out
+  converge's own address makes the read-back fail with 403; the spec, not
+  the task, has to know that address.
+
+`value` is untyped in the description, so `schema-check` has no field of
+this task to check.
+
+Not measured on the host yet: a VOD refresh after a switch, and a stream
+refused from an address outside `STREAMS`.
+
 ## 20. Not in the pilot
 
 

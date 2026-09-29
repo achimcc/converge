@@ -1,0 +1,19 @@
+[
+  {"id": 11, "name": "Action", "category_type": "movie", "category_type_display": "Movie", "m3u_accounts": [
+    {"category": 11, "m3u_account": 3, "enabled": false},
+    {"category": 11, "m3u_account": 2, "enabled": true}
+  ]},
+  {"id": 12, "name": "Dokumentation", "category_type": "movie", "category_type_display": "Movie", "m3u_accounts": [
+    {"category": 12, "m3u_account": 2, "enabled": false}
+  ]},
+  {"id": 21, "name": "Krimi", "category_type": "series", "category_type_display": "Series", "m3u_accounts": [
+    {"category": 21, "m3u_account": 2, "enabled": true}
+  ]},
+  {"id": 1, "name": "Uncategorized", "category_type": "movie", "category_type_display": "Movie", "m3u_accounts": [
+    {"category": 1, "m3u_account": 2, "enabled": true},
+    {"category": 1, "m3u_account": 3, "enabled": true}
+  ]},
+  {"id": 2, "name": "Uncategorized", "category_type": "series", "category_type_display": "Series", "m3u_accounts": [
+    {"category": 2, "m3u_account": 2, "enabled": true}
+  ]}
+]
