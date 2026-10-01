@@ -9,7 +9,7 @@
 //! created by `POST /api/auth/setup` while there is none — so the first run
 //! sets it up, and every later one signs in.
 
-use std::collections::BTreeMap;
+use std::{cell::RefCell, collections::BTreeMap};
 
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -537,6 +537,164 @@ impl Task for ImportConfig {
     }
 }
 
+// --- Prowlarr sync ----------------------------------------------------------
+
+pub const INDEXERS: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/indexers",
+    request: None,
+    response: None,
+};
+
+pub const PROWLARR_SYNC: Endpoint = Endpoint {
+    method: "POST",
+    path: "/api/indexers/prowlarr/sync",
+    request: None,
+    response: None,
+};
+
+/// The indexers of one Prowlarr, copied into Questarr.
+///
+/// Questarr does not keep the connection: a sync is one request that reads
+/// Prowlarr's indexers and stores each as an indexer of its own, with the
+/// URL `<Prowlarr>/<id>/api` and Prowlarr's key. So the state can only be
+/// read off the indexers -- "none of them comes from this Prowlarr" is the
+/// one difference a plan can see. The key is answered masked; every apply
+/// syncs once, which hands the key over again and picks up indexers Prowlarr
+/// has gained since.
+pub struct ProwlarrSync {
+    /// Prowlarr's base URL as Questarr reaches it, without a trailing slash.
+    pub url: String,
+    pub api_key: Secret,
+    /// What this run's sync answered, so an apply syncs once, not twice.
+    pub synced: RefCell<Option<String>>,
+}
+
+#[derive(Deserialize)]
+struct SyncAnswer {
+    success: bool,
+    results: SyncResults,
+}
+
+/// `errors` is not read: it is Questarr's own text about a request to
+/// Prowlarr, and such a request carries the key in its URL.
+#[derive(Deserialize)]
+struct SyncResults {
+    added: u64,
+    updated: u64,
+    failed: u64,
+}
+
+impl ProwlarrSync {
+    const SUBJECT: &'static str = "Prowlarr sync";
+
+    /// Whether an indexer was copied from this Prowlarr: its URL is
+    /// `<Prowlarr>/<id>/api`. The slash keeps `…:599` from matching `…:5998`.
+    fn came_from_here(&self, entry: &Map<String, Value>) -> bool {
+        entry
+            .get("url")
+            .and_then(Value::as_str)
+            .is_some_and(|url| url.starts_with(&format!("{}/", self.url)))
+    }
+
+    /// One sync. The line it returns is what the run reports as handed over.
+    fn sync(&self, t: &dyn Transport) -> Result<String, Error> {
+        let path = PROWLARR_SYNC.path;
+        let mut body = Map::new();
+        body.insert("url".to_string(), Value::from(self.url.clone()));
+        body.insert("apiKey".to_string(), Value::from(self.api_key.expose()));
+        let reply = t.post_json(path, &text_of("POST", path, &body)?)?;
+        expect_status_at("POST", path, &reply, &[200])?;
+        let answer: SyncAnswer = serde_json::from_str(&reply.body).map_err(|e| Error::Decode {
+            path: path.to_string(),
+            reason: crate::error::shape(&e),
+        })?;
+        if !answer.success || answer.results.failed > 0 {
+            return Err(Error::Refused(format!(
+                "{}: {} indexer(s) could not be synced ({} added, {} updated); Questarr's log says why",
+                Self::SUBJECT,
+                answer.results.failed,
+                answer.results.added,
+                answer.results.updated
+            )));
+        }
+        let line = format!(
+            "{}: {} added, {} updated; apiKey handed over from credentials (write-only)",
+            Self::SUBJECT,
+            answer.results.added,
+            answer.results.updated
+        );
+        *self.synced.borrow_mut() = Some(line.clone());
+        Ok(line)
+    }
+}
+
+impl Task for ProwlarrSync {
+    type Current = Vec<Map<String, Value>>;
+
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        probe(t)
+    }
+
+    /// An empty list is a valid answer: nothing was synced yet.
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        let path = INDEXERS.path;
+        let reply = t.get(path)?;
+        expect_status_at("GET", path, &reply, &[200])?;
+        let entries: Vec<Map<String, Value>> = serde_json::from_value(decode(path, &reply.body)?)
+            .map_err(|e| Error::Decode {
+            path: path.to_string(),
+            reason: crate::error::shape(&e),
+        })?;
+        if let Some(index) = entries
+            .iter()
+            .position(|e| e.get("name").and_then(Value::as_str).is_none())
+        {
+            return Err(Error::MissingName {
+                path: path.to_string(),
+                index,
+            });
+        }
+        Ok(entries)
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        if current.iter().any(|e| self.came_from_here(e)) {
+            return Ok(Vec::new());
+        }
+        Ok(vec![Change {
+            subject: Self::SUBJECT.to_string(),
+            field: String::new(),
+            current: "(none synced)".to_string(),
+            desired: "(synced from Prowlarr)".to_string(),
+        }])
+    }
+
+    fn notes(&self, current: &Self::Current) -> Vec<String> {
+        current
+            .iter()
+            .filter(|e| !self.came_from_here(e))
+            .filter_map(|e| e.get("name").and_then(Value::as_str))
+            .map(|name| format!("not from this Prowlarr: indexer {name}"))
+            .collect()
+    }
+
+    fn write(&self, t: &dyn Transport, _current: &Self::Current) -> Result<(), Error> {
+        self.sync(t).map(|_| ())
+    }
+
+    /// Every apply syncs once: the key is answered masked, so a rotated one
+    /// can only arrive by being sent again -- and Prowlarr may have gained
+    /// indexers. A run whose write has just synced does not sync twice.
+    fn hand_over(&self, t: &dyn Transport, _current: &Self::Current) -> Result<Vec<String>, Error> {
+        let already = self.synced.borrow().clone();
+        match already {
+            Some(line) => Ok(vec![line]),
+            None => Ok(vec![self.sync(t)?]),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1049,6 +1207,167 @@ mod tests {
             .unwrap();
         assert!(
             matches!(error, Error::Status { status: 400, .. }),
+            "{error}"
+        );
+    }
+
+    // --- Prowlarr sync ------------------------------------------------------
+
+    const NO_INDEXERS: &str =
+        include_str!("../../tests/fixtures/questarr-1.4.2/indexers-empty.json");
+    const INDEXERS_SYNCED: &str = include_str!("../../tests/fixtures/questarr-1.4.2/indexers.json");
+    const SYNC_ANSWER: &str =
+        include_str!("../../tests/fixtures/questarr-1.4.2/prowlarr-sync-answer.json");
+    const SYNC_AGAIN: &str =
+        include_str!("../../tests/fixtures/questarr-1.4.2/prowlarr-sync-answer-again.json");
+    const SYNC_UNREACHABLE: &str =
+        include_str!("../../tests/fixtures/questarr-1.4.2/prowlarr-sync-unreachable.json");
+
+    /// The stub the fixtures were recorded against.
+    const PROWLARR: &str = "http://127.0.0.1:5998";
+    const PROWLARR_KEY: &str = "prowlarr-key-5a7d2e-never-print-me";
+
+    fn sync_of(url: &str) -> ProwlarrSync {
+        ProwlarrSync {
+            url: url.to_string(),
+            api_key: Secret::new(PROWLARR_KEY.to_string()),
+            synced: RefCell::new(None),
+        }
+    }
+
+    fn indexers(lists: Vec<Step>) -> FakeTransport {
+        FakeTransport::default()
+            .on_get("/api/health", vec![ok(HEALTH_OK)])
+            .on_get("/api/indexers", lists)
+    }
+
+    #[test]
+    fn a_questarr_without_indexers_is_synced_once_and_read_back() {
+        let task = sync_of(PROWLARR);
+        let t = indexers(vec![ok(NO_INDEXERS), ok(INDEXERS_SYNCED)]).on_put(vec![ok(SYNC_ANSWER)]);
+        let report = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        let Outcome::Changed(changes) = &report.outcome else {
+            panic!("{:?}", report.outcome)
+        };
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].subject, "Prowlarr sync");
+        assert_eq!(
+            (changes[0].current.as_str(), changes[0].desired.as_str()),
+            ("(none synced)", "(synced from Prowlarr)")
+        );
+        // ONE request: the write's sync is also this run's hand-over.
+        assert_eq!(t.written.borrow().len(), 1);
+        let (path, body) = sent(&t, 0);
+        assert_eq!(path, "/api/indexers/prowlarr/sync");
+        assert_eq!(body, json!({"url": PROWLARR, "apiKey": PROWLARR_KEY}));
+        assert_eq!(
+            report.handed_over,
+            ["Prowlarr sync: 2 added, 0 updated; apiKey handed over from credentials (write-only)"]
+        );
+        let printed = format!("{changes:?} {:?} {:?}", report.notes, report.handed_over);
+        assert!(!printed.contains(PROWLARR_KEY), "{printed}");
+    }
+
+    #[test]
+    fn a_synced_questarr_is_unchanged_and_every_apply_syncs_once_more() {
+        let task = sync_of(PROWLARR);
+        let t = indexers(vec![ok(INDEXERS_SYNCED)]).on_put(vec![ok(SYNC_AGAIN)]);
+        let report = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        assert_eq!(report.outcome, Outcome::Unchanged);
+        assert_eq!(t.written.borrow().len(), 1);
+        assert_eq!(
+            report.handed_over,
+            ["Prowlarr sync: 0 added, 2 updated; apiKey handed over from credentials (write-only)"]
+        );
+    }
+
+    #[test]
+    fn a_plan_sees_only_whether_anything_was_synced_and_writes_nothing() {
+        let t = indexers(vec![ok(INDEXERS_SYNCED)]);
+        let report = run(
+            Mode::Plan,
+            &sync_of(PROWLARR),
+            &t,
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .unwrap();
+        assert_eq!(report.outcome, Outcome::Unchanged);
+        assert!(t.written.borrow().is_empty());
+
+        let t = indexers(vec![ok(NO_INDEXERS)]);
+        let report = run(
+            Mode::Plan,
+            &sync_of(PROWLARR),
+            &t,
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .unwrap();
+        assert!(matches!(report.outcome, Outcome::Differs(ref c) if c.len() == 1));
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn indexers_of_another_prowlarr_do_not_count_as_synced() {
+        // The same host, another port: a prefix without the slash would match.
+        let t = indexers(vec![ok(INDEXERS_SYNCED)]);
+        let report = run(
+            Mode::Plan,
+            &sync_of("http://127.0.0.1:599"),
+            &t,
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .unwrap();
+        assert!(matches!(report.outcome, Outcome::Differs(_)));
+        assert_eq!(
+            report.notes,
+            [
+                "not from this Prowlarr: indexer Fixture Usenet",
+                "not from this Prowlarr: indexer Fixture Torrent"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_sync_that_lost_indexers_is_an_error_that_shows_only_their_number() {
+        // What Questarr puts into `errors` is its own text about a request to
+        // Prowlarr; it is counted, never printed.
+        let answer = json!({"success": true, "message": "x",
+            "results": {"added": 1, "updated": 0, "failed": 1,
+                        "errors": [format!("request to {PROWLARR}/2/api?apikey={PROWLARR_KEY} failed")]}})
+        .to_string();
+        let t = indexers(vec![ok(NO_INDEXERS)]).on_put(vec![ok(&answer)]);
+        let error = run(
+            Mode::Apply,
+            &sync_of(PROWLARR),
+            &t,
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .err()
+        .unwrap();
+        let text = error.to_string();
+        assert!(text.contains("1 indexer(s) could not be synced"), "{text}");
+        assert!(!text.contains(PROWLARR_KEY), "{text}");
+    }
+
+    #[test]
+    fn an_unreachable_prowlarr_is_questarrs_500() {
+        let t = indexers(vec![ok(NO_INDEXERS)])
+            .on_put(vec![Step::Answer(500, SYNC_UNREACHABLE.into())]);
+        let error = run(
+            Mode::Apply,
+            &sync_of(PROWLARR),
+            &t,
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .err()
+        .unwrap();
+        assert!(
+            matches!(error, Error::Status { status: 500, .. }),
             "{error}"
         );
     }

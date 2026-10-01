@@ -277,6 +277,14 @@ fn reconcile_one(
                 };
                 run(mode, &task, &transport, &SystemClock, timing)
             }
+            QuestarrTask::ProwlarrSync { url, api_key } => {
+                let task = questarr::ProwlarrSync {
+                    url: url.clone(),
+                    api_key: read_credential(credentials, api_key).map_err(fail)?,
+                    synced: std::cell::RefCell::new(None),
+                };
+                run(mode, &task, &transport, &SystemClock, timing)
+            }
         },
         Desired::Dispatcharr(desired) => match &desired.task {
             DispatcharrTask::StreamSettings {

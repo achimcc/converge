@@ -160,6 +160,7 @@ enum TaskName {
     EpgSources,
     ChannelEpg,
     ImportConfig,
+    ProwlarrSync,
 }
 
 impl TaskName {
@@ -228,7 +229,7 @@ impl TaskName {
             | TaskName::NetworkAccess
             | TaskName::EpgSources
             | TaskName::ChannelEpg => service == Service::Dispatcharr,
-            TaskName::ImportConfig => service == Service::Questarr,
+            TaskName::ImportConfig | TaskName::ProwlarrSync => service == Service::Questarr,
         }
     }
 }
@@ -788,6 +789,9 @@ pub enum QuestarrTask {
     DownloadClients(BTreeMap<String, QuestarrClient>),
     /// Fields of the signed-in account's import configuration.
     ImportConfig(BTreeMap<String, serde_json::Value>),
+    /// The Prowlarr whose indexers Questarr copies: its base URL as Questarr
+    /// reaches it, and the credential that holds its API key.
+    ProwlarrSync { url: String, api_key: String },
 }
 
 /// One download client: its fields, and the fields whose value comes from a
@@ -1225,7 +1229,7 @@ impl Spec {
             TaskName::DownloadClients if raw.service == Service::Questarr => {
                 Desired::Questarr(questarr_desired(raw.task, raw.desired).map_err(invalid)?)
             }
-            TaskName::ImportConfig => {
+            TaskName::ImportConfig | TaskName::ProwlarrSync => {
                 Desired::Questarr(questarr_desired(raw.task, raw.desired).map_err(invalid)?)
             }
             TaskName::DownloadClients | TaskName::RootFolders | TaskName::ProwlarrInstances
@@ -2372,6 +2376,7 @@ impl Spec {
             Desired::Questarr(ref d) => match &d.task {
                 QuestarrTask::DownloadClients(_) => "download-clients",
                 QuestarrTask::ImportConfig(_) => "import-config",
+                QuestarrTask::ProwlarrSync { .. } => "prowlarr-sync",
             },
             Desired::AuthentikSettings(_) => "settings",
         }
@@ -2524,6 +2529,40 @@ fn questarr_desired(task: TaskName, desired: serde_json::Value) -> Result<Questa
             Ok(QuestarrDesired {
                 username: d.username,
                 task: QuestarrTask::ImportConfig(d.config),
+            })
+        }
+        TaskName::ProwlarrSync => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Sync {
+                username: String,
+                url: String,
+                secret_fields: BTreeMap<String, String>,
+            }
+            let d: Sync = serde_json::from_value(desired).map_err(|e| format!("desired: {e}"))?;
+            username_ok(&d.username)?;
+            if padded(&d.url) {
+                return Err("desired.url has surrounding whitespace".to_string());
+            }
+            if !(d.url.starts_with("http://") || d.url.starts_with("https://")) {
+                return Err("desired.url must start with http:// or https://".to_string());
+            }
+            // Questarr strips the slash before it builds `<url>/<id>/api`; a
+            // spec that kept it would never recognise what was synced.
+            if d.url.ends_with('/') {
+                return Err("desired.url must not end with a slash".to_string());
+            }
+            let api_key = match (d.secret_fields.len(), d.secret_fields.get("apiKey")) {
+                (1, Some(credential)) => credential.clone(),
+                _ => return Err("desired.secret_fields must name exactly apiKey".to_string()),
+            };
+            credential_name(&api_key, "desired.secret_fields.apiKey")?;
+            Ok(QuestarrDesired {
+                username: d.username,
+                task: QuestarrTask::ProwlarrSync {
+                    url: d.url,
+                    api_key,
+                },
             })
         }
         other => Err(format!("{other:?} is not a Questarr task")),
@@ -5003,5 +5042,66 @@ mod tests {
             r#"{"username":"","config":{"autoUnpack":true}}"#,
         );
         assert!(no_user.is_err(), "empty username");
+    }
+
+    #[test]
+    fn questarr_prowlarr_sync_parses_with_its_account() {
+        let spec = questarr(
+            "prowlarr-sync",
+            r#"{"username":"achim","url":"http://10.0.10.10:9696","secret_fields":{"apiKey":"prowlarr-api-key"}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "prowlarr-sync");
+        let Desired::Questarr(d) = &spec.desired else {
+            panic!("not a Questarr spec")
+        };
+        let QuestarrTask::ProwlarrSync { url, api_key } = &d.task else {
+            panic!("not the Prowlarr sync")
+        };
+        assert_eq!(url, "http://10.0.10.10:9696");
+        assert_eq!(api_key, "prowlarr-api-key");
+    }
+
+    #[test]
+    fn questarr_prowlarr_sync_is_strict() {
+        let refused = |rest: &str| {
+            questarr(
+                "prowlarr-sync",
+                &format!(r#"{{"username":"achim",{rest}}}"#),
+            )
+            .unwrap_err()
+            .to_string()
+        };
+        let key = r#""secret_fields":{"apiKey":"prowlarr-api-key"}"#;
+        // Questarr strips the slash before it builds an indexer's URL, so a
+        // spec that keeps it would never recognise what it synced.
+        let text = refused(&format!(r#""url":"http://10.0.10.10:9696/",{key}"#));
+        assert!(text.contains("url must not end with a slash"), "{text}");
+        let text = refused(&format!(r#""url":"10.0.10.10:9696",{key}"#));
+        assert!(
+            text.contains("url must start with http:// or https://"),
+            "{text}"
+        );
+        let text = refused(&format!(r#""url":" http://10.0.10.10:9696",{key}"#));
+        assert!(text.contains("url has surrounding whitespace"), "{text}");
+        let text = refused(r#""url":"http://10.0.10.10:9696","secret_fields":{}"#);
+        assert!(
+            text.contains("secret_fields must name exactly apiKey"),
+            "{text}"
+        );
+        let text = refused(
+            r#""url":"http://10.0.10.10:9696","secret_fields":{"apiKey":"k","password":"p"}"#,
+        );
+        assert!(
+            text.contains("secret_fields must name exactly apiKey"),
+            "{text}"
+        );
+        let text = refused(r#""url":"http://10.0.10.10:9696","secret_fields":{"apiKey":"a/b"}"#);
+        assert!(text.contains("not a credential name"), "{text}");
+        // The key itself has no place in a spec.
+        let text = refused(&format!(
+            r#""url":"http://10.0.10.10:9696","apiKey":"x",{key}"#
+        ));
+        assert!(text.contains("unknown field"), "{text}");
     }
 }
