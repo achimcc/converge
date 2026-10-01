@@ -429,6 +429,114 @@ impl Task for DownloadClients {
     }
 }
 
+// --- import configuration ---------------------------------------------------
+
+pub const IMPORT_CONFIG: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/imports/config",
+    request: None,
+    response: None,
+};
+
+/// The fields of the import configuration (`importConfigPatchSchema`,
+/// `server/routes/import.ts`). Questarr refuses any other key.
+pub const IMPORT_CONFIG_FIELDS: [&str; 10] = [
+    "enablePostProcessing",
+    "autoUnpack",
+    "renamePattern",
+    "overwriteExisting",
+    "transferMode",
+    "importPlatformIds",
+    "ignoredExtensions",
+    "minFileSize",
+    "libraryRoot",
+    "autoDeleteAfterImport",
+];
+
+pub const TRANSFER_MODES: [&str; 4] = ["move", "copy", "hardlink", "symlink"];
+
+/// The import configuration of the account that signed in: where finished
+/// downloads go and how. It is kept per user, so it is the signed-in
+/// account's that is read and written.
+pub struct ImportConfig {
+    pub config: BTreeMap<String, Value>,
+}
+
+impl ImportConfig {
+    const SUBJECT: &'static str = "import configuration";
+
+    /// The change lines and the body a `PATCH` has to carry: what differs,
+    /// and nothing else.
+    fn changes_of(
+        &self,
+        current: &Map<String, Value>,
+        missing: &mut Vec<String>,
+    ) -> (Vec<Change>, Map<String, Value>) {
+        let (mut changes, mut body) = (Vec::new(), Map::new());
+        for (field, desired) in &self.config {
+            match current.get(field) {
+                None => missing.push(format!("{}: {field}", Self::SUBJECT)),
+                Some(now) if now != desired => {
+                    changes.push(Change {
+                        subject: Self::SUBJECT.to_string(),
+                        field: field.clone(),
+                        current: shortened(now),
+                        desired: shortened(desired),
+                    });
+                    body.insert(field.clone(), desired.clone());
+                }
+                Some(_) => {}
+            }
+        }
+        (changes, body)
+    }
+}
+
+impl Task for ImportConfig {
+    type Current = Map<String, Value>;
+
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        probe(t)
+    }
+
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        let path = IMPORT_CONFIG.path;
+        let reply = t.get(path)?;
+        expect_status_at("GET", path, &reply, &[200])?;
+        serde_json::from_value(decode(path, &reply.body)?).map_err(|e| Error::Decode {
+            path: path.to_string(),
+            reason: crate::error::shape(&e),
+        })
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        let mut missing = Vec::new();
+        let (changes, _) = self.changes_of(current, &mut missing);
+        if !missing.is_empty() {
+            return Err(Error::MissingField(missing));
+        }
+        Ok(changes)
+    }
+
+    fn notes(&self, _current: &Self::Current) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// One `PATCH` with the differing fields. Questarr validates it strictly
+    /// (an unknown key or a transfer mode it does not know is a 400) and
+    /// leaves every field the body omits.
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        let mut missing = Vec::new();
+        let (_, body) = self.changes_of(current, &mut missing);
+        if body.is_empty() {
+            return Ok(());
+        }
+        let path = IMPORT_CONFIG.path;
+        let reply = t.patch_json(path, &text_of("PATCH", path, &body)?)?;
+        expect_status_at("PATCH", path, &reply, &[200])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -836,5 +944,112 @@ mod tests {
         let error = apply(&task, &t).err().unwrap();
         assert!(matches!(error, Error::Decode { .. }), "{error}");
         assert!(t.written.borrow().is_empty());
+    }
+
+    // --- import configuration -----------------------------------------------
+
+    const IMPORT_DEFAULT: &str =
+        include_str!("../../tests/fixtures/questarr-1.4.2/imports-config-default.json");
+    const IMPORT_SET: &str =
+        include_str!("../../tests/fixtures/questarr-1.4.2/imports-config-set.json");
+    const IMPORT_REFUSED: &str =
+        include_str!("../../tests/fixtures/questarr-1.4.2/imports-config-refused.json");
+
+    fn hosts_import() -> ImportConfig {
+        ImportConfig {
+            config: map(json!({
+                "enablePostProcessing": true,
+                "autoUnpack": true,
+                "transferMode": "copy",
+                "libraryRoot": "/tank/spiele/roms",
+                "autoDeleteAfterImport": false,
+                "overwriteExisting": false
+            })),
+        }
+    }
+
+    fn import(configs: Vec<Step>) -> FakeTransport {
+        FakeTransport::default()
+            .on_get("/api/health", vec![ok(HEALTH_OK)])
+            .on_get("/api/imports/config", configs)
+    }
+
+    #[test]
+    fn a_fresh_import_configuration_gets_only_what_differs() {
+        // Questarr's defaults: post-processing off, hardlink, /data.
+        let task = hosts_import();
+        let t = import(vec![ok(IMPORT_DEFAULT), ok(IMPORT_SET)]).on_put(vec![ok(IMPORT_SET)]);
+        let report = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        let Outcome::Changed(changes) = &report.outcome else {
+            panic!("{:?}", report.outcome)
+        };
+        let fields: Vec<&str> = changes.iter().map(|c| c.field.as_str()).collect();
+        assert_eq!(
+            fields,
+            [
+                "autoUnpack",
+                "enablePostProcessing",
+                "libraryRoot",
+                "transferMode"
+            ]
+        );
+        assert!(changes.iter().all(|c| c.subject == "import configuration"));
+        let root = changes.iter().find(|c| c.field == "libraryRoot").unwrap();
+        assert_eq!(
+            (root.current.as_str(), root.desired.as_str()),
+            ("\"/data\"", "\"/tank/spiele/roms\"")
+        );
+
+        assert_eq!(t.written.borrow().len(), 1);
+        let (path, body) = sent(&t, 0);
+        assert_eq!(path, "/api/imports/config");
+        assert_eq!(
+            body,
+            json!({"enablePostProcessing": true, "autoUnpack": true,
+                   "transferMode": "copy", "libraryRoot": "/tank/spiele/roms"})
+        );
+        assert_eq!(*t.calls.borrow(), [("PATCH", path)]);
+    }
+
+    #[test]
+    fn a_matching_import_configuration_is_left_alone() {
+        let task = hosts_import();
+        let t = import(vec![ok(IMPORT_SET)]);
+        let report = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        assert_eq!(report.outcome, Outcome::Unchanged);
+        assert!(report.handed_over.is_empty());
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn an_import_field_questarr_does_not_answer_is_not_a_change() {
+        let mut task = hosts_import();
+        task.config.insert("libraryroot".to_string(), json!("/x"));
+        let t = import(vec![ok(IMPORT_DEFAULT)]);
+        let error = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default())
+            .err()
+            .unwrap();
+        assert!(matches!(error, Error::MissingField(_)), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("import configuration: libraryroot"),
+            "{error}"
+        );
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_refused_import_configuration_is_an_error_with_its_status() {
+        let task = hosts_import();
+        let t =
+            import(vec![ok(IMPORT_DEFAULT)]).on_put(vec![Step::Answer(400, IMPORT_REFUSED.into())]);
+        let error = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default())
+            .err()
+            .unwrap();
+        assert!(
+            matches!(error, Error::Status { status: 400, .. }),
+            "{error}"
+        );
     }
 }

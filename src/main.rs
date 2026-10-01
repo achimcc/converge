@@ -271,6 +271,12 @@ fn reconcile_one(
                 let task = questarr::DownloadClients { clients: targets };
                 run(mode, &task, &transport, &SystemClock, timing)
             }
+            QuestarrTask::ImportConfig(config) => {
+                let task = questarr::ImportConfig {
+                    config: config.clone(),
+                };
+                run(mode, &task, &transport, &SystemClock, timing)
+            }
         },
         Desired::Dispatcharr(desired) => match &desired.task {
             DispatcharrTask::StreamSettings {

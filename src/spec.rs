@@ -159,6 +159,7 @@ enum TaskName {
     NetworkAccess,
     EpgSources,
     ChannelEpg,
+    ImportConfig,
 }
 
 impl TaskName {
@@ -227,6 +228,7 @@ impl TaskName {
             | TaskName::NetworkAccess
             | TaskName::EpgSources
             | TaskName::ChannelEpg => service == Service::Dispatcharr,
+            TaskName::ImportConfig => service == Service::Questarr,
         }
     }
 }
@@ -784,6 +786,8 @@ pub struct QuestarrDesired {
 pub enum QuestarrTask {
     /// Download clients by name.
     DownloadClients(BTreeMap<String, QuestarrClient>),
+    /// Fields of the signed-in account's import configuration.
+    ImportConfig(BTreeMap<String, serde_json::Value>),
 }
 
 /// One download client: its fields, and the fields whose value comes from a
@@ -1219,6 +1223,9 @@ impl Spec {
         let desired = match raw.task {
             // Before the arms that share the task's name: Questarr's own shape.
             TaskName::DownloadClients if raw.service == Service::Questarr => {
+                Desired::Questarr(questarr_desired(raw.task, raw.desired).map_err(invalid)?)
+            }
+            TaskName::ImportConfig => {
                 Desired::Questarr(questarr_desired(raw.task, raw.desired).map_err(invalid)?)
             }
             TaskName::DownloadClients | TaskName::RootFolders | TaskName::ProwlarrInstances
@@ -2364,6 +2371,7 @@ impl Spec {
             },
             Desired::Questarr(ref d) => match &d.task {
                 QuestarrTask::DownloadClients(_) => "download-clients",
+                QuestarrTask::ImportConfig(_) => "import-config",
             },
             Desired::AuthentikSettings(_) => "settings",
         }
@@ -2447,6 +2455,75 @@ fn questarr_desired(task: TaskName, desired: serde_json::Value) -> Result<Questa
             Ok(QuestarrDesired {
                 username: d.username,
                 task: QuestarrTask::DownloadClients(d.clients),
+            })
+        }
+        TaskName::ImportConfig => {
+            use crate::services::questarr::{IMPORT_CONFIG_FIELDS, TRANSFER_MODES};
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Import {
+                username: String,
+                config: BTreeMap<String, serde_json::Value>,
+            }
+            let d: Import = serde_json::from_value(desired).map_err(|e| format!("desired: {e}"))?;
+            username_ok(&d.username)?;
+            if d.config.is_empty() {
+                return Err("desired.config names no field".to_string());
+            }
+            // Questarr answers what follows with a 400; said here, a typo
+            // stops the build instead of the unit.
+            for (field, value) in &d.config {
+                let at = "desired.config";
+                let text_within = |limit: usize| {
+                    value
+                        .as_str()
+                        .is_some_and(|t| !t.is_empty() && t.chars().count() <= limit)
+                };
+                if value.as_str().is_some_and(padded) {
+                    return Err(format!("{at}: {field} has surrounding whitespace"));
+                }
+                let fault = match field.as_str() {
+                    "enablePostProcessing"
+                    | "autoUnpack"
+                    | "overwriteExisting"
+                    | "autoDeleteAfterImport" => {
+                        (!value.is_boolean()).then(|| "must be true or false".to_string())
+                    }
+                    "transferMode" => {
+                        (!value.as_str().is_some_and(|m| TRANSFER_MODES.contains(&m)))
+                            .then(|| format!("is not one of {}", TRANSFER_MODES.join(", ")))
+                    }
+                    "libraryRoot" => (!text_within(1024))
+                        .then(|| "must be a text of 1 to 1024 characters".to_string()),
+                    "renamePattern" => (!text_within(200))
+                        .then(|| "must be a text of 1 to 200 characters".to_string()),
+                    "importPlatformIds" => (!value.as_array().is_some_and(|ids| {
+                        ids.iter().all(|id| id.as_u64().is_some_and(|n| n >= 1))
+                    }))
+                    .then(|| "must be a list of IGDB platform ids (integers from 1)".to_string()),
+                    "ignoredExtensions" => (!value.as_array().is_some_and(|all| {
+                        all.iter()
+                            .all(|e| e.as_str().is_some_and(|t| !t.is_empty()))
+                    }))
+                    .then(|| "must be a list of non-empty texts".to_string()),
+                    "minFileSize" => {
+                        (value.as_u64().is_none()).then(|| "must be an integer from 0".to_string())
+                    }
+                    other => {
+                        debug_assert!(!IMPORT_CONFIG_FIELDS.contains(&other));
+                        Some(format!(
+                            "is not a field of the import configuration ({})",
+                            IMPORT_CONFIG_FIELDS.join(", ")
+                        ))
+                    }
+                };
+                if let Some(fault) = fault {
+                    return Err(format!("{at}: {field} {fault}"));
+                }
+            }
+            Ok(QuestarrDesired {
+                username: d.username,
+                task: QuestarrTask::ImportConfig(d.config),
             })
         }
         other => Err(format!("{other:?} is not a Questarr task")),
@@ -4765,7 +4842,9 @@ mod tests {
             panic!("not a Questarr spec")
         };
         assert_eq!(d.username, "achim");
-        let QuestarrTask::DownloadClients(clients) = &d.task;
+        let QuestarrTask::DownloadClients(clients) = &d.task else {
+            panic!("not the download clients")
+        };
         assert_eq!(clients.len(), 2);
         assert_eq!(
             clients["sabnzbd"].secret_fields["username"],
@@ -4840,5 +4919,89 @@ mod tests {
             r#"{"service":"questarr","base_url":"http://x","api_key_credential":"k","task":"quality-profiles","desired":{}}"#,
         );
         assert!(wrong.is_err());
+    }
+
+    #[test]
+    fn questarr_import_config_parses_with_its_account() {
+        let spec = questarr(
+            "import-config",
+            r#"{"username":"achim","config":{"enablePostProcessing":true,"autoUnpack":true,
+                "transferMode":"copy","libraryRoot":"/tank/spiele/roms",
+                "autoDeleteAfterImport":false,"overwriteExisting":false}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "import-config");
+        let Desired::Questarr(d) = &spec.desired else {
+            panic!("not a Questarr spec")
+        };
+        assert_eq!(d.username, "achim");
+        let QuestarrTask::ImportConfig(config) = &d.task else {
+            panic!("not the import configuration")
+        };
+        assert_eq!(config.len(), 6);
+        assert_eq!(config["transferMode"], "copy");
+    }
+
+    #[test]
+    fn questarr_import_config_is_strict() {
+        let refused = |config: &str| {
+            questarr(
+                "import-config",
+                &format!(r#"{{"username":"achim","config":{config}}}"#),
+            )
+            .unwrap_err()
+            .to_string()
+        };
+        let text = refused("{}");
+        assert!(text.contains("names no field"), "{text}");
+        // Questarr answers an unknown key with 400; the build says so earlier.
+        let text = refused(r#"{"libraryroot":"/x"}"#);
+        assert!(
+            text.contains("libraryroot is not a field of the import configuration"),
+            "{text}"
+        );
+        let text = refused(r#"{"transferMode":"teleport"}"#);
+        assert!(
+            text.contains("transferMode is not one of move, copy, hardlink, symlink"),
+            "{text}"
+        );
+        let text = refused(r#"{"enablePostProcessing":"true"}"#);
+        assert!(
+            text.contains("enablePostProcessing must be true or false"),
+            "{text}"
+        );
+        let text = refused(r#"{"libraryRoot":" /tank/spiele/roms"}"#);
+        assert!(
+            text.contains("libraryRoot has surrounding whitespace"),
+            "{text}"
+        );
+        let text = refused(r#"{"libraryRoot":""}"#);
+        assert!(
+            text.contains("libraryRoot must be a text of 1 to 1024 characters"),
+            "{text}"
+        );
+        let text = refused(r#"{"importPlatformIds":[0]}"#);
+        assert!(
+            text.contains(
+                "importPlatformIds must be a list of IGDB platform ids (integers from 1)"
+            ),
+            "{text}"
+        );
+        let text = refused(r#"{"ignoredExtensions":[""]}"#);
+        assert!(
+            text.contains("ignoredExtensions must be a list of non-empty texts"),
+            "{text}"
+        );
+        let text = refused(r#"{"minFileSize":-1}"#);
+        assert!(
+            text.contains("minFileSize must be an integer from 0"),
+            "{text}"
+        );
+
+        let no_user = questarr(
+            "import-config",
+            r#"{"username":"","config":{"autoUnpack":true}}"#,
+        );
+        assert!(no_user.is_err(), "empty username");
     }
 }
