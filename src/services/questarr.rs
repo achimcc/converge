@@ -9,13 +9,15 @@
 //! created by `POST /api/auth/setup` while there is none — so the first run
 //! sets it up, and every later one signs in.
 
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Map, Value};
 
 use crate::{
     client::{expect_status_at, Transport},
-    endpoint::Endpoint,
-    engine::Probe,
+    endpoint::{is_path_segment, Endpoint},
+    engine::{shortened, Change, Probe, Task},
     error::Error,
     secret::Secret,
 };
@@ -154,6 +156,276 @@ pub fn sign_in(t: &dyn Transport, username: &str, password: &Secret) -> Result<S
             expect_status_at(LOGIN.method, LOGIN.path, &reply, &[200])?;
             token_of(&LOGIN, &reply.body)
         }
+    }
+}
+
+// --- download clients -------------------------------------------------------
+
+pub const DOWNLOADERS: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/downloaders",
+    request: None,
+    response: None,
+};
+
+/// How a stored download-client password is answered: never the value.
+const MASKED: &str = "********";
+
+/// One download client the spec declares, its secrets read from credentials.
+///
+/// `secrets` may hold `username` and `password`. SABnzbd's API key lives in
+/// `username` (Questarr has no key column) and is answered in clear, so it is
+/// compared, unseen. A `password` is answered as `********` and handed over on
+/// every apply.
+pub struct ClientTarget {
+    pub name: String,
+    pub set: BTreeMap<String, Value>,
+    pub secrets: BTreeMap<String, Secret>,
+}
+
+pub struct DownloadClients {
+    pub clients: Vec<ClientTarget>,
+}
+
+fn decode(path: &str, body: &str) -> Result<Value, Error> {
+    serde_json::from_str(body).map_err(|e| Error::Decode {
+        path: path.to_string(),
+        reason: crate::error::shape(&e),
+    })
+}
+
+/// A body that may hold a secret: a serializing error names the path only.
+fn text_of(method: &'static str, path: &str, body: &Map<String, Value>) -> Result<String, Error> {
+    serde_json::to_string(body).map_err(|_| Error::Request {
+        method,
+        path: path.to_string(),
+        reason: "cannot serialize the body".to_string(),
+    })
+}
+
+impl DownloadClients {
+    fn subject(name: &str) -> String {
+        format!("download client {name}")
+    }
+
+    /// The one entry of that name. Questarr has no unique index on `name`, so
+    /// two of them are refused rather than one of them picked.
+    fn find<'a>(
+        current: &'a [Map<String, Value>],
+        name: &str,
+    ) -> Result<Option<&'a Map<String, Value>>, Error> {
+        let mut found = current
+            .iter()
+            .filter(|e| e.get("name").and_then(Value::as_str) == Some(name));
+        let first = found.next();
+        let others = found.count();
+        if others > 0 {
+            return Err(Error::Mismatch(vec![format!(
+                "{} exists {} times in Questarr; the spec cannot say which one it means",
+                Self::subject(name),
+                others + 1
+            )]));
+        }
+        Ok(first)
+    }
+
+    /// What an update has to send for an existing entry, and the change lines
+    /// that say so. A secret never appears in a line.
+    fn changes_of(
+        target: &ClientTarget,
+        entry: &Map<String, Value>,
+        missing: &mut Vec<String>,
+        mismatch: &mut Vec<String>,
+    ) -> (Vec<Change>, Map<String, Value>) {
+        let subject = Self::subject(&target.name);
+        let (mut changes, mut body) = (Vec::new(), Map::new());
+        for (field, desired) in &target.set {
+            match entry.get(field) {
+                None => missing.push(format!("{subject}: {field}")),
+                Some(current) if current != desired => {
+                    changes.push(Change {
+                        subject: subject.clone(),
+                        field: field.clone(),
+                        current: shortened(current),
+                        desired: shortened(desired),
+                    });
+                    body.insert(field.clone(), desired.clone());
+                }
+                Some(_) => {}
+            }
+        }
+        for (field, secret) in &target.secrets {
+            let Some(current) = entry.get(field) else {
+                missing.push(format!("{subject}: {field}"));
+                continue;
+            };
+            let change = if field == "password" {
+                // Answered as `********` when one is stored, `null` or empty
+                // when none is. Whether a stored one is the credential's
+                // cannot be read; `hand_over` writes it on every apply.
+                match current.as_str() {
+                    Some(MASKED) => None,
+                    Some(shown) if !shown.is_empty() => {
+                        mismatch.push(format!(
+                            "{subject}: Questarr answers password with a value, so it is not write-only here"
+                        ));
+                        None
+                    }
+                    _ => Some("(not stored)"),
+                }
+            } else if current.as_str() == Some(secret.expose()) {
+                None
+            } else {
+                Some("(another value, not shown)")
+            };
+            if let Some(shown) = change {
+                changes.push(Change {
+                    subject: subject.clone(),
+                    field: field.clone(),
+                    current: shown.to_string(),
+                    desired: "(the credential's, not shown)".to_string(),
+                });
+                body.insert(field.clone(), Value::from(secret.expose()));
+            }
+        }
+        (changes, body)
+    }
+
+    fn update_path(entry: &Map<String, Value>) -> Result<String, Error> {
+        // `read` has checked every id.
+        let id = entry.get("id").and_then(Value::as_str).unwrap_or_default();
+        Ok(format!("{}/{id}", DOWNLOADERS.path))
+    }
+}
+
+impl Task for DownloadClients {
+    type Current = Vec<Map<String, Value>>;
+
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        probe(t)
+    }
+
+    /// An empty list is a valid answer: a fresh Questarr has no client, and
+    /// every client the spec names then shows up as a change.
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        let path = DOWNLOADERS.path;
+        let reply = t.get(path)?;
+        expect_status_at("GET", path, &reply, &[200])?;
+        let entries: Vec<Map<String, Value>> = serde_json::from_value(decode(path, &reply.body)?)
+            .map_err(|e| Error::Decode {
+            path: path.to_string(),
+            reason: crate::error::shape(&e),
+        })?;
+        for (index, entry) in entries.iter().enumerate() {
+            let Some(name) = entry.get("name").and_then(Value::as_str) else {
+                return Err(Error::MissingName {
+                    path: path.to_string(),
+                    index,
+                });
+            };
+            // The id goes into a path; an answer must not aim a write elsewhere.
+            if !entry
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(is_path_segment)
+            {
+                return Err(Error::Decode {
+                    path: path.to_string(),
+                    reason: format!("{} has no id that is a path segment", Self::subject(name)),
+                });
+            }
+        }
+        Ok(entries)
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        let (mut missing, mut mismatch, mut changes) = (Vec::new(), Vec::new(), Vec::new());
+        for target in &self.clients {
+            match Self::find(current, &target.name)? {
+                Some(entry) => {
+                    changes.extend(Self::changes_of(target, entry, &mut missing, &mut mismatch).0)
+                }
+                None => changes.push(Change {
+                    subject: Self::subject(&target.name),
+                    field: String::new(),
+                    current: "(missing)".to_string(),
+                    desired: "(added)".to_string(),
+                }),
+            }
+        }
+        if !mismatch.is_empty() {
+            return Err(Error::Mismatch(mismatch));
+        }
+        if !missing.is_empty() {
+            return Err(Error::MissingField(missing));
+        }
+        Ok(changes)
+    }
+
+    fn notes(&self, current: &Self::Current) -> Vec<String> {
+        current
+            .iter()
+            .filter_map(|e| e.get("name").and_then(Value::as_str))
+            .filter(|name| !self.clients.iter().any(|t| t.name == *name))
+            .map(|name| format!("not in the spec: {}", Self::subject(name)))
+            .collect()
+    }
+
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        for target in &self.clients {
+            match Self::find(current, &target.name)? {
+                None => {
+                    let mut body: Map<String, Value> = target
+                        .set
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect();
+                    for (field, secret) in &target.secrets {
+                        body.insert(field.clone(), Value::from(secret.expose()));
+                    }
+                    body.insert("name".to_string(), Value::from(target.name.clone()));
+                    let path = DOWNLOADERS.path;
+                    let reply = t.post_json(path, &text_of("POST", path, &body)?)?;
+                    expect_status_at("POST", path, &reply, &[200, 201])?;
+                }
+                Some(entry) => {
+                    let (mut missing, mut mismatch) = (Vec::new(), Vec::new());
+                    let (_, body) = Self::changes_of(target, entry, &mut missing, &mut mismatch);
+                    if body.is_empty() {
+                        continue;
+                    }
+                    let path = Self::update_path(entry)?;
+                    let reply = t.patch_json(&path, &text_of("PATCH", &path, &body)?)?;
+                    expect_status_at("PATCH", &path, &reply, &[200])?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// A stored password is answered masked, so a stale one cannot be seen by
+    /// reading. It is handed over on every apply, with a `PATCH` that carries
+    /// only the password: Questarr leaves every field a `PATCH` omits.
+    fn hand_over(&self, t: &dyn Transport, current: &Self::Current) -> Result<Vec<String>, Error> {
+        let mut lines = Vec::new();
+        for target in &self.clients {
+            let Some(password) = target.secrets.get("password") else {
+                continue;
+            };
+            let Some(entry) = Self::find(current, &target.name)? else {
+                return Err(Error::NotFound(vec![Self::subject(&target.name)]));
+            };
+            let path = Self::update_path(entry)?;
+            let mut body = Map::new();
+            body.insert("password".to_string(), Value::from(password.expose()));
+            let reply = t.patch_json(&path, &text_of("PATCH", &path, &body)?)?;
+            expect_status_at("PATCH", &path, &reply, &[200])?;
+            lines.push(format!(
+                "{}: password handed over from credentials (write-only; Questarr keeps the rest of the row)",
+                Self::subject(&target.name)
+            ));
+        }
+        Ok(lines)
     }
 }
 
@@ -297,5 +569,272 @@ mod tests {
         assert!(matches!(error, Error::Status { status: 400, .. }));
         assert_eq!(t.written.borrow().len(), 1);
         assert!(!error.to_string().contains(PASSWORD));
+    }
+
+    // --- download clients ---------------------------------------------------
+
+    use crate::{
+        engine::{run, Mode, Outcome, Timing},
+        testing::FakeClock,
+    };
+
+    const CLIENTS: &str = include_str!("../../tests/fixtures/questarr-1.4.2/downloaders.json");
+    const NO_CLIENTS: &str =
+        include_str!("../../tests/fixtures/questarr-1.4.2/downloaders-empty.json");
+    const CREATED: &str =
+        include_str!("../../tests/fixtures/questarr-1.4.2/downloader-created.json");
+
+    /// The made-up key the fixture was recorded with: SABnzbd's API key, which
+    /// Questarr keeps in `username` and answers in clear.
+    const SAB_KEY: &str = "fixture-sab-key-never-real";
+    const QB_PASSWORD: &str = "qb-pw-9d2b6f-never-print-me";
+
+    fn map(value: Value) -> BTreeMap<String, Value> {
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn secrets(pairs: &[(&str, &str)]) -> BTreeMap<String, Secret> {
+        pairs
+            .iter()
+            .map(|(field, value)| (field.to_string(), Secret::new(value.to_string())))
+            .collect()
+    }
+
+    fn hosts_clients(sab_key: &str, category: &str) -> DownloadClients {
+        DownloadClients {
+            clients: vec![
+                ClientTarget {
+                    name: "sabnzbd".to_string(),
+                    set: map(json!({"type": "sabnzbd", "url": "10.0.10.10", "port": 8080,
+                                    "useSsl": false, "category": category, "enabled": true})),
+                    secrets: secrets(&[("username", sab_key)]),
+                },
+                ClientTarget {
+                    name: "qbittorrent".to_string(),
+                    set: map(
+                        json!({"type": "qbittorrent", "url": "10.0.10.11", "port": 8080,
+                                    "useSsl": false, "username": "admin",
+                                    "category": "questarr", "enabled": true}),
+                    ),
+                    secrets: secrets(&[("password", QB_PASSWORD)]),
+                },
+            ],
+        }
+    }
+
+    fn clients(lists: Vec<Step>) -> FakeTransport {
+        FakeTransport::default()
+            .on_get("/api/health", vec![ok(HEALTH_OK)])
+            .on_get("/api/downloaders", lists)
+    }
+
+    fn id_of(name: &str) -> String {
+        let all: Vec<Map<String, Value>> = serde_json::from_str(CLIENTS).unwrap();
+        let entry = all.iter().find(|e| e["name"] == name).unwrap();
+        entry["id"].as_str().unwrap().to_string()
+    }
+
+    fn apply(task: &DownloadClients, t: &FakeTransport) -> Result<crate::engine::Report, Error> {
+        run(Mode::Apply, task, t, &FakeClock::new(), Timing::default())
+    }
+
+    #[test]
+    fn the_hosts_clients_match_and_every_apply_hands_only_the_password_over() {
+        let task = hosts_clients(SAB_KEY, "questarr");
+        let t = clients(vec![ok(CLIENTS)]).on_put(vec![ok("{}")]);
+        let report = apply(&task, &t).unwrap();
+        assert_eq!(report.outcome, Outcome::Unchanged);
+        assert_eq!(
+            report.handed_over,
+            ["download client qbittorrent: password handed over from credentials (write-only; Questarr keeps the rest of the row)"]
+        );
+        // One PATCH, with ONLY the password. SABnzbd's key is not written: it
+        // is answered in clear and already the credential's.
+        assert_eq!(t.written.borrow().len(), 1);
+        let (path, body) = sent(&t, 0);
+        assert_eq!(path, format!("/api/downloaders/{}", id_of("qbittorrent")));
+        assert_eq!(body, json!({"password": QB_PASSWORD}));
+        assert_eq!(*t.calls.borrow(), [("PATCH", path)]);
+        let printed = format!("{:?} {:?}", report.handed_over, report.notes);
+        assert!(!printed.contains(SAB_KEY) && !printed.contains(QB_PASSWORD));
+    }
+
+    #[test]
+    fn a_plan_writes_nothing() {
+        let task = hosts_clients(SAB_KEY, "questarr");
+        let t = clients(vec![ok(CLIENTS)]);
+        let report = run(Mode::Plan, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        assert_eq!(report.outcome, Outcome::Unchanged);
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn missing_clients_are_created_with_every_field_and_their_secrets() {
+        let task = hosts_clients(SAB_KEY, "questarr");
+        // Empty at first; after the two POSTs the list is the recorded one.
+        // Two creations (201), then the password's hand-over (a PATCH, 200).
+        let t = clients(vec![ok(NO_CLIENTS), ok(CLIENTS)]).on_put(vec![
+            Step::Answer(201, CREATED.into()),
+            Step::Answer(201, CREATED.into()),
+            ok("{}"),
+        ]);
+        let report = apply(&task, &t).unwrap();
+        let Outcome::Changed(changes) = &report.outcome else {
+            panic!("{:?}", report.outcome)
+        };
+        assert_eq!(changes.len(), 2);
+        assert_eq!(changes[0].subject, "download client sabnzbd");
+        assert_eq!(
+            (changes[0].current.as_str(), changes[0].desired.as_str()),
+            ("(missing)", "(added)")
+        );
+
+        let (path, body) = sent(&t, 0);
+        assert_eq!(path, "/api/downloaders");
+        assert_eq!(
+            body,
+            json!({"name": "sabnzbd", "type": "sabnzbd", "url": "10.0.10.10", "port": 8080,
+                   "useSsl": false, "category": "questarr", "enabled": true, "username": SAB_KEY})
+        );
+        let (path, body) = sent(&t, 1);
+        assert_eq!(path, "/api/downloaders");
+        assert_eq!(body["password"], QB_PASSWORD);
+        assert_eq!(body["username"], "admin");
+        assert_eq!(
+            t.calls.borrow()[..2],
+            [("POST", path.clone()), ("POST", path)]
+        );
+        // The new qBittorrent row gets its password handed over like any other.
+        let (path, body) = sent(&t, 2);
+        assert_eq!(path, format!("/api/downloaders/{}", id_of("qbittorrent")));
+        assert_eq!(body, json!({"password": QB_PASSWORD}));
+        assert_eq!(t.written.borrow().len(), 3);
+        let printed = format!("{changes:?} {:?}", report.notes);
+        assert!(
+            !printed.contains(SAB_KEY) && !printed.contains(QB_PASSWORD),
+            "{printed}"
+        );
+    }
+
+    #[test]
+    fn a_differing_field_is_patched_alone() {
+        // The recorded SABnzbd has category `questarr`; the spec wants another.
+        let task = hosts_clients(SAB_KEY, "spiele");
+        let after = CLIENTS.replacen(r#""category": "questarr""#, r#""category": "spiele""#, 1);
+        let t = clients(vec![ok(CLIENTS), ok(&after)]).on_put(vec![ok("{}")]);
+        let report = apply(&task, &t).unwrap();
+        let Outcome::Changed(changes) = &report.outcome else {
+            panic!("{:?}", report.outcome)
+        };
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field, "category");
+        assert_eq!(
+            (changes[0].current.as_str(), changes[0].desired.as_str()),
+            ("\"questarr\"", "\"spiele\"")
+        );
+        let (path, body) = sent(&t, 0);
+        assert_eq!(path, format!("/api/downloaders/{}", id_of("sabnzbd")));
+        assert_eq!(body, json!({"category": "spiele"}));
+    }
+
+    #[test]
+    fn another_key_in_username_is_a_change_that_shows_no_value() {
+        const NEW_KEY: &str = "sab-key-3e8f1c-never-print-me";
+        let task = hosts_clients(NEW_KEY, "questarr");
+        let after = CLIENTS.replacen(SAB_KEY, NEW_KEY, 1);
+        let t = clients(vec![ok(CLIENTS), ok(&after)]).on_put(vec![ok("{}")]);
+        let report = apply(&task, &t).unwrap();
+        let Outcome::Changed(changes) = &report.outcome else {
+            panic!("{:?}", report.outcome)
+        };
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field, "username");
+        assert_eq!(changes[0].current, "(another value, not shown)");
+        assert_eq!(changes[0].desired, "(the credential's, not shown)");
+        let (_, body) = sent(&t, 0);
+        assert_eq!(body, json!({"username": NEW_KEY}));
+        let printed = format!("{changes:?} {:?} {:?}", report.notes, report.handed_over);
+        assert!(
+            !printed.contains(NEW_KEY) && !printed.contains(SAB_KEY),
+            "{printed}"
+        );
+    }
+
+    #[test]
+    fn a_password_questarr_does_not_hold_is_a_change() {
+        // The recorded SABnzbd has `password: null`. A spec that declares one
+        // must see that as "not stored", not as fine.
+        let mut task = hosts_clients(SAB_KEY, "questarr");
+        task.clients[0].secrets.insert(
+            "password".to_string(),
+            Secret::new("sab-pw-never-print-me".to_string()),
+        );
+        let t = clients(vec![ok(CLIENTS)]);
+        let report = run(Mode::Plan, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        let Outcome::Differs(changes) = &report.outcome else {
+            panic!("{:?}", report.outcome)
+        };
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field, "password");
+        assert_eq!(changes[0].current, "(not stored)");
+    }
+
+    #[test]
+    fn two_clients_of_one_name_are_refused_not_guessed_at() {
+        // Questarr has no unique index on `name`.
+        let twice = CLIENTS.replacen(r#""name": "qbittorrent""#, r#""name": "sabnzbd""#, 1);
+        let task = hosts_clients(SAB_KEY, "questarr");
+        let t = clients(vec![ok(&twice)]);
+        let error = apply(&task, &t).err().unwrap();
+        assert!(matches!(error, Error::Mismatch(_)), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("download client sabnzbd exists 2 times"),
+            "{error}"
+        );
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_field_questarr_does_not_answer_is_a_typo_not_a_change() {
+        let mut task = hosts_clients(SAB_KEY, "questarr");
+        task.clients[0]
+            .set
+            .insert("catagory".to_string(), json!("questarr"));
+        let t = clients(vec![ok(CLIENTS)]);
+        let error = apply(&task, &t).err().unwrap();
+        assert!(matches!(error, Error::MissingField(_)), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("download client sabnzbd: catagory"),
+            "{error}"
+        );
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_client_outside_the_spec_is_noted_and_left_alone() {
+        let mut task = hosts_clients(SAB_KEY, "questarr");
+        task.clients.pop();
+        let t = clients(vec![ok(CLIENTS)]);
+        let report = apply(&task, &t).unwrap();
+        assert_eq!(
+            report.notes,
+            ["not in the spec: download client qbittorrent"]
+        );
+        assert!(t.written.borrow().is_empty());
+        assert!(t.deleted.borrow().is_empty());
+    }
+
+    #[test]
+    fn an_id_that_is_no_path_segment_is_not_written_to() {
+        let odd = CLIENTS.replacen(&id_of("qbittorrent"), "../auth/setup", 1);
+        let task = hosts_clients(SAB_KEY, "questarr");
+        let t = clients(vec![ok(&odd)]);
+        let error = apply(&task, &t).err().unwrap();
+        assert!(matches!(error, Error::Decode { .. }), "{error}");
+        assert!(t.written.borrow().is_empty());
     }
 }

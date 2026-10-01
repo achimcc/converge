@@ -188,7 +188,10 @@ impl TaskName {
             | TaskName::DelayProfiles => service.is_servarr(),
             TaskName::RootFolders => service.is_servarr() || service == Service::Bindery,
             TaskName::DownloadClients => {
-                service.is_servarr() || service == Service::Prowlarr || service == Service::Bindery
+                service.is_servarr()
+                    || service == Service::Prowlarr
+                    || service == Service::Bindery
+                    || service == Service::Questarr
             }
             TaskName::Notifications => service.is_servarr() || service == Service::Prowlarr,
             TaskName::ProwlarrInstances | TaskName::OidcProviders => service == Service::Bindery,
@@ -763,8 +766,48 @@ pub enum Desired {
     AudiobookshelfAuthSettings(AudiobookshelfAuth),
     AudiobookshelfAdminPermissions(AbsPermissions),
     Dispatcharr(DispatcharrDesired),
+    Questarr(QuestarrDesired),
     AuthentikSettings(BTreeMap<String, serde_json::Value>),
 }
+
+/// A Questarr task (design §47). Every task signs in as `username` -- the one
+/// account Questarr has, whose password is `api_key_credential`. The first
+/// run sets that account up. The name is not a secret and belongs in the
+/// spec, so a wrong one shows in a plan.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuestarrDesired {
+    pub username: String,
+    pub task: QuestarrTask,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum QuestarrTask {
+    /// Download clients by name.
+    DownloadClients(BTreeMap<String, QuestarrClient>),
+}
+
+/// One download client: its fields, and the fields whose value comes from a
+/// credential. Questarr keeps SABnzbd's API key in `username`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QuestarrClient {
+    #[serde(default)]
+    pub set: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub secret_fields: BTreeMap<String, String>,
+}
+
+/// The download-client types Questarr 1.4.2 knows
+/// (`shared/downloader-types.ts`).
+const QUESTARR_CLIENT_TYPES: [&str; 7] = [
+    "sabnzbd",
+    "nzbget",
+    "transmission",
+    "rtorrent",
+    "qbittorrent",
+    "synology",
+    "deluge",
+];
 
 /// A Dispatcharr task (design §29). Every task logs in as `username`, a
 /// service account whose password is `api_key_credential`; the account is
@@ -1174,6 +1217,10 @@ impl Spec {
             )));
         }
         let desired = match raw.task {
+            // Before the arms that share the task's name: Questarr's own shape.
+            TaskName::DownloadClients if raw.service == Service::Questarr => {
+                Desired::Questarr(questarr_desired(raw.task, raw.desired).map_err(invalid)?)
+            }
             TaskName::DownloadClients | TaskName::RootFolders | TaskName::ProwlarrInstances
                 if raw.service == Service::Bindery =>
             {
@@ -2315,8 +2362,94 @@ impl Spec {
                 DispatcharrTask::NetworkAccess(_) => "network-access",
                 DispatcharrTask::ChannelEpg(_) => "channel-epg",
             },
+            Desired::Questarr(ref d) => match &d.task {
+                QuestarrTask::DownloadClients(_) => "download-clients",
+            },
             Desired::AuthentikSettings(_) => "settings",
         }
+    }
+}
+
+/// A Questarr spec's `desired`, checked. The errors are the reason only; the
+/// caller names the spec.
+fn questarr_desired(task: TaskName, desired: serde_json::Value) -> Result<QuestarrDesired, String> {
+    /// Questarr trims the strings it stores, so a padded one would differ on
+    /// every run -- or, for the account, never sign in.
+    fn padded(text: &str) -> bool {
+        text != text.trim()
+    }
+
+    fn username_ok(username: &str) -> Result<(), String> {
+        account_name(username, "desired.username")?;
+        if padded(username) {
+            return Err("desired.username has surrounding whitespace".to_string());
+        }
+        Ok(())
+    }
+
+    match task {
+        TaskName::DownloadClients => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Clients {
+                username: String,
+                clients: BTreeMap<String, QuestarrClient>,
+            }
+            let d: Clients =
+                serde_json::from_value(desired).map_err(|e| format!("desired: {e}"))?;
+            username_ok(&d.username)?;
+            if d.clients.is_empty() {
+                return Err("desired.clients names nothing".to_string());
+            }
+            for (name, client) in &d.clients {
+                let at = format!("desired.clients.{name}");
+                if name.trim().is_empty() || padded(name) {
+                    return Err(format!("{at}: not a client's name as Questarr stores it"));
+                }
+                if client.set.is_empty() {
+                    return Err(format!("{at}.set names no field"));
+                }
+                for (field, credential) in &client.secret_fields {
+                    if !["username", "password"].contains(&field.as_str()) {
+                        return Err(format!(
+                            "{at}.secret_fields: {field} is not one of Questarr's secret fields (username, password)"
+                        ));
+                    }
+                    credential_name(credential, &format!("{at}.secret_fields.{field}"))?;
+                    if client.set.contains_key(field) {
+                        return Err(format!("{at}: {field} is both in set and in secret_fields"));
+                    }
+                }
+                // The entry's identity, and the one field a plan would print
+                // in clear though it is a secret.
+                for own in ["id", "name", "createdAt", "updatedAt", "password"] {
+                    if client.set.contains_key(own) {
+                        return Err(format!("{at}.set: {own} is not set this way"));
+                    }
+                }
+                for (field, value) in &client.set {
+                    if value.as_str().is_some_and(padded) {
+                        return Err(format!("{at}.set: {field} has surrounding whitespace"));
+                    }
+                }
+                if let Some(kind) = client.set.get("type") {
+                    if !kind
+                        .as_str()
+                        .is_some_and(|k| QUESTARR_CLIENT_TYPES.contains(&k))
+                    {
+                        return Err(format!(
+                            "{at}.set: type is not one Questarr knows ({})",
+                            QUESTARR_CLIENT_TYPES.join(", ")
+                        ));
+                    }
+                }
+            }
+            Ok(QuestarrDesired {
+                username: d.username,
+                task: QuestarrTask::DownloadClients(d.clients),
+            })
+        }
+        other => Err(format!("{other:?} is not a Questarr task")),
     }
 }
 
@@ -4607,5 +4740,105 @@ mod tests {
             r#"["Unknown"],"format_scores":{"3D":1.5}}"#,
         );
         assert!(parse(&fraction).is_err());
+    }
+
+    fn questarr(task: &str, desired: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"questarr","base_url":"http://10.0.183.10:5000","api_key_credential":"questarr-passwort","task":"{task}","desired":{desired}}}"#
+        ))
+    }
+
+    #[test]
+    fn questarr_download_clients_parse_with_their_account() {
+        let spec = questarr(
+            "download-clients",
+            r#"{"username":"achim","clients":{
+                "sabnzbd":{"set":{"type":"sabnzbd","url":"10.0.10.10","port":8080,"category":"questarr"},
+                           "secret_fields":{"username":"sabnzbd-api-key"}},
+                "qbittorrent":{"set":{"type":"qbittorrent","url":"10.0.10.11","username":"admin"},
+                               "secret_fields":{"password":"qbittorrent-webui-password"}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.service, Service::Questarr);
+        assert_eq!(spec.task_name(), "download-clients");
+        let Desired::Questarr(d) = &spec.desired else {
+            panic!("not a Questarr spec")
+        };
+        assert_eq!(d.username, "achim");
+        let QuestarrTask::DownloadClients(clients) = &d.task;
+        assert_eq!(clients.len(), 2);
+        assert_eq!(
+            clients["sabnzbd"].secret_fields["username"],
+            "sabnzbd-api-key"
+        );
+        assert_eq!(clients["qbittorrent"].set["username"], "admin");
+    }
+
+    #[test]
+    fn questarr_download_clients_are_strict() {
+        let refused = |desired: &str| {
+            questarr("download-clients", desired)
+                .unwrap_err()
+                .to_string()
+        };
+        let client = |inner: &str| format!(r#"{{"username":"achim","clients":{{"c":{inner}}}}}"#);
+
+        let text = refused(r#"{"username":"","clients":{"c":{"set":{"type":"sabnzbd"}}}}"#);
+        assert!(text.contains("an account has no name"), "{text}");
+        // Questarr trims the name it stores; a padded one would never sign in.
+        let text = refused(r#"{"username":" achim","clients":{"c":{"set":{"type":"sabnzbd"}}}}"#);
+        assert!(text.contains("surrounding whitespace"), "{text}");
+        let text = refused(r#"{"username":"achim","clients":{}}"#);
+        assert!(text.contains("names nothing"), "{text}");
+
+        // Only `username` and `password` hold a secret in Questarr.
+        let text = refused(&client(
+            r#"{"set":{"type":"sabnzbd"},"secret_fields":{"apiKey":"k"}}"#,
+        ));
+        assert!(
+            text.contains("apiKey is not one of Questarr's secret fields (username, password)"),
+            "{text}"
+        );
+        let text = refused(&client(
+            r#"{"set":{"type":"sabnzbd","username":"u"},"secret_fields":{"username":"k"}}"#,
+        ));
+        assert!(
+            text.contains("username is both in set and in secret_fields"),
+            "{text}"
+        );
+        let text = refused(&client(
+            r#"{"set":{"type":"sabnzbd"},"secret_fields":{"username":"a/b"}}"#,
+        ));
+        assert!(text.contains("not a credential name"), "{text}");
+        // A password in `set` would be printed by a plan.
+        let text = refused(&client(r#"{"set":{"type":"qbittorrent","password":"x"}}"#));
+        assert!(text.contains("password is not set this way"), "{text}");
+        for own in ["id", "name", "createdAt", "updatedAt"] {
+            let text = refused(&client(&format!(
+                r#"{{"set":{{"type":"sabnzbd","{own}":"x"}}}}"#
+            )));
+            assert!(
+                text.contains(&format!("{own} is not set this way")),
+                "{text}"
+            );
+        }
+        let text = refused(&client(r#"{"set":{"type":"usenetthing"}}"#));
+        assert!(text.contains("type is not one Questarr knows"), "{text}");
+        // Questarr trims strings; a padded value would differ on every run.
+        let text = refused(&client(
+            r#"{"set":{"type":"sabnzbd","category":"questarr "}}"#,
+        ));
+        assert!(
+            text.contains("category has surrounding whitespace"),
+            "{text}"
+        );
+        let text = refused(&client(r#"{"set":{}}"#));
+        assert!(text.contains("names no field"), "{text}");
+
+        // The task belongs to the service that is named.
+        let wrong = parse(
+            r#"{"service":"questarr","base_url":"http://x","api_key_credential":"k","task":"quality-profiles","desired":{}}"#,
+        );
+        assert!(wrong.is_err());
     }
 }

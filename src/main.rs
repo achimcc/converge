@@ -12,16 +12,16 @@ use converge::{
     schema,
     services::{
         arr, audiobookshelf, authentik, bindery, dispatcharr, jellyfin, kavita, koel, lidarr, ntfy,
-        providers, prowlarr, seerr, servarr, suggestarr, trailarr,
+        providers, prowlarr, questarr, seerr, servarr, suggestarr, trailarr,
     },
-    spec::{Desired, DispatcharrTask, Service, Spec},
+    spec::{Desired, DispatcharrTask, QuestarrTask, Service, Spec},
 };
 
 const USAGE: &str = "usage:
   converge apply [--deadline <seconds>] <spec.json>...
   converge plan [--deadline <seconds>] <spec.json>...
   converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr|kavita|dispatcharr|authentik> --openapi <file> [--spec <spec.json>]...
-  converge schema-check --service ntfy|bindery|seerr|koel|suggestarr|audiobookshelf [--spec <spec.json>]...";
+  converge schema-check --service ntfy|bindery|seerr|koel|suggestarr|audiobookshelf|questarr [--spec <spec.json>]...";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -136,6 +136,23 @@ fn reconcile_one(
                 }
             }
         }
+        // And for Questarr (design §47): the password of its one account in,
+        // a JWT out -- and on the very first run the account itself. Questarr
+        // allows 20 sign-ins per 15 minutes, successful ones included, so a
+        // run signs in once however many specs it carries.
+        Desired::Questarr(desired) => {
+            let at = (spec.base_url.clone(), desired.username.clone());
+            match tokens.get(&at) {
+                Some(token) => converge::secret::Secret::new(token.clone()),
+                None => {
+                    let anonymous = HttpTransport::anonymous(&spec.base_url, REQUEST_TIMEOUT);
+                    let token =
+                        questarr::sign_in(&anonymous, &desired.username, &key).map_err(fail)?;
+                    tokens.insert(at, token.expose().to_string());
+                    token
+                }
+            }
+        }
         _ => key,
     };
     let transport = HttpTransport::new(
@@ -234,6 +251,27 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::Questarr(desired) => match &desired.task {
+            QuestarrTask::DownloadClients(clients) => {
+                let mut targets = Vec::new();
+                for (name, client) in clients {
+                    let mut secrets = std::collections::BTreeMap::new();
+                    for (field, credential) in &client.secret_fields {
+                        secrets.insert(
+                            field.clone(),
+                            read_credential(credentials, credential).map_err(fail)?,
+                        );
+                    }
+                    targets.push(questarr::ClientTarget {
+                        name: name.clone(),
+                        set: client.set.clone(),
+                        secrets,
+                    });
+                }
+                let task = questarr::DownloadClients { clients: targets };
+                run(mode, &task, &transport, &SystemClock, timing)
+            }
+        },
         Desired::Dispatcharr(desired) => match &desired.task {
             DispatcharrTask::StreamSettings {
                 default_stream_profile,
@@ -750,8 +788,10 @@ fn schema_check(args: &[String]) -> ExitCode {
             other => return usage(Some(&format!("unexpected argument {other}"))),
         }
     }
-    if let Some(name @ ("ntfy" | "bindery" | "seerr" | "koel" | "suggestarr" | "audiobookshelf")) =
-        service.as_deref()
+    if let Some(
+        name @ ("ntfy" | "bindery" | "seerr" | "koel" | "suggestarr" | "audiobookshelf"
+        | "questarr"),
+    ) = service.as_deref()
     {
         return match openapi {
             Some(_) => usage(Some(&format!(
@@ -1005,7 +1045,8 @@ fn schema_check(args: &[String]) -> ExitCode {
             | Desired::SeerrMain(_)
             | Desired::SeerrJellyfin(_)
             | Desired::SeerrServers(..)
-            | Desired::SeerrWebhook(_) => (Vec::new(), 0),
+            | Desired::SeerrWebhook(_)
+            | Desired::Questarr(_) => (Vec::new(), 0),
             Desired::Naming(set) => (
                 schema::check_paths(&document, servarr::NAMING, set),
                 set.len(),
