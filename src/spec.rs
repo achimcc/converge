@@ -26,6 +26,7 @@ pub enum Service {
     Audiobookshelf,
     Dispatcharr,
     Authentik,
+    Questarr,
 }
 
 impl Service {
@@ -46,6 +47,7 @@ impl Service {
             Service::Audiobookshelf => "audiobookshelf",
             Service::Dispatcharr => "dispatcharr",
             Service::Authentik => "authentik",
+            Service::Questarr => "questarr",
         }
     }
 
@@ -66,14 +68,15 @@ impl Service {
             | Service::SuggestArr
             | Service::Audiobookshelf
             | Service::Dispatcharr
-            | Service::Authentik => "Authorization",
+            | Service::Authentik
+            | Service::Questarr => "Authorization",
         }
     }
 
     /// The header's value. The credential holds the bare key; ntfy, Koel and
-    /// authentik want it as a bearer token, and for SuggestArr and Dispatcharr
-    /// the value is the JWT a login returned (the credential there holds a
-    /// password, never a key).
+    /// authentik want it as a bearer token, and for SuggestArr, Dispatcharr
+    /// and Questarr the value is the JWT a login returned (the credential
+    /// there holds a password, never a key).
     pub fn key_value(self, key: Secret) -> Secret {
         match self {
             Service::Ntfy
@@ -81,7 +84,8 @@ impl Service {
             | Service::SuggestArr
             | Service::Audiobookshelf
             | Service::Dispatcharr
-            | Service::Authentik => Secret::new(format!("Bearer {}", key.expose())),
+            | Service::Authentik
+            | Service::Questarr => Secret::new(format!("Bearer {}", key.expose())),
             _ => key,
         }
     }

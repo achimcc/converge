@@ -10,6 +10,7 @@ pub mod lidarr;
 pub mod ntfy;
 pub mod providers;
 pub mod prowlarr;
+pub mod questarr;
 pub mod seerr;
 pub mod servarr;
 pub mod suggestarr;

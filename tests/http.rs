@@ -151,6 +151,42 @@ fn the_anonymous_transport_sends_no_key_and_a_login_answers_a_token() {
     assert!(!seen.path.contains("pa55word"), "{}", seen.path);
 }
 
+#[test]
+fn questarr_is_set_up_anonymously_and_the_password_stays_in_the_body() {
+    // A fresh Questarr: the status says "no account", the setup answers the
+    // token. Neither request may carry a key -- there is none yet.
+    let server = Server::start(vec![
+        (
+            "GET",
+            "/api/auth/status",
+            200,
+            r#"{"hasUsers":false}"#.into(),
+        ),
+        (
+            "POST",
+            "/api/auth/setup",
+            200,
+            r#"{"token":"jwt-value","user":{"id":"u-1","username":"achim"}}"#.into(),
+        ),
+    ]);
+    let anonymous = HttpTransport::anonymous(&server.base_url(), Duration::from_secs(5));
+    let token =
+        converge::services::questarr::sign_in(&anonymous, "achim", &Secret::new("pa55word".into()))
+            .expect("the setup answered a token");
+    assert_eq!(token.expose(), "jwt-value");
+
+    let seen = server.requests();
+    assert_eq!(seen.len(), 2);
+    for request in &seen {
+        let headers = request.headers.to_ascii_lowercase();
+        assert!(!headers.contains("authorization"), "{headers}");
+        assert!(!headers.contains("x-api-key"), "{headers}");
+        assert!(!request.path.contains("pa55word"), "{}", request.path);
+    }
+    assert_eq!(seen[1].path, "/api/auth/setup");
+    assert!(seen[1].body.contains("pa55word"), "{}", seen[1].body);
+}
+
 // --- Redirects (audit B39) -------------------------------------------------
 //
 // Two listeners, as in the audit's measurement: A is the service, B is
