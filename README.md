@@ -19,10 +19,10 @@ script should have been:
 
 ## Status
 
-Early. **v0.43.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.44.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11),
 **SuggestArr** (2.14), **Kavita** (0.9), **Audiobookshelf** (2.36),
-**Dispatcharr** (0.31) and **authentik** (2026.5), each replacing a shell unit
+**Dispatcharr** (0.31), **authentik** (2026.5) and **Questarr** (1.4), each replacing a shell unit
 or an OpenTofu resource on the host it was written for:
 
 | service | task | desired state |
@@ -72,6 +72,9 @@ or an OpenTofu resource on the host it was written for:
 | Dispatcharr | `vod-categories` | which VOD categories of an account are read in, by name and type (`movie`, `series`): exactly the named ones on, every other category of the account off -- `Uncategorized` among them unless named; a name the account does not have, or an account without categories of its own (no VOD refresh yet), is an error; after a change a VOD refresh brings the titles |
 | Dispatcharr | `network-access` | the network allowlists by area (`STREAMS`, `XC_API`, `M3U_EPG`, `UI`), each a list of CIDRs, compared as sets; only the named areas are written, the others stay. `UI` also guards the API converge itself uses |
 | Dispatcharr | `channel-epg` | per channel (by the name the sync gives it): the guide entry -- a source by name and a tvg-id --, a display name and a logo by URL (created when missing), written as the channel's override, which the channel sync leaves alone; fallback streams by name, played after the channel's own when it fails -- only from the same group, since another group's sync would delete the channel; and a fixed channel number, also in the override, which every numbering of the sync treats as taken |
+| Questarr | `download-clients` | download clients by name: a missing one is added, a differing field is patched alone; SABnzbd's API key lives in `username` there and is compared unseen, a `password` is answered masked and handed over on every apply; two clients of one name are refused. Every task signs in with the one account's name and password, once per run -- and the first apply sets that account up (a plan never does) |
+| Questarr | `import-config` | fields of the signed-in account's import configuration (post-processing, transfer mode, library root, ...): only the differing ones are written |
+| Questarr | `prowlarr-sync` | the indexers of one Prowlarr, copied into Questarr: a plan sees whether any indexer comes from it, an apply syncs once -- Questarr keeps no connection, and the key is answered masked |
 | authentik | `settings` | fields of the tenant settings (`/admin/settings/`), by name — those outside the blueprint schema; `PATCH` carries only what differs |
 | SuggestArr | `configuration` | the whole flat configuration: plain fields by name, secret fields from credentials (never shown), and the Jellyfin libraries derived from what the service reports, minus the collection types named |
 
@@ -386,7 +389,7 @@ a single `DELETE`:
 | `converge apply [--deadline <s>] <spec>...` | reconcile, write, read back | 0 done, 1 any spec failed |
 | `converge plan [--deadline <s>] <spec>...` | show what `apply` would change | 0 equal, 2 differs, 1 error |
 | `converge schema-check --service <radarr\|sonarr\|lidarr\|prowlarr\|jellyfin\|trailarr\|kavita\|dispatcharr\|authentik> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
-| `converge schema-check --service <ntfy\|bindery\|seerr\|koel\|suggestarr\|audiobookshelf> [--spec <spec>]...` | ntfy and bindery publish no OpenAPI description, Seerr's misnames its fields, Koel's describes a long-gone version, SuggestArr's covers only its public `/api/v1`: only validate the specs (`--openapi` is refused) | 0 / 1 |
+| `converge schema-check --service <ntfy\|bindery\|seerr\|koel\|suggestarr\|audiobookshelf\|questarr> [--spec <spec>]...` | ntfy, bindery and Questarr publish no OpenAPI description, Seerr's misnames its fields, Koel's describes a long-gone version, SuggestArr's covers only its public `/api/v1`: only validate the specs (`--openapi` is refused) | 0 / 1 |
 
 Several specs are processed in order; one failing does not skip the next.
 
@@ -417,7 +420,7 @@ radarr quality-definitions: changed 1 field(s), read back and confirmed
    types derive their JSON schema; `schema-check` compares it with the
    service's `openapi.json`. Run it in your build against the exact version
    you deploy, and an upgrade that renames a field fails before the deploy.
-   ntfy and bindery publish no such description, and Seerr's and Koel's do
+   ntfy, bindery and Questarr publish no such description, and Seerr's and Koel's do
    not fit the running service; for them `schema-check` validates the specs,
    and only the first two checks apply to their fields.
 

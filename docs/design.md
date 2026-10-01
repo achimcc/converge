@@ -2791,6 +2791,103 @@ this task to check.
 Not measured on the host yet: a VOD refresh after a switch, and a stream
 refused from an address outside `STREAMS`.
 
+## 47. Questarr: the account, download clients, the Prowlarr sync and the import configuration (v0.44.0, 2026-10-01)
+
+Questarr (1.4.2) is an *arr for games. The host runs it next to RomM and
+wants it set up without a hand in its web page: one account, SABnzbd and
+qBittorrent as download clients, Prowlarr's indexers, and an import that
+copies finished downloads into RomM's library.
+
+### No key, no cookie: the sign-in
+
+Every route behind `/api` wants `Authorization: Bearer <JWT>`, and the only
+way to a token is `POST /api/auth/login` with the account's name and
+password. There is no API key and no session cookie. So Questarr joins
+SuggestArr (§19) and Dispatcharr (§29): `api_key_credential` holds a
+password, `username` is in `desired`, and a run signs in once per base URL
+and account -- Questarr allows 20 sign-ins per 15 minutes and address,
+successful ones included, and offers no switch for that.
+
+Questarr has exactly one account, and it is created by
+`POST /api/auth/setup` while there is none. That is new here: the sign-in
+reads `GET /api/auth/status` (`hasUsers`), sets the account up when it is
+missing, and signs in otherwise. A setup answered `403` lost a race against
+another run -- the account check comes first there, before any validation --
+and the sign-in follows. A refused password (`401`) and the limit (`429`)
+are final; waiting would only spend more of the twenty.
+
+The setup sends the account alone. Questarr would take IGDB credentials
+with it, but what it stores that way shadows the ones from its environment
+for good.
+
+**A plan never sets the account up.** A token needs the account, and the
+account is a write. Found by running the binary against a real 1.4.2: the
+sign-in comes before the task, and at first it set the account up in a plan
+too. A plan now asks the status first; without an account it reports
+`account <name>: (missing) -> (set up)` for the spec and stops, since
+nothing behind the sign-in can be read.
+
+A token that has expired or is no token is answered `403`, not `401`; only a
+missing one is `401`.
+
+### Download clients
+
+`GET /api/downloaders`, `POST` to add (`201`), `PATCH /api/downloaders/{id}`
+to change. A `PATCH` is partial and ignores a field it does not know, so a
+typo in the spec would be accepted and never arrive: a `set` field the
+answer does not carry is an error, not a change.
+
+There is no `apiKey` column. **SABnzbd's API key lives in `username`** and
+is answered in clear, so it is compared -- unseen, as Dispatcharr's are
+(§30). A `password` is answered as `********` when one is stored and as
+`null` when none is; like bindery's (§14) it is handed over on every apply,
+with a `PATCH` that carries only the password. A spec may name `username`
+and `password` under `secret_fields`; a `password` under `set` is refused,
+a plan would print it.
+
+Clients are matched by `name`, and Questarr has no unique index there: two
+of one name are refused rather than one of them picked. The `id` goes into
+a path and is checked to be a path segment (§45). Questarr trims the strings
+it stores, so a padded value in a spec is refused -- it would differ on
+every run.
+
+### Import configuration
+
+`GET` and `PATCH /api/imports/config`, ten fields, kept per user: it is the
+signed-in account's that is read and written. Unlike the download clients'
+`PATCH` this one is strict (an unknown key or a transfer mode Questarr does
+not know is a `400`), and the spec is checked the same way, so a typo stops
+the build instead of the unit. Only differing fields are sent.
+
+### Prowlarr sync
+
+Questarr keeps no Prowlarr connection. `POST /api/indexers/prowlarr/sync`
+with a URL and a key is one request that reads Prowlarr's indexers and
+stores each as an indexer of Questarr's own: URL `<Prowlarr>/<id>/api`, key
+Prowlarr's, answered masked. Indexers are matched by URL and never removed.
+
+So there is no stored state to compare. A plan sees one thing: whether any
+indexer's URL begins with `<url>/` (the slash keeps `...:599` from matching
+`...:5998`; a spec's URL may not end with one, since Questarr strips it).
+An apply syncs once -- as the write when nothing was synced, as the
+hand-over otherwise: the key can only arrive by being sent again, and
+Prowlarr may have gained indexers. A sync also resets each indexer's
+`categories` to empty; a task that sets them would have to run after it.
+
+What the answer lists under `errors` is counted and never printed: it is
+Questarr's text about a request to Prowlarr, and such a request carries the
+key in its URL. (Questarr itself is less careful -- a failed SABnzbd
+connection puts the whole URL, `apikey=` included, into its log and into
+the answer of its test endpoint. converge calls neither.)
+
+### Checked how
+
+No OpenAPI description: `schema-check --service questarr` validates the
+specs, and the field names come from answers recorded from a 1.4.2 started
+for the purpose (`tests/fixtures/questarr-1.4.2`, with what the recording
+settled in its `SOURCE.md`). Questarr's API names no version, so the report
+says `(not reported)`.
+
 ## 20. Not in the pilot
 
 
