@@ -2265,3 +2265,197 @@ fn a_plan_against_a_questarr_without_an_account_sets_nothing_up() {
     );
     assert!(!format!("{stdout}{stderr}").contains("account-pw-never-print-me"));
 }
+
+const QUESTARR_CLIENTS: &str = r#"{"username":"achim","clients":{
+    "sabnzbd":{"set":{"type":"sabnzbd","url":"10.0.10.10","port":8080,"useSsl":false,"category":"questarr","enabled":true},
+               "secret_fields":{"username":"sabnzbd-api-key"}},
+    "qbittorrent":{"set":{"type":"qbittorrent","url":"10.0.10.11","port":8080,"useSsl":false,"username":"admin","category":"questarr","enabled":true},
+                   "secret_fields":{"password":"qbittorrent-webui-password"}}}}"#;
+const QUESTARR_SYNC: &str = r#"{"username":"achim","url":"http://10.0.10.10:9696","secret_fields":{"apiKey":"prowlarr-api-key"}}"#;
+
+#[test]
+fn schema_check_for_questarr_validates_its_three_tasks_without_an_openapi_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = "http://10.0.183.10:5000";
+    let clients = write_questarr_spec(
+        dir.path(),
+        "clients.json",
+        base,
+        "download-clients",
+        QUESTARR_CLIENTS,
+    );
+    let import = write_questarr_spec(
+        dir.path(),
+        "import.json",
+        base,
+        "import-config",
+        QUESTARR_IMPORT,
+    );
+    let sync = write_questarr_spec(
+        dir.path(),
+        "sync.json",
+        base,
+        "prowlarr-sync",
+        QUESTARR_SYNC,
+    );
+    let out = schema_check("questarr", None, &[&clients, &import, &sync]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("questarr: no OpenAPI description exists; 3 spec(s) valid"),
+        "{stdout}"
+    );
+
+    // SABnzbd's key is `username` in Questarr; `apiKey` is not a field there.
+    let bad = write_questarr_spec(
+        dir.path(),
+        "bad.json",
+        base,
+        "download-clients",
+        r#"{"username":"achim","clients":{"sabnzbd":{"set":{"type":"sabnzbd"},"secret_fields":{"apiKey":"sabnzbd-api-key"}}}}"#,
+    );
+    let out = schema_check("questarr", None, &[&bad]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("apiKey is not one of Questarr's secret fields"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // A transfer mode Questarr does not know stops the build, not the unit.
+    let bad = write_questarr_spec(
+        dir.path(),
+        "bad-import.json",
+        base,
+        "import-config",
+        r#"{"username":"achim","config":{"transferMode":"teleport"}}"#,
+    );
+    let out = schema_check("questarr", None, &[&bad]);
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn one_questarr_run_signs_in_once_and_prints_no_secret() {
+    const CLIENTS: &str = include_str!("fixtures/questarr-1.4.2/downloaders.json");
+    const IMPORT_SET: &str = include_str!("fixtures/questarr-1.4.2/imports-config-set.json");
+    let ids: Vec<String> = serde_json::from_str::<Vec<serde_json::Value>>(CLIENTS)
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_str().unwrap().to_string())
+        .collect();
+    // The test server keeps its paths for its whole life; an id from the
+    // fixture is leaked into one, which a test may do.
+    let mut routes: Vec<(&'static str, &'static str, u16, String)> =
+        vec![
+        ("GET", "/api/auth/status", 200, r#"{"hasUsers":true}"#.to_string()),
+        (
+            "POST",
+            "/api/auth/login",
+            200,
+            r#"{"token":"jwt-run-token-never-print-me","user":{"id":"u-1","username":"achim"}}"#
+                .to_string(),
+        ),
+        ("GET", "/api/health", 200, r#"{"status":"ok"}"#.to_string()),
+        ("GET", "/api/imports/config", 200, IMPORT_SET.to_string()),
+        ("GET", "/api/downloaders", 200, CLIENTS.to_string()),
+    ];
+    for id in &ids {
+        let path: &'static str = Box::leak(format!("/api/downloaders/{id}").into_boxed_str());
+        routes.push(("PATCH", path, 200, "{}".to_string()));
+    }
+    let server = Server::start(routes);
+    let dir = tempfile::tempdir().unwrap();
+    let import = write_questarr_spec(
+        dir.path(),
+        "import.json",
+        &server.base_url(),
+        "import-config",
+        r#"{"username":"achim","config":{"transferMode":"copy","libraryRoot":"/tank/spiele/roms"}}"#,
+    );
+    let clients = write_questarr_spec(
+        dir.path(),
+        "clients.json",
+        &server.base_url(),
+        "download-clients",
+        QUESTARR_CLIENTS,
+    );
+    // The recorded SABnzbd key, so the clients match; the password is handed over.
+    std::fs::write(
+        dir.path().join("sabnzbd-api-key"),
+        "fixture-sab-key-never-real\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("qbittorrent-webui-password"),
+        "qb-pw-never-print-me\n",
+    )
+    .unwrap();
+
+    let out = converge()
+        .arg("apply")
+        .arg(&import)
+        .arg(&clients)
+        .env("CREDENTIALS_DIRECTORY", dir.path())
+        .output()
+        .unwrap();
+    let printed = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(0), "{printed}");
+    assert!(
+        printed.contains("questarr import-config: unchanged"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("questarr download-clients: unchanged"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("download client qbittorrent: password handed over from credentials"),
+        "{printed}"
+    );
+
+    let seen = server.requests();
+    // Two specs, one sign-in: Questarr allows 20 per 15 minutes.
+    let logins = seen.iter().filter(|r| r.path == "/api/auth/login").count();
+    assert_eq!(
+        logins,
+        1,
+        "{:?}",
+        seen.iter().map(|r| &r.path).collect::<Vec<_>>()
+    );
+    // The sign-in itself carries no token; everything behind it carries the JWT.
+    for request in &seen {
+        let headers = request.headers.to_ascii_lowercase();
+        let behind =
+            request.path == "/api/imports/config" || request.path.starts_with("/api/downloaders");
+        if request.path.starts_with("/api/auth/") {
+            assert!(
+                !headers.contains("authorization"),
+                "{} {headers}",
+                request.path
+            );
+        } else if behind {
+            assert!(
+                headers.contains("authorization: bearer jwt-run-token-never-print-me"),
+                "{} {headers}",
+                request.path
+            );
+        }
+    }
+    for secret in [
+        "account-pw-never-print-me",
+        "jwt-run-token-never-print-me",
+        "fixture-sab-key-never-real",
+        "qb-pw-never-print-me",
+    ] {
+        assert!(!printed.contains(secret), "{secret} in: {printed}");
+    }
+}
