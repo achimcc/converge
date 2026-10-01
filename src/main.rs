@@ -146,6 +146,25 @@ fn reconcile_one(
                 Some(token) => converge::secret::Secret::new(token.clone()),
                 None => {
                     let anonymous = HttpTransport::anonymous(&spec.base_url, REQUEST_TIMEOUT);
+                    // A plan writes nothing, and the account is created by a
+                    // POST: without one, all a plan can say is that it would
+                    // be set up. What lies behind the sign-in stays unread.
+                    if matches!(mode, Mode::Plan)
+                        && !questarr::has_account(&anonymous).map_err(fail)?
+                    {
+                        let change = converge::engine::Change {
+                            subject: format!("account {}", desired.username),
+                            field: String::new(),
+                            current: "(missing)".to_string(),
+                            desired: "(set up)".to_string(),
+                        };
+                        say(&format!(
+                            "{label}: note: nothing else can be planned before the account exists"
+                        ));
+                        say(&format!("{label}: would change {change}"));
+                        say(&format!("{label}: 1 field(s) differ"));
+                        return Ok(true);
+                    }
                     let token =
                         questarr::sign_in(&anonymous, &desired.username, &key).map_err(fail)?;
                     tokens.insert(at, token.expose().to_string());

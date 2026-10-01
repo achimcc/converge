@@ -2207,3 +2207,61 @@ fn control_characters_from_a_service_are_shown_as_escapes_on_stdout_and_stderr()
         "{stderr:?}"
     );
 }
+
+// --- Questarr (design §47) ---------------------------------------------------
+
+fn write_questarr_spec(dir: &Path, file: &str, base: &str, task: &str, desired: &str) -> PathBuf {
+    let path = dir.join(file);
+    let text = format!(
+        r#"{{"service":"questarr","base_url":"{base}","api_key_credential":"questarr-passwort","task":"{task}","desired":{desired}}}"#
+    );
+    std::fs::write(&path, text).unwrap();
+    std::fs::write(dir.join("questarr-passwort"), "account-pw-never-print-me\n").unwrap();
+    path
+}
+
+const QUESTARR_IMPORT: &str =
+    r#"{"username":"achim","config":{"transferMode":"copy","libraryRoot":"/tank/spiele/roms"}}"#;
+
+#[test]
+fn a_plan_against_a_questarr_without_an_account_sets_nothing_up() {
+    // A token needs the account, and the account is created by a POST. A plan
+    // writes nothing: it says the account would be set up and stops there.
+    let server = Server::start(vec![(
+        "GET",
+        "/api/auth/status",
+        200,
+        r#"{"hasUsers":false}"#.into(),
+    )]);
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_questarr_spec(
+        dir.path(),
+        "import.json",
+        &server.base_url(),
+        "import-config",
+        QUESTARR_IMPORT,
+    );
+    let out = converge()
+        .arg("plan")
+        .arg(&path)
+        .env("CREDENTIALS_DIRECTORY", dir.path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{stdout}{stderr}");
+    assert!(
+        stdout
+            .contains("questarr import-config: would change account achim: (missing) -> (set up)"),
+        "{stdout}{stderr}"
+    );
+    let seen = server.requests();
+    assert!(
+        seen.iter().all(|r| r.method == "GET"),
+        "a plan sent {:?}",
+        seen.iter()
+            .map(|r| (&r.method, &r.path))
+            .collect::<Vec<_>>()
+    );
+    assert!(!format!("{stdout}{stderr}").contains("account-pw-never-print-me"));
+}

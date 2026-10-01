@@ -88,6 +88,19 @@ pub fn probe(t: &dyn Transport) -> Result<String, Probe> {
     }
 }
 
+/// Whether Questarr has its account yet: `GET /api/auth/status`, without a
+/// token. A plan asks this before anything else -- a token needs the account,
+/// the account is created by a `POST`, and a plan writes nothing.
+pub fn has_account(t: &dyn Transport) -> Result<bool, Error> {
+    let reply = t.get(AUTH_STATUS.path)?;
+    expect_status_at(AUTH_STATUS.method, AUTH_STATUS.path, &reply, &[200])?;
+    let status: AuthStatus = serde_json::from_str(&reply.body).map_err(|e| Error::Decode {
+        path: AUTH_STATUS.path.to_string(),
+        reason: crate::error::shape(&e),
+    })?;
+    Ok(status.has_users)
+}
+
 /// The body of both the setup and the login. Built here, so the password
 /// never travels in `argv`; a serializing failure names the path only.
 fn account_body(endpoint: &Endpoint, username: &str, password: &Secret) -> Result<String, Error> {
@@ -122,14 +135,7 @@ fn token_of(endpoint: &Endpoint, body: &str) -> Result<Secret, Error> {
 /// refused sign-in is final: Questarr allows 20 of them per 15 minutes and
 /// address, successful ones included, and a wrong password stays wrong.
 pub fn sign_in(t: &dyn Transport, username: &str, password: &Secret) -> Result<Secret, Error> {
-    let reply = t.get(AUTH_STATUS.path)?;
-    expect_status_at(AUTH_STATUS.method, AUTH_STATUS.path, &reply, &[200])?;
-    let status: AuthStatus = serde_json::from_str(&reply.body).map_err(|e| Error::Decode {
-        path: AUTH_STATUS.path.to_string(),
-        reason: crate::error::shape(&e),
-    })?;
-
-    if !status.has_users {
+    if !has_account(t)? {
         let reply = t.post_json(SETUP.path, &account_body(&SETUP, username, password)?)?;
         if reply.status != 403 {
             expect_status_at(SETUP.method, SETUP.path, &reply, &[200])?;
@@ -744,6 +750,15 @@ mod tests {
         let t =
             FakeTransport::default().on_get("/api/health", vec![ok(r#"{"status":"starting"}"#)]);
         assert!(matches!(probe(&t), Err(Probe::NotYet(_))));
+    }
+
+    #[test]
+    fn whether_the_account_exists_is_asked_without_writing() {
+        let t = questarr(FRESH, vec![]);
+        assert!(!has_account(&t).unwrap());
+        let t = questarr(SET_UP, vec![]);
+        assert!(has_account(&t).unwrap());
+        assert!(t.written.borrow().is_empty());
     }
 
     #[test]
