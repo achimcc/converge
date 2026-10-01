@@ -1,0 +1,12 @@
+{
+  "enablePostProcessing": false,
+  "autoUnpack": false,
+  "renamePattern": "{Title} ({Region})",
+  "overwriteExisting": false,
+  "transferMode": "hardlink",
+  "importPlatformIds": [],
+  "ignoredExtensions": [],
+  "minFileSize": 0,
+  "libraryRoot": "/data",
+  "autoDeleteAfterImport": false
+}

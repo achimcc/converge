@@ -1,0 +1,12 @@
+{
+  "enablePostProcessing": true,
+  "autoUnpack": true,
+  "renamePattern": "{Title} ({Region})",
+  "overwriteExisting": false,
+  "transferMode": "copy",
+  "importPlatformIds": [],
+  "ignoredExtensions": [],
+  "minFileSize": 0,
+  "libraryRoot": "/tank/spiele/roms",
+  "autoDeleteAfterImport": false
+}

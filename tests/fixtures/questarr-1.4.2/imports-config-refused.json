@@ -1,0 +1,3 @@
+{
+  "error": "Invalid option: expected one of \"move\"|\"copy\"|\"hardlink\"|\"symlink\""
+}

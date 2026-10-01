@@ -1,0 +1,4 @@
+{
+  "success": false,
+  "message": "Failed to connect to SABnzbd at http://10.0.10.10:8080/api?apikey=fixture-sab-key-never-real&mode=version&output=json: The operation was aborted due to timeout"
+}

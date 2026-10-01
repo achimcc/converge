@@ -1,0 +1,30 @@
+[
+  {
+    "id": "d4ee2fe2-14c4-4d33-8e24-e685e4282306",
+    "name": "Fixture Usenet",
+    "url": "http://127.0.0.1:5998/1/api",
+    "apiKey": "********",
+    "protocol": "newznab",
+    "enabled": true,
+    "priority": 25,
+    "categories": [],
+    "rssEnabled": true,
+    "autoSearchEnabled": true,
+    "createdAt": "2026-10-01T16:32:15.384Z",
+    "updatedAt": "2026-10-01T16:32:15.384Z"
+  },
+  {
+    "id": "c7edde3b-470a-49bb-a791-996b5d17489d",
+    "name": "Fixture Torrent",
+    "url": "http://127.0.0.1:5998/2/api",
+    "apiKey": "********",
+    "protocol": "torznab",
+    "enabled": true,
+    "priority": 30,
+    "categories": [],
+    "rssEnabled": true,
+    "autoSearchEnabled": true,
+    "createdAt": "2026-10-01T16:32:15.384Z",
+    "updatedAt": "2026-10-01T16:32:15.384Z"
+  }
+]

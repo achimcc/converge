@@ -1,0 +1,10 @@
+{
+  "success": true,
+  "message": "Synced indexers from Prowlarr: 0 added, 2 updated",
+  "results": {
+    "added": 0,
+    "updated": 2,
+    "failed": 0,
+    "errors": []
+  }
+}
