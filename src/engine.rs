@@ -274,9 +274,30 @@ fn wait_ready<T: Task>(
     timing: Timing,
     start: Instant,
 ) -> Result<String, Error> {
+    wait_for(&|| task.probe(t), clock, timing, start)
+}
+
+/// Waits until `probe` answers, as `run` does before its first read. For
+/// what has to happen before a task exists: a service that hands out its
+/// token at a sign-in is asked for one before `run` is ever called, and a
+/// unit started together with the service gets there before it listens.
+pub fn await_ready(
+    probe: &dyn Fn() -> Result<String, Probe>,
+    clock: &dyn Clock,
+    timing: Timing,
+) -> Result<String, Error> {
+    wait_for(probe, clock, timing, clock.now())
+}
+
+fn wait_for(
+    probe: &dyn Fn() -> Result<String, Probe>,
+    clock: &dyn Clock,
+    timing: Timing,
+    start: Instant,
+) -> Result<String, Error> {
     let began = clock.now();
     loop {
-        match task.probe(t) {
+        match probe() {
             Ok(version) => return Ok(version),
             Err(Probe::Fatal(e)) => return Err(e),
             Err(Probe::NotYet(last)) => {
@@ -489,6 +510,35 @@ mod tests {
             err,
             "written, but after 60 s these still differ: Bluray-1080p: min 12.5 -> 35"
         );
+    }
+
+    #[test]
+    fn a_probe_is_waited_for_before_there_is_a_task() {
+        use crate::services::questarr;
+        let t = FakeTransport::default().on_get(
+            "/api/health",
+            vec![Step::Refused, Step::Refused, ok(r#"{"status":"ok"}"#)],
+        );
+        let clock = FakeClock::new();
+        let version = await_ready(&|| questarr::probe(&t), &clock, Timing::default()).unwrap();
+        assert_eq!(version, "(not reported)");
+        // Two refusals, two polls of two seconds.
+        assert_eq!(clock.elapsed(), Duration::from_secs(4));
+    }
+
+    #[test]
+    fn a_probe_that_never_answers_ends_at_the_ready_timeout() {
+        use crate::services::questarr;
+        let t = FakeTransport::default().on_get("/api/health", vec![Step::Refused]);
+        let err = await_ready(
+            &|| questarr::probe(&t),
+            &FakeClock::new(),
+            Timing::default(),
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(err.starts_with("service not ready after 120 s"), "{err}");
     }
 
     #[test]

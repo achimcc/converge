@@ -2227,12 +2227,15 @@ const QUESTARR_IMPORT: &str =
 fn a_plan_against_a_questarr_without_an_account_sets_nothing_up() {
     // A token needs the account, and the account is created by a POST. A plan
     // writes nothing: it says the account would be set up and stops there.
-    let server = Server::start(vec![(
-        "GET",
-        "/api/auth/status",
-        200,
-        r#"{"hasUsers":false}"#.into(),
-    )]);
+    let server = Server::start(vec![
+        ("GET", "/api/health", 200, r#"{"status":"ok"}"#.into()),
+        (
+            "GET",
+            "/api/auth/status",
+            200,
+            r#"{"hasUsers":false}"#.into(),
+        ),
+    ]);
     let dir = tempfile::tempdir().unwrap();
     let path = write_questarr_spec(
         dir.path(),
@@ -2423,6 +2426,10 @@ fn one_questarr_run_signs_in_once_and_prints_no_secret() {
     );
 
     let seen = server.requests();
+    // Ready first, then the sign-in: a unit started with Questarr runs before
+    // Questarr listens, and a sign-in that is refused a connection would end
+    // the run (seen on the first deploy, 2026-10-01).
+    assert_eq!(seen[0].path, "/api/health", "{:?}", seen[0].path);
     // Two specs, one sign-in: Questarr allows 20 per 15 minutes.
     let logins = seen.iter().filter(|r| r.path == "/api/auth/login").count();
     assert_eq!(

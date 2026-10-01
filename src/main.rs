@@ -146,6 +146,16 @@ fn reconcile_one(
                 Some(token) => converge::secret::Secret::new(token.clone()),
                 None => {
                     let anonymous = HttpTransport::anonymous(&spec.base_url, REQUEST_TIMEOUT);
+                    // Ready first: a unit started with Questarr gets here
+                    // before Questarr listens, and the sign-in below would
+                    // end the run at a refused connection -- before the
+                    // engine's own waiting, which only begins with the task.
+                    converge::engine::await_ready(
+                        &|| questarr::probe(&anonymous),
+                        &SystemClock,
+                        timing,
+                    )
+                    .map_err(fail)?;
                     // A plan writes nothing, and the account is created by a
                     // POST: without one, all a plan can say is that it would
                     // be set up. What lies behind the sign-in stays unread.

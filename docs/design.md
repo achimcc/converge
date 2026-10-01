@@ -2830,6 +2830,15 @@ nothing behind the sign-in can be read.
 A token that has expired or is no token is answered `403`, not `401`; only a
 missing one is `401`.
 
+**Ready first, then the sign-in (v0.44.1).** The engine waits for a service
+before a task's first read -- but the sign-in happens before there is a task,
+and a unit started together with Questarr gets there before Questarr
+listens. The first deploy showed it: `GET /api/auth/status: io: Connection
+refused`, the unit failed and its restart a minute later did the work. The
+sign-in now waits for `/api/health` first, with the engine's own loop
+(`engine::await_ready`), so a late service costs seconds and no failed run.
+SuggestArr's and Dispatcharr's logins still go without that wait.
+
 ### Download clients
 
 `GET /api/downloaders`, `POST` to add (`201`), `PATCH /api/downloaders/{id}`
