@@ -1046,6 +1046,87 @@ fn schema_check_for_ntfy_validates_specs_without_an_openapi_file() {
 }
 
 #[test]
+fn bazarr_plans_over_http_with_its_key_header_and_needs_no_openapi_file() {
+    const STATUS: &str = include_str!("fixtures/bazarr-1.6.0/constructed-status-version-only.json");
+    const PROFILES: &str = include_str!("fixtures/bazarr-1.6.0/language-profiles.json");
+    const LANGUAGES: &str = include_str!("fixtures/bazarr-1.6.0/languages.json");
+    let server = Server::start(vec![
+        ("GET", "/api/system/status", 200, STATUS.into()),
+        (
+            "GET",
+            "/api/system/languages/profiles",
+            200,
+            PROFILES.into(),
+        ),
+        ("GET", "/api/system/languages", 200, LANGUAGES.into()),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("bazarr-api-key"), "bazarr-key\n").unwrap();
+    let write = |file: &str, desired: &str| {
+        let path = dir.path().join(file);
+        let text = format!(
+            r#"{{"service":"bazarr","base_url":"{}","api_key_credential":"bazarr-api-key","task":"language-profiles","desired":{desired}}}"#,
+            server.base_url()
+        );
+        std::fs::write(&path, text).unwrap();
+        path
+    };
+    let same = write(
+        "same.json",
+        r#"{"profiles":{"DE+EN":{"languages":[{"language":"de"},{"language":"en"}]}}}"#,
+    );
+    let other = write(
+        "other.json",
+        r#"{"profiles":{"DE+EN":{"languages":[{"language":"de"},{"language":"en","hi":true}]},"EN":{"languages":[{"language":"en"}]}}}"#,
+    );
+    let plan = |spec: &Path| {
+        converge()
+            .arg("plan")
+            .arg(spec)
+            .env("CREDENTIALS_DIRECTORY", dir.path())
+            .output()
+            .unwrap()
+    };
+
+    let out = plan(&same);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("bazarr language-profiles: service version 1.6.0"),
+        "{stdout}"
+    );
+    let headers = server.requests()[0].headers.to_ascii_lowercase();
+    assert!(headers.contains("x-api-key: bazarr-key"), "{headers}");
+
+    let out = plan(&other);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(2), "{stdout}");
+    assert!(
+        stdout.contains("would change profile DE+EN: languages [de, en] -> [de, en (hi)]"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("would change profile EN: (missing) -> (added)"),
+        "{stdout}"
+    );
+    // A plan reads and nothing else.
+    assert!(server.requests().iter().all(|r| r.method == "GET"));
+
+    let out = schema_check("bazarr", None, &[&same, &other]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("bazarr: no OpenAPI description exists; 2 spec(s) valid"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn trailarr_connections_plan_over_http_sends_the_key_as_x_api_key() {
     const SETTINGS: &str =
         include_str!("fixtures/trailarr-0.11.5/constructed-settings-version-only.json");

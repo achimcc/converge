@@ -76,6 +76,29 @@ fn post_sends_json() {
 }
 
 #[test]
+fn a_form_is_percent_encoded_and_says_what_it_is() {
+    let server = Server::start(vec![("POST", "/f", 204, String::new())]);
+    let json = r#"[{"name":"DE+EN","tag":null,"n":"ä & b=c"}]"#;
+    let reply = transport(&server.base_url())
+        .post_form("/f", &[("languages-profiles", json), ("b", "1")])
+        .unwrap();
+    assert_eq!(reply.status, 204);
+    let seen = &server.requests()[0];
+    assert!(seen
+        .headers
+        .to_ascii_lowercase()
+        .contains("content-type: application/x-www-form-urlencoded"));
+    assert!(seen
+        .headers
+        .to_ascii_lowercase()
+        .contains("x-api-key: s3cret-key-value"));
+    assert_eq!(
+        seen.body,
+        "languages-profiles=%5B%7B%22name%22%3A%22DE%2BEN%22%2C%22tag%22%3Anull%2C%22n%22%3A%22%C3%A4%20%26%20b%3Dc%22%7D%5D&b=1"
+    );
+}
+
+#[test]
 fn a_refused_connection_is_an_error_without_the_key() {
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()

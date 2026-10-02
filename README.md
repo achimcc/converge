@@ -19,10 +19,10 @@ script should have been:
 
 ## Status
 
-Early. **v0.44.1** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.45.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11),
 **SuggestArr** (2.14), **Kavita** (0.9), **Audiobookshelf** (2.36),
-**Dispatcharr** (0.31), **authentik** (2026.5) and **Questarr** (1.4), each replacing a shell unit
+**Dispatcharr** (0.31), **authentik** (2026.5), **Questarr** (1.4) and **Bazarr** (1.6), each replacing a shell unit
 or an OpenTofu resource on the host it was written for:
 
 | service | task | desired state |
@@ -75,6 +75,7 @@ or an OpenTofu resource on the host it was written for:
 | Questarr | `download-clients` | download clients by name: a missing one is added, a differing field is patched alone; SABnzbd's API key lives in `username` there and is compared unseen, a `password` is answered masked and handed over on every apply; two clients of one name are refused. Every task signs in with the one account's name and password, once per run -- and the first apply sets that account up (a plan never does) |
 | Questarr | `import-config` | fields of the signed-in account's import configuration (post-processing, transfer mode, library root, ...): only the differing ones are written |
 | Questarr | `prowlarr-sync` | the indexers of one Prowlarr, copied into Questarr: a plan sees whether any indexer comes from it, an apply syncs once -- Questarr keeps no connection, and the key is answered masked |
+| Bazarr | `language-profiles` | language profiles by name, each with its languages in order (two-letter code, and the switches `hi`, `forced`, `audio_exclude`, `audio_only_include`); a missing profile is added under the next free id, differing languages are written. Bazarr takes the profiles only as a whole list and deletes what a list leaves out, so every write carries all of them -- the ones the spec does not name exactly as read. Nothing is removed; a language Bazarr does not know is an error, and so is a change of the languages under a cutoff that names one |
 | authentik | `settings` | fields of the tenant settings (`/admin/settings/`), by name — those outside the blueprint schema; `PATCH` carries only what differs |
 | SuggestArr | `configuration` | the whole flat configuration: plain fields by name, secret fields from credentials (never shown), and the Jellyfin libraries derived from what the service reports, minus the collection types named |
 
@@ -389,7 +390,7 @@ a single `DELETE`:
 | `converge apply [--deadline <s>] <spec>...` | reconcile, write, read back | 0 done, 1 any spec failed |
 | `converge plan [--deadline <s>] <spec>...` | show what `apply` would change | 0 equal, 2 differs, 1 error |
 | `converge schema-check --service <radarr\|sonarr\|lidarr\|prowlarr\|jellyfin\|trailarr\|kavita\|dispatcharr\|authentik> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
-| `converge schema-check --service <ntfy\|bindery\|seerr\|koel\|suggestarr\|audiobookshelf\|questarr> [--spec <spec>]...` | ntfy, bindery and Questarr publish no OpenAPI description, Seerr's misnames its fields, Koel's describes a long-gone version, SuggestArr's covers only its public `/api/v1`: only validate the specs (`--openapi` is refused) | 0 / 1 |
+| `converge schema-check --service <ntfy\|bindery\|seerr\|koel\|suggestarr\|audiobookshelf\|questarr\|bazarr> [--spec <spec>]...` | ntfy, bindery and Questarr publish no OpenAPI description, Bazarr's hides the endpoint that writes, Seerr's misnames its fields, Koel's describes a long-gone version, SuggestArr's covers only its public `/api/v1`: only validate the specs (`--openapi` is refused) | 0 / 1 |
 
 Several specs are processed in order; one failing does not skip the next.
 
@@ -420,7 +421,8 @@ radarr quality-definitions: changed 1 field(s), read back and confirmed
    types derive their JSON schema; `schema-check` compares it with the
    service's `openapi.json`. Run it in your build against the exact version
    you deploy, and an upgrade that renames a field fails before the deploy.
-   ntfy, bindery and Questarr publish no such description, and Seerr's and Koel's do
+   ntfy, bindery and Questarr publish no such description, Bazarr's hides its
+   settings endpoint, and Seerr's and Koel's do
    not fit the running service; for them `schema-check` validates the specs,
    and only the first two checks apply to their fields.
 

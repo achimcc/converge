@@ -27,6 +27,7 @@ pub enum Service {
     Dispatcharr,
     Authentik,
     Questarr,
+    Bazarr,
 }
 
 impl Service {
@@ -48,6 +49,7 @@ impl Service {
             Service::Dispatcharr => "dispatcharr",
             Service::Authentik => "authentik",
             Service::Questarr => "questarr",
+            Service::Bazarr => "bazarr",
         }
     }
 
@@ -62,7 +64,7 @@ impl Service {
             | Service::Seerr
             | Service::Kavita => "X-Api-Key",
             Service::Jellyfin => "X-Emby-Token",
-            Service::Trailarr => "X-API-KEY",
+            Service::Trailarr | Service::Bazarr => "X-API-KEY",
             Service::Ntfy
             | Service::Koel
             | Service::SuggestArr
@@ -161,6 +163,7 @@ enum TaskName {
     ChannelEpg,
     ImportConfig,
     ProwlarrSync,
+    LanguageProfiles,
 }
 
 impl TaskName {
@@ -230,6 +233,7 @@ impl TaskName {
             | TaskName::EpgSources
             | TaskName::ChannelEpg => service == Service::Dispatcharr,
             TaskName::ImportConfig | TaskName::ProwlarrSync => service == Service::Questarr,
+            TaskName::LanguageProfiles => service == Service::Bazarr,
         }
     }
 }
@@ -771,6 +775,9 @@ pub enum Desired {
     Dispatcharr(DispatcharrDesired),
     Questarr(QuestarrDesired),
     AuthentikSettings(BTreeMap<String, serde_json::Value>),
+    /// Bazarr's language profiles by name, each with its languages in order
+    /// (design §48).
+    BazarrLanguageProfiles(BTreeMap<String, Vec<crate::services::bazarr::Language>>),
 }
 
 /// A Questarr task (design §47). Every task signs in as `username` -- the one
@@ -1597,6 +1604,55 @@ impl Spec {
                 }
                 Desired::SuggestArrConfiguration(desired)
             }
+            TaskName::LanguageProfiles => {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct RawProfile {
+                    languages: Vec<crate::services::bazarr::Language>,
+                }
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Raw {
+                    profiles: BTreeMap<String, RawProfile>,
+                }
+                let desired: Raw = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if desired.profiles.is_empty() {
+                    return Err(invalid("desired.profiles names no profile".to_string()));
+                }
+                let mut profiles = BTreeMap::new();
+                for (name, profile) in desired.profiles {
+                    let at = format!("desired.profiles.{name}");
+                    if name.trim().is_empty() {
+                        return Err(invalid(format!("{at}: a profile needs a name")));
+                    }
+                    if profile.languages.is_empty() {
+                        return Err(invalid(format!(
+                            "{at}: a profile needs at least one language"
+                        )));
+                    }
+                    for (i, entry) in profile.languages.iter().enumerate() {
+                        let code = &entry.language;
+                        if code.len() != 2 || !code.bytes().all(|b| b.is_ascii_lowercase()) {
+                            return Err(invalid(format!(
+                                "{at}: {code:?} is not a two-letter language code"
+                            )));
+                        }
+                        // Bazarr tells two items of one language apart by
+                        // these two switches only.
+                        let same = |other: &crate::services::bazarr::Language| {
+                            other.language == *code
+                                && other.hi == entry.hi
+                                && other.forced == entry.forced
+                        };
+                        if profile.languages[..i].iter().any(same) {
+                            return Err(invalid(format!("{at}: names {} twice", entry.label())));
+                        }
+                    }
+                    profiles.insert(name, profile.languages);
+                }
+                Desired::BazarrLanguageProfiles(profiles)
+            }
             TaskName::RadioStations => {
                 #[derive(Deserialize)]
                 #[serde(deny_unknown_fields)]
@@ -2350,6 +2406,7 @@ impl Spec {
             Desired::SeerrServers(SeerrKind::Sonarr, _) => "sonarr-servers",
             Desired::SeerrWebhook(_) => "webhook",
             Desired::KoelRadioStations(_) => "radio-stations",
+            Desired::BazarrLanguageProfiles(_) => "language-profiles",
             Desired::SuggestArrConfiguration(_) => "configuration",
             Desired::KavitaServerSettings(_) => "server-settings",
             Desired::KavitaLibraries(_) | Desired::AudiobookshelfLibraries(_) => "libraries",
@@ -3904,6 +3961,60 @@ mod tests {
                 .contains("the task does not belong to service"),
             "{e}"
         );
+    }
+
+    fn bazarr(desired: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"bazarr","base_url":"http://localhost:6767","api_key_credential":"bazarr-api-key","task":"language-profiles","desired":{desired}}}"#
+        ))
+    }
+
+    #[test]
+    fn bazarr_profiles_are_named_and_hold_languages_in_order() {
+        let spec = bazarr(
+            r#"{"profiles":{"DE+EN":{"languages":[{"language":"de"},{"language":"en","forced":true}]}}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.service.key_header(), "X-API-KEY");
+        assert_eq!(spec.task_name(), "language-profiles");
+        let Desired::BazarrLanguageProfiles(profiles) = spec.desired else {
+            panic!("wrong task")
+        };
+        let labels: Vec<String> = profiles["DE+EN"].iter().map(|l| l.label()).collect();
+        assert_eq!(labels, ["de", "en (forced)"]);
+
+        assert!(reason(bazarr(r#"{"profiles":{}}"#)).contains("names no profile"));
+        assert!(reason(bazarr(r#"{"profiles":{"A":{"languages":[]}}}"#))
+            .contains("at least one language"));
+        assert!(reason(bazarr(
+            r#"{"profiles":{"A":{"languages":[{"language":"ger"}]}}}"#
+        ))
+        .contains("is not a two-letter language code"));
+        // A typo in a switch, and a field converge does not declare.
+        assert!(reason(bazarr(
+            r#"{"profiles":{"A":{"languages":[{"language":"de","force":true}]}}}"#
+        ))
+        .contains("unknown field `force`"));
+        assert!(reason(bazarr(
+            r#"{"profiles":{"A":{"languages":[{"language":"de"}],"cutoff":1}}}"#
+        ))
+        .contains("unknown field `cutoff`"));
+        // The same language twice is one item to Bazarr -- unless `hi` or
+        // `forced` tells them apart.
+        assert!(reason(bazarr(
+            r#"{"profiles":{"A":{"languages":[{"language":"de"},{"language":"de"}]}}}"#
+        ))
+        .contains("names de twice"));
+        assert!(bazarr(
+            r#"{"profiles":{"A":{"languages":[{"language":"de"},{"language":"de","hi":true}]}}}"#
+        )
+        .is_ok());
+        // Nothing is removed, so the switch that asks for it is refused.
+        let exactly = r#"{"service":"bazarr","base_url":"http://localhost:6767","api_key_credential":"k","task":"language-profiles","exactly":true,"desired":{"profiles":{"A":{"languages":[{"language":"de"}]}}}}"#;
+        assert!(reason(parse(exactly)).contains("does not support exactly"));
+        // The task is Bazarr's and nobody else's.
+        let elsewhere = exactly.replace(r#""service":"bazarr""#, r#""service":"radarr""#);
+        assert!(parse(&elsewhere).is_err());
     }
 
     fn koel(desired: &str) -> Result<Spec, Error> {

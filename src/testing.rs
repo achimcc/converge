@@ -161,4 +161,16 @@ impl Transport for FakeTransport {
         let step = take(Some(&mut *self.deletes.borrow_mut()));
         play(step, "DELETE", path)
     }
+
+    /// The write queue once more. `written` holds the fields as
+    /// `name=value` lines, not encoded, so a test reads what was meant.
+    fn post_form(&self, path: &str, fields: &[(&str, &str)]) -> Result<Reply, Error> {
+        let body: Vec<String> = fields.iter().map(|(n, v)| format!("{n}={v}")).collect();
+        self.written
+            .borrow_mut()
+            .push((path.to_string(), body.join("\n")));
+        self.record("POST", path);
+        let step = take(Some(&mut *self.puts.borrow_mut()));
+        play(step, "POST", path)
+    }
 }

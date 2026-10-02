@@ -11,8 +11,8 @@ use converge::{
     error::Error,
     schema,
     services::{
-        arr, audiobookshelf, authentik, bindery, dispatcharr, jellyfin, kavita, koel, lidarr, ntfy,
-        providers, prowlarr, questarr, seerr, servarr, suggestarr, trailarr,
+        arr, audiobookshelf, authentik, bazarr, bindery, dispatcharr, jellyfin, kavita, koel,
+        lidarr, ntfy, providers, prowlarr, questarr, seerr, servarr, suggestarr, trailarr,
     },
     spec::{Desired, DispatcharrTask, QuestarrTask, Service, Spec},
 };
@@ -21,7 +21,7 @@ const USAGE: &str = "usage:
   converge apply [--deadline <seconds>] <spec.json>...
   converge plan [--deadline <seconds>] <spec.json>...
   converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr|kavita|dispatcharr|authentik> --openapi <file> [--spec <spec.json>]...
-  converge schema-check --service ntfy|bindery|seerr|koel|suggestarr|audiobookshelf|questarr [--spec <spec.json>]...";
+  converge schema-check --service ntfy|bindery|seerr|koel|suggestarr|audiobookshelf|questarr|bazarr [--spec <spec.json>]...";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -594,6 +594,12 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::BazarrLanguageProfiles(profiles) => {
+            let task = bazarr::LanguageProfiles {
+                profiles: profiles.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
         Desired::KoelRadioStations(stations) => {
             // As for credentials: every logo file before the first request.
             let mut targets = Vec::new();
@@ -788,7 +794,8 @@ fn servarr_api(spec: &Spec) -> Result<&'static servarr::Api, Error> {
 /// ntfy (design §10), bindery (§14) and Audiobookshelf (§27) have no OpenAPI
 /// description, Seerr's
 /// (§17) misnames the fields its answers carry, and Koel's (§18) describes a
-/// version four majors old without radio stations: their specs are loaded
+/// version four majors old without radio stations, and Bazarr's (§48) hides
+/// the one endpoint that writes: their specs are loaded
 /// and validated, and that is all a build can check.
 fn undescribed_specs_check(service: &str, specs: &[PathBuf]) -> ExitCode {
     let mut findings = Vec::new();
@@ -833,7 +840,7 @@ fn schema_check(args: &[String]) -> ExitCode {
     }
     if let Some(
         name @ ("ntfy" | "bindery" | "seerr" | "koel" | "suggestarr" | "audiobookshelf"
-        | "questarr"),
+        | "questarr" | "bazarr"),
     ) = service.as_deref()
     {
         return match openapi {
@@ -1076,6 +1083,7 @@ fn schema_check(args: &[String]) -> ExitCode {
             // Not reachable: the service check above rejects ntfy, bindery,
             // Seerr, Koel and SuggestArr specs.
             Desired::KoelRadioStations(_)
+            | Desired::BazarrLanguageProfiles(_)
             | Desired::AudiobookshelfAuthSettings(_)
             | Desired::AudiobookshelfAdminPermissions(_)
             | Desired::AudiobookshelfLibraries(_)

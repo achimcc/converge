@@ -2897,6 +2897,91 @@ for the purpose (`tests/fixtures/questarr-1.4.2`, with what the recording
 settled in its `SOURCE.md`). Questarr's API names no version, so the report
 says `(not reported)`.
 
+## 48. Bazarr: language profiles, and a write that is the whole list (v0.45.0, 2026-10-02)
+
+Bazarr (1.6.0) fetches subtitles for what Radarr and Sonarr hold. Which
+languages a film or a series should have is a *language profile*, and the
+profiles live in Bazarr's database: its `config.yaml` -- which the host
+writes at every start -- names a default profile by number and cannot
+define one. The host's shell unit created the one profile when it was
+missing and never looked at it again; a profile changed by hand stayed
+changed, and the unit ran at the guest's start only.
+
+### One endpoint, hidden, and it replaces the list
+
+`GET /api/system/languages/profiles` answers the profiles.
+`POST /api/system/languages/profiles` is a `405` since some release; the
+web page writes through `POST /api/system/settings`, a **form** with the
+field `languages-profiles` holding the list as JSON. That endpoint is
+hidden from Bazarr's OpenAPI description, so `schema-check --service bazarr`
+only validates the specs, as for ntfy (§10).
+
+Read in `api/system/settings.py` of the deployed 1.6.0: for every profile
+of the posted list Bazarr updates the row with that `profileId` or inserts
+it, and then **deletes every row the list did not name**. The field is the
+whole collection. So converge reads all profiles, keeps each one's answer
+as it came, and posts every one of them back -- the ones the spec does not
+name untouched, a changed one with new `items`, a missing one at the end
+under the highest `profileId` plus one. On a fresh Bazarr that is `1`, the
+number the host's `config.yaml` names as its default.
+
+This is the first form body converge sends (`Transport::post_form`). The
+encoding is its own twenty lines rather than a feature of the HTTP client:
+one field, percent-encoded byte by byte.
+
+Bazarr reads `cutoff`, `mustContain`, `mustNotContain` and `originalFormat`
+of each posted profile with `item['…']`. A profile that lacks one would be
+a `KeyError` in the middle of that loop, after the profiles before it were
+written and before the surplus was deleted. Such a profile is an error at
+the **read**, before anything is sent.
+
+Between the read and the write a profile added by hand would be deleted by
+the write. Bazarr's own web page has the same window; converge does not
+close it.
+
+### What a spec names
+
+Profiles by name, each with its languages in order:
+
+```json
+{"profiles": {"DE+EN": {"languages": [{"language": "de"}, {"language": "en"}]}}}
+```
+
+A language is Bazarr's two-letter code and four switches -- `hi`, `forced`,
+`audio_exclude`, `audio_only_include` --, off unless named. Bazarr stores
+the switches as the strings `"True"` and `"False"`; a spec writes booleans,
+and the read takes either. The order is part of the profile: Bazarr numbers
+the items from 1 in that order.
+
+`cutoff`, the two filter lists, `originalFormat` and `tag` are not declared.
+An existing profile keeps them, a new one gets none. One guard follows from
+that: a cutoff names an item by its number, and a change of the languages
+numbers them anew. A profile with such a cutoff is refused when its
+languages differ -- "any language" (`65535`) names no item and is fine.
+
+A code Bazarr does not know (`GET /api/system/languages`, 187 of them) is an
+error before any write. Whether a language is *enabled* is not checked: the
+web page offers only enabled ones, the API and the subtitle search take any,
+and the host's instance has run with none enabled since its first day.
+
+Bazarr keeps profile names not unique; two profiles of a declared name are
+refused rather than one of them picked. Nothing is removed and `exactly` is
+not taken -- series and films point at profiles by number.
+
+### After the write
+
+The same request makes Bazarr recompute the missing subtitles of every
+series and film before it answers `204`. On a large library that can take
+longer than a request may; the write then fails as a request error although
+the profiles are stored, and the next run finds nothing to do.
+
+### Checked how
+
+Field names come from the two recorded answers
+(`tests/fixtures/bazarr-1.6.0`). The profile there was created by the shell
+unit this task replaces, and the test that adds a profile to an empty list
+expects exactly that answer in the form field.
+
 ## 20. Not in the pilot
 
 

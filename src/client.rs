@@ -18,6 +18,33 @@ pub trait Transport {
     /// Removes one entry. Only a task with `exactly` sends this, and only
     /// for an entry `Task::surplus` named (design §39).
     fn delete(&self, path: &str) -> Result<Reply, Error>;
+    /// A form body. Bazarr's settings endpoint reads `request.form` and
+    /// nothing else (design §48).
+    fn post_form(&self, path: &str, fields: &[(&str, &str)]) -> Result<Reply, Error>;
+}
+
+/// `fields` as `application/x-www-form-urlencoded`: everything but ASCII
+/// letters, digits and `-._~` is percent-encoded, byte by byte.
+pub fn form_body(fields: &[(&str, &str)]) -> String {
+    fn encode(text: &str, out: &mut String) {
+        for byte in text.bytes() {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+                out.push(byte as char);
+            } else {
+                out.push_str(&format!("%{byte:02X}"));
+            }
+        }
+    }
+    let mut body = String::new();
+    for (i, (name, value)) in fields.iter().enumerate() {
+        if i > 0 {
+            body.push('&');
+        }
+        encode(name, &mut body);
+        body.push('=');
+        encode(value, &mut body);
+    }
+    body
 }
 
 pub struct HttpTransport {
@@ -203,6 +230,14 @@ impl Transport for HttpTransport {
             .headers(self.agent.delete(format!("{}{path}", self.base_url)))
             .call();
         Self::finish("DELETE", path, result)
+    }
+
+    fn post_form(&self, path: &str, fields: &[(&str, &str)]) -> Result<Reply, Error> {
+        let result = self
+            .headers(self.agent.post(format!("{}{path}", self.base_url)))
+            .content_type("application/x-www-form-urlencoded")
+            .send(form_body(fields));
+        Self::finish("POST", path, result)
     }
 }
 
