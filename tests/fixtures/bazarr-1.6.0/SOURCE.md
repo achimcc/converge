@@ -1,6 +1,6 @@
 # Source of these fixtures
 
-Recorded 2026-10-02 around 12:30 CEST from a running Bazarr 1.6.0 (the
+Recorded 2026-10-02 around 23:30 CEST from a running Bazarr 1.6.0 (the
 nixpkgs package, native NixOS module) on the host this program was written
 for:
 
