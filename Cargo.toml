@@ -15,3 +15,7 @@ ureq = { version = "3.4.1", default-features = false }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[lints.rust]
+# No `unsafe` anywhere in this crate, and no `#[allow]` can bring it back.
+unsafe_code = "forbid"
