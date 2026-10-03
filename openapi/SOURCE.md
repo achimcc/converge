@@ -22,6 +22,7 @@ holds names, types and defaults, no configured values.
 | file | source | sha256 |
 |---|---|---|
 | `trailarr-0.11.5.json` | `GET /api/v1/openapi.json` of that container, `jq -S` | `11251eebd9493881e400c7b44e548f2be36cf1c2f09b9e38f5b19878c5a66257` |
+| `trailarr-0.13.0.json` | `GET /api/v1/openapi.json` of a throwaway container of `docker.io/nandyalu/trailarr:0.13.0@sha256:39c4ce70fb6b00ab5fe0724c02b2a736e66649f0edd53141cbe976bf7fb4b792` (no volume, fetched 2026-10-03 09:23 CEST on the host), `jq -S` | `120e3179d8f27db8eb233a90e36a74eb92d75155dbc5eee22964f3329a7ec8a0` |
 
 `kavita-0.9.1.4.json` comes from the source tree of the release Kavita ships
 as `v0.9.1.4` (https://github.com/kareadita/kavita/archive/v0.9.1.4.tar.gz,
