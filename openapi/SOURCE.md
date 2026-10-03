@@ -23,6 +23,17 @@ holds names, types and defaults, no configured values.
 |---|---|---|
 | `trailarr-0.11.5.json` | `GET /api/v1/openapi.json` of that container, `jq -S` | `11251eebd9493881e400c7b44e548f2be36cf1c2f09b9e38f5b19878c5a66257` |
 
+Since then Trailarr commits its description (`backend/export_openapi.py`,
+"run this after any change to a route, and commit the result").
+`trailarr-0.13.0.json` is that file at the release tag, fetched 2026-10-02
+late evening, byte for byte. Its `info.version` is `v0.13.0`, and its paths
+start with `/api/v1/` as the 0.11.5 answer's did. The fixtures stay those of
+0.11.5: no 0.13.0 instance was running to record from.
+
+| file | source | sha256 |
+|---|---|---|
+| `trailarr-0.13.0.json` | https://raw.githubusercontent.com/nandyalu/trailarr/v0.13.0/docs/references/api-docs/openapi.json | `f39a31f4043ee026c8ea95fe8e6501e3f43ad20c0dd7f15c2af4809c7d6dc785` |
+
 `kavita-0.9.1.4.json` comes from the source tree of the release Kavita ships
 as `v0.9.1.4` (https://github.com/kareadita/kavita/archive/v0.9.1.4.tar.gz,
 the nixpkgs source of the package the host deploys; fetched 2026-09-18),

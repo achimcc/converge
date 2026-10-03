@@ -479,6 +479,41 @@ fn the_hosts_connection_fields_are_properties_of_both_bodies() {
     );
 }
 
+/// 0.13.0 publishes its description in its repository; the host moved to
+/// it with the fixtures still from 0.11.5. Names are all a description can
+/// vouch for -- the endpoints, the wire types and the host's fields.
+#[test]
+fn trailarr_0_13_0_still_fits_the_endpoints_types_and_the_hosts_fields() {
+    let d = doc("trailarr-0.13.0");
+    assert_eq!(trailarr_findings(&d), Vec::<String>::new());
+    let mut map = std::collections::BTreeMap::new();
+    for (k, v) in host_connection().as_object().unwrap() {
+        map.insert(k.clone(), v.clone());
+    }
+    for component in ["ConnectionCreate", "ConnectionUpdate"] {
+        assert_eq!(
+            converge::schema::check_paths(&d, component, &map),
+            Vec::<String>::new(),
+            "{component}"
+        );
+    }
+    let profile: std::collections::BTreeMap<String, Value> =
+        serde_json::from_value(serde_json::json!({
+            "search_query": "{title} {year} deutscher trailer", "always_search": true,
+            "exclude_words": "reaction", "file_format": "mp4",
+            "video_format": "h264", "audio_format": "aac"
+        }))
+        .unwrap();
+    assert_eq!(
+        converge::schema::check_paths(
+            &d,
+            converge::services::trailarr::TRAILER_PROFILE_READ,
+            &profile
+        ),
+        Vec::<String>::new()
+    );
+}
+
 #[test]
 fn monitor_is_not_a_trailarr_field() {
     // What the host's shell unit sent for years; pydantic ignored it.
