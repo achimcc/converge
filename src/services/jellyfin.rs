@@ -127,7 +127,16 @@ pub const DISPLAY_PREFERENCES_WRITE: Endpoint = Endpoint {
     request: Some(Shape::Document("DisplayPreferencesDto")),
     response: None,
 };
-pub const ENDPOINTS: [Endpoint; 16] = [
+/// The whole configuration of one account -- what its owner chose under
+/// "playback" and "subtitles". The account is a query parameter; Jellyfin
+/// replaces the document like a policy (design §49).
+pub const USER_CONFIGURATION_WRITE: Endpoint = Endpoint {
+    method: "POST",
+    path: "/Users/Configuration",
+    request: Some(Shape::Document("UserConfiguration")),
+    response: None,
+};
+pub const ENDPOINTS: [Endpoint; 17] = [
     SYSTEM_INFO,
     CONFIGURATION_READ,
     CONFIGURATION_WRITE,
@@ -142,6 +151,7 @@ pub const ENDPOINTS: [Endpoint; 16] = [
     PLUGIN_CONFIGURATION_WRITE,
     USERS,
     USER_POLICY_WRITE,
+    USER_CONFIGURATION_WRITE,
     DISPLAY_PREFERENCES_READ,
     DISPLAY_PREFERENCES_WRITE,
 ];
@@ -151,6 +161,7 @@ pub const SERVER_CONFIGURATION: &str = "ServerConfiguration";
 pub const LIBRARY_OPTIONS: &str = "LibraryOptions";
 pub const TASK_TRIGGER_INFO: &str = "TaskTriggerInfo";
 pub const USER_POLICY: &str = "UserPolicy";
+pub const USER_CONFIGURATION: &str = "UserConfiguration";
 
 pub fn wire_types() -> Vec<schemars::Schema> {
     vec![
@@ -199,8 +210,8 @@ pub struct VirtualFolderInfo {
 /// something or which picture they picked, and a change about an account
 /// names nothing but its name and the fields the spec asked for.
 ///
-/// `Policy` is a document whose fields a spec names, so it stays a `Value`
-/// and is written back as it was read.
+/// `Policy` and `Configuration` are documents whose fields a spec names, so
+/// they stay a `Value` and are written back as they were read.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
 pub struct UserDto {
@@ -210,6 +221,9 @@ pub struct UserDto {
     #[serde(default)]
     #[schemars(skip)]
     pub policy: Option<Value>,
+    #[serde(default)]
+    #[schemars(skip)]
+    pub configuration: Option<Value>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -1056,17 +1070,135 @@ impl UserDto {
         format!("account {}", self.name.as_deref().unwrap_or(&self.id))
     }
 
-    /// The account's policy as an object. Jellyfin declares it nullable, and
-    /// a spec's fields have nothing to be compared against without it.
-    fn policy(&self) -> Result<&Map<String, Value>, Error> {
-        self.policy
-            .as_ref()
-            .and_then(Value::as_object)
-            .ok_or_else(|| Error::MissingField(vec![format!("{}: Policy", self.label())]))
+    /// One of the two documents the answer embeds, as an object. Jellyfin
+    /// declares both nullable, and a spec's fields have nothing to be
+    /// compared against without it.
+    fn embedded(&self, which: Embedded) -> Result<&Map<String, Value>, Error> {
+        match which {
+            Embedded::Policy => &self.policy,
+            Embedded::Configuration => &self.configuration,
+        }
+        .as_ref()
+        .and_then(Value::as_object)
+        .ok_or_else(|| Error::MissingField(vec![format!("{}: {}", self.label(), which.name())]))
     }
 }
 
-/// A status these two tasks do not accept. Nothing from the body reaches the
+/// The two documents `GET /Users` embeds per account. Both are C# classes
+/// Jellyfin replaces as a whole on a write, so both are reconciled the same
+/// way; they differ in their name and in where the write goes.
+#[derive(Debug, Clone, Copy)]
+enum Embedded {
+    Policy,
+    Configuration,
+}
+
+impl Embedded {
+    /// The key in `UserDto`, and what a change calls the document.
+    fn name(self) -> &'static str {
+        match self {
+            Embedded::Policy => "Policy",
+            Embedded::Configuration => "Configuration",
+        }
+    }
+
+    fn endpoint(self) -> Endpoint {
+        match self {
+            Embedded::Policy => USER_POLICY_WRITE,
+            Embedded::Configuration => USER_CONFIGURATION_WRITE,
+        }
+    }
+
+    /// Where one account's document is written. The id was checked to be a
+    /// plain path segment when the accounts were read.
+    fn write_path(self, user_id: &str) -> String {
+        match self {
+            Embedded::Policy => USER_POLICY_WRITE.path.replace("{userId}", user_id),
+            Embedded::Configuration => {
+                format!("{}?userId={user_id}", USER_CONFIGURATION_WRITE.path)
+            }
+        }
+    }
+
+    /// The differences between every account's document and the fields
+    /// `set_for` names for it.
+    fn diff(
+        self,
+        users: &[UserDto],
+        set_for: impl Fn(&UserDto) -> BTreeMap<String, Value>,
+    ) -> Result<Vec<Change>, Error> {
+        let mut changes = Vec::new();
+        let mut missing = Vec::new();
+        for user in users {
+            let set = set_for(user);
+            if set.is_empty() {
+                continue;
+            }
+            let document = user.embedded(self)?;
+            for (field, desired) in &set {
+                match document.get(field) {
+                    // Unlike a custom pref, a field of these documents is
+                    // one Jellyfin always answers with: a name it does not
+                    // know is a misspelling, not something to add.
+                    None => missing.push(format!("{}: {}.{field}", user.label(), self.name())),
+                    Some(now) if now != desired => changes.push(Change {
+                        subject: user.label(),
+                        field: format!("{}.{field}", self.name()),
+                        current: shortened(now),
+                        desired: shortened(desired),
+                    }),
+                    Some(_) => {}
+                }
+            }
+        }
+        if missing.is_empty() {
+            Ok(changes)
+        } else {
+            Err(Error::MissingField(missing))
+        }
+    }
+
+    /// One POST per account that differs, each with that account's whole
+    /// document as it was read and only the named fields changed.
+    fn write(
+        self,
+        t: &dyn Transport,
+        users: &[UserDto],
+        set_for: impl Fn(&UserDto) -> BTreeMap<String, Value>,
+    ) -> Result<(), Error> {
+        for user in users {
+            let set = set_for(user);
+            if set.is_empty() {
+                continue;
+            }
+            let document = user.embedded(self)?;
+            if set.iter().all(|(f, d)| document.get(f) == Some(d)) {
+                continue;
+            }
+            let mut updated = document.clone();
+            for (field, value) in &set {
+                if !updated.contains_key(field) {
+                    return Err(Error::MissingField(vec![format!(
+                        "{}: {}.{field}",
+                        user.label(),
+                        self.name()
+                    )]));
+                }
+                updated.insert(field.clone(), value.clone());
+            }
+            let path = self.write_path(&user.id);
+            let method = self.endpoint().method;
+            let body = serialize(method, &path, &Value::Object(updated))?;
+            let reply = t.post_json(&path, &body)?;
+            if !matches!(reply.status, 200 | 204) {
+                return Err(refuse_account(method, &path, reply.status));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A status the account tasks do not accept. Nothing from the body reaches the
 /// message: every answer here is a document about accounts.
 fn refuse_account(method: &'static str, path: &str, status: u16) -> Error {
     Error::Status {
@@ -1168,35 +1300,7 @@ impl Task for UserPolicies {
     }
 
     fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
-        let mut changes = Vec::new();
-        let mut missing = Vec::new();
-        for user in current {
-            let set = self.set_for(user);
-            if set.is_empty() {
-                continue;
-            }
-            let policy = user.policy()?;
-            for (field, desired) in &set {
-                match policy.get(field) {
-                    // Unlike a custom pref, a policy field is one Jellyfin
-                    // always answers with: a name it does not know is a
-                    // misspelling, not something to add.
-                    None => missing.push(format!("{}: Policy.{field}", user.label())),
-                    Some(now) if now != desired => changes.push(Change {
-                        subject: user.label(),
-                        field: format!("Policy.{field}"),
-                        current: shortened(now),
-                        desired: shortened(desired),
-                    }),
-                    Some(_) => {}
-                }
-            }
-        }
-        if missing.is_empty() {
-            Ok(changes)
-        } else {
-            Err(Error::MissingField(missing))
-        }
+        Embedded::Policy.diff(current, |user| self.set_for(user))
     }
 
     fn notes(&self, current: &Self::Current) -> Vec<String> {
@@ -1206,37 +1310,51 @@ impl Task for UserPolicies {
             .collect()
     }
 
-    /// One POST per account that differs, each with that account's whole
-    /// policy as it was read and only the named fields changed.
     fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
-        for user in current {
-            let set = self.set_for(user);
-            let policy = user.policy()?;
-            if set.is_empty() || set.iter().all(|(f, d)| policy.get(f) == Some(d)) {
-                continue;
-            }
-            let mut updated = policy.clone();
-            for (field, value) in &set {
-                if !updated.contains_key(field) {
-                    return Err(Error::MissingField(vec![format!(
-                        "{}: Policy.{field}",
-                        user.label()
-                    )]));
-                }
-                updated.insert(field.clone(), value.clone());
-            }
-            let path = USER_POLICY_WRITE.path.replace("{userId}", &user.id);
-            let body = serialize(USER_POLICY_WRITE.method, &path, &Value::Object(updated))?;
-            let reply = t.post_json(&path, &body)?;
-            if !matches!(reply.status, 200 | 204) {
-                return Err(refuse_account(
-                    USER_POLICY_WRITE.method,
-                    &path,
-                    reply.status,
-                ));
-            }
-        }
-        Ok(())
+        Embedded::Policy.write(t, current, |user| self.set_for(user))
+    }
+}
+
+// --- user-configurations (design §49) ---------------------------------------
+
+/// The configuration fields every account must carry, and the ones single
+/// accounts carry instead -- `SubtitleMode`, say. Read and written like a
+/// policy: the document is embedded in `GET /Users` and replaced as a whole.
+pub struct UserConfigurations {
+    pub all: BTreeMap<String, Value>,
+    pub accounts: BTreeMap<String, BTreeMap<String, Value>>,
+}
+
+impl UserConfigurations {
+    fn set_for(&self, user: &UserDto) -> BTreeMap<String, Value> {
+        merged(&self.all, &self.accounts, user)
+    }
+}
+
+impl Task for UserConfigurations {
+    type Current = Vec<UserDto>;
+
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        probe(t)
+    }
+
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        read_users(t)
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        Embedded::Configuration.diff(current, |user| self.set_for(user))
+    }
+
+    fn notes(&self, current: &Self::Current) -> Vec<String> {
+        absent_accounts(current, self.accounts.keys())
+            .iter()
+            .map(|name| absent_note(name))
+            .collect()
+    }
+
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        Embedded::Configuration.write(t, current, |user| self.set_for(user))
     }
 }
 
@@ -2444,6 +2562,115 @@ mod tests {
             assert!(err.contains(&format!("HTTP {status}")), "{err}");
             assert!(err.contains(&account_id("konto1")), "{err}");
         }
+    }
+
+    // --- user-configurations (design §49) -----------------------------------
+
+    fn only_forced() -> UserConfigurations {
+        UserConfigurations {
+            all: fields(&[("SubtitleMode", json!("OnlyForced"))]),
+            accounts: BTreeMap::new(),
+        }
+    }
+
+    /// Every recorded account carries the factory value, `Default`.
+    #[test]
+    fn user_configurations_recorded_state_is_already_desired() {
+        let task = UserConfigurations {
+            all: fields(&[("SubtitleMode", json!("Default"))]),
+            accounts: BTreeMap::new(),
+        };
+        let t = users_transport(USERS_JSON);
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+        task.write(&t, &current).unwrap();
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn user_configurations_write_the_whole_configuration_with_the_account_in_the_query() {
+        let task = UserConfigurations {
+            all: BTreeMap::new(),
+            accounts: [(
+                "konto2".to_string(),
+                fields(&[("SubtitleMode", json!("OnlyForced"))]),
+            )]
+            .into_iter()
+            .collect(),
+        };
+        let t = users_transport(USERS_JSON);
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            changes[0].to_string(),
+            "account konto2: Configuration.SubtitleMode \"Default\" -> \"OnlyForced\""
+        );
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1, "one POST, for the one account");
+        assert_eq!(
+            written[0].0,
+            format!("/Users/Configuration?userId={}", account_id("konto2"))
+        );
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        let mut expected = account("konto2")["Configuration"].clone();
+        expected["SubtitleMode"] = json!("OnlyForced");
+        assert_eq!(
+            sent, expected,
+            "the whole configuration as read, with only SubtitleMode different"
+        );
+    }
+
+    #[test]
+    fn a_configuration_for_all_is_one_change_and_one_write_per_account() {
+        let task = only_forced();
+        let t = FakeTransport::default()
+            .on_get(USERS.path, vec![ok(USERS_JSON)])
+            .on_put(vec![Step::Answer(204, String::new()); 9]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.diff(&current).unwrap().len(), 9);
+        task.write(&t, &current).unwrap();
+        assert_eq!(t.written.borrow().len(), 9);
+    }
+
+    /// `AudioLanguagePreference` is a property of `UserConfiguration`, but
+    /// Jellyfin leaves it out while it is null -- the recorded answer has
+    /// fifteen of the sixteen. Naming it is an error, not an addition: the
+    /// same rule as for a policy, and for a misspelt name.
+    #[test]
+    fn a_configuration_field_the_answer_does_not_carry_is_an_error_before_the_write() {
+        for field in ["SubtitelMode", "AudioLanguagePreference"] {
+            let task = UserConfigurations {
+                all: fields(&[(field, json!("x"))]),
+                accounts: BTreeMap::new(),
+            };
+            let t = users_transport(USERS_JSON);
+            let current = task.read(&t).unwrap();
+            let err = task.diff(&current).err().unwrap().to_string();
+            assert!(
+                err.starts_with(&format!(
+                    "the answer has no such field: account konto1: Configuration.{field}"
+                )),
+                "{err}"
+            );
+            assert!(task.write(&t, &current).is_err());
+            assert!(t.written.borrow().is_empty());
+        }
+    }
+
+    #[test]
+    fn an_account_without_a_configuration_is_an_error() {
+        let answer = with(USERS_JSON, |v| {
+            v[0].as_object_mut().unwrap().remove("Configuration");
+        });
+        let task = only_forced();
+        let t = users_transport(&answer);
+        let current = task.read(&t).unwrap();
+        assert_eq!(
+            task.diff(&current).err().unwrap().to_string(),
+            "the answer has no such field: account konto1: Configuration"
+        );
     }
 
     fn favourites_off() -> DisplayPreferences {

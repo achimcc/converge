@@ -124,6 +124,7 @@ enum TaskName {
     PluginConfigurations,
     NamedConfiguration,
     UserPolicies,
+    UserConfigurations,
     DisplayPreferences,
     Connections,
     TrailerProfiles,
@@ -183,6 +184,7 @@ impl TaskName {
             | TaskName::PluginConfigurations
             | TaskName::NamedConfiguration
             | TaskName::UserPolicies
+            | TaskName::UserConfigurations
             | TaskName::DisplayPreferences => service == Service::Jellyfin,
             TaskName::Connections | TaskName::TrailerProfiles => service == Service::Trailarr,
             TaskName::AccountSubscriptions => service == Service::Ntfy,
@@ -372,6 +374,9 @@ impl NamedKey {
 /// `Name` of the account. Each key is a top-level field of `UserPolicy`; a
 /// policy is written as a whole, so a field converge does not name travels
 /// back as it was read.
+///
+/// `user-configurations` (design §49) takes the same shape, with the fields
+/// of `UserConfiguration`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UserPolicySettings {
@@ -742,6 +747,7 @@ pub enum Desired {
     PluginConfigurations(BTreeMap<String, PluginSettings>),
     NamedConfiguration(NamedConfigurationSettings),
     UserPolicies(UserPolicySettings),
+    UserConfigurations(UserPolicySettings),
     DisplayPreferences(DisplayPreferencesSettings),
     Connections(TrailarrConnections),
     TrailerProfiles(TrailerProfileSettings),
@@ -1969,14 +1975,15 @@ impl Spec {
                 field_paths(&settings.set, "desired.set").map_err(invalid)?;
                 Desired::NamedConfiguration(settings)
             }
-            TaskName::UserPolicies => {
+            // Both documents are flat C# classes: every key is a top-level
+            // field, and neither has a nested document a path could reach
+            // into.
+            name @ (TaskName::UserPolicies | TaskName::UserConfigurations) => {
                 let settings: UserPolicySettings = serde_json::from_value(raw.desired)
                     .map_err(|e| invalid(format!("desired: {e}")))?;
                 if settings.all.is_empty() && settings.accounts.is_empty() {
                     return Err(invalid("desired names no field".to_string()));
                 }
-                // Every key is a top-level field of `UserPolicy`: a policy
-                // has no nested document a path could reach into.
                 if !settings.all.is_empty() {
                     plain_fields(&settings.all, "desired.all", &[]).map_err(invalid)?;
                 }
@@ -1984,7 +1991,11 @@ impl Spec {
                     account_name(name, "desired.accounts").map_err(invalid)?;
                     plain_fields(set, &format!("desired.accounts.{name}"), &[]).map_err(invalid)?;
                 }
-                Desired::UserPolicies(settings)
+                if matches!(name, TaskName::UserPolicies) {
+                    Desired::UserPolicies(settings)
+                } else {
+                    Desired::UserConfigurations(settings)
+                }
             }
             TaskName::DisplayPreferences => {
                 let settings: DisplayPreferencesSettings = serde_json::from_value(raw.desired)
@@ -2379,6 +2390,7 @@ impl Spec {
             Desired::PluginConfigurations(_) => "plugin-configurations",
             Desired::NamedConfiguration(_) => "named-configuration",
             Desired::UserPolicies(_) => "user-policies",
+            Desired::UserConfigurations(_) => "user-configurations",
             Desired::DisplayPreferences(_) => "display-preferences",
             Desired::Connections(_) => "connections",
             Desired::TrailerProfiles(_) => "trailer-profiles",
@@ -3271,6 +3283,44 @@ mod tests {
             jellyfin("user-policies", r#"{"accounts":{"k":{"IsHidden":true}}}"#).is_ok(),
             "accounts alone"
         );
+    }
+
+    #[test]
+    fn parses_the_account_configurations_like_the_policies() {
+        let spec = jellyfin(
+            "user-configurations",
+            r#"{"all":{"SubtitleMode":"OnlyForced"},
+                "accounts":{"konto1":{"SubtitleMode":"Always"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "user-configurations");
+        match &spec.desired {
+            Desired::UserConfigurations(s) => {
+                assert_eq!(s.all["SubtitleMode"], serde_json::json!("OnlyForced"));
+                assert_eq!(
+                    s.accounts["konto1"]["SubtitleMode"],
+                    serde_json::json!("Always")
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        for (desired, why) in [
+            (r#"{}"#, "neither map"),
+            (
+                r#"{"accounts":{"konto1":{}}}"#,
+                "an account without a field",
+            ),
+            (
+                r#"{"all":{"Configuration.SubtitleMode":"None"}}"#,
+                "a path, not a top-level field",
+            ),
+            (
+                r#"{"all":{"SubtitleMode":"None"},"extra":1}"#,
+                "an unknown key",
+            ),
+        ] {
+            assert!(jellyfin("user-configurations", desired).is_err(), "{why}");
+        }
     }
 
     #[test]

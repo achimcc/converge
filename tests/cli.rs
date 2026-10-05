@@ -103,7 +103,7 @@ fn schema_check_reads_jellyfin_specs_and_rejects_a_trigger_type_outside_the_enum
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("jellyfin: 16 endpoints and their wire types match"),
+        stdout.contains("jellyfin: 17 endpoints and their wire types match"),
         "{stdout}"
     );
     assert!(
@@ -251,6 +251,43 @@ fn schema_check_counts_both_account_maps_and_names_the_account_of_a_finding() {
         "{stderr}"
     );
 
+    // The same check for `user-configurations`, against `UserConfiguration`
+    // (design §49): the task is read from the spec, not assumed.
+    let configuration = |name: &str, desired: &str| {
+        let path = dir.path().join(name);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"service":"jellyfin","base_url":"http://localhost:8096","api_key_credential":"k","task":"user-configurations","desired":{desired}}}"#
+            ),
+        )
+        .unwrap();
+        path
+    };
+    let out = check(&configuration(
+        "configuration.json",
+        r#"{"all":{"SubtitleMode":"OnlyForced"},"accounts":{"konto1":{"SubtitleMode":"Always"}}}"#,
+    ));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("2 spec field(s) in 1 spec(s) match"),
+        "{stdout}"
+    );
+    // A policy field is not a configuration field.
+    let out = check(&configuration(
+        "wrong-document.json",
+        r#"{"accounts":{"konto1":{"IsAdministrator":true}}}"#,
+    ));
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(
+            "account konto1: UserConfiguration.IsAdministrator: UserConfiguration has no property IsAdministrator"
+        ),
+        "{stderr}"
+    );
+
     // A display-preferences spec has no field a schema knows -- but its
     // endpoints are checked, so the run still says something.
     let prefs = dir.path().join("prefs.json");
@@ -263,7 +300,7 @@ fn schema_check_counts_both_account_maps_and_names_the_account_of_a_finding() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(
-        stdout.contains("jellyfin: 16 endpoints and their wire types match"),
+        stdout.contains("jellyfin: 17 endpoints and their wire types match"),
         "{stdout}"
     );
 }

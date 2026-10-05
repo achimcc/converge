@@ -306,6 +306,26 @@ fn null_needs_a_nullable_property() {
     );
 }
 
+/// The fields of a `user-configurations` spec are top-level properties of
+/// `UserConfiguration` (design §49), and `SubtitleMode` is an enum behind an
+/// `allOf` reference: a value outside it is a build error.
+#[test]
+fn account_configuration_fields_are_checked_against_user_configuration() {
+    let component = converge::services::jellyfin::USER_CONFIGURATION;
+    assert_eq!(
+        paths(component, serde_json::json!({"SubtitleMode": "OnlyForced"})),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        paths(component, serde_json::json!({"SubtitelMode": "None"})),
+        ["UserConfiguration.SubtitelMode: UserConfiguration has no property SubtitelMode"]
+    );
+    assert_eq!(
+        paths(component, serde_json::json!({"SubtitleMode": "Forced"})),
+        ["UserConfiguration.SubtitleMode: \"Forced\" is not one of Default, Always, OnlyForced, None, Smart"]
+    );
+}
+
 /// The fields of a `user-policies` spec are top-level properties of
 /// `UserPolicy` (design §40): a misspelt name, a wrong type and a value
 /// outside an enum are all build errors.

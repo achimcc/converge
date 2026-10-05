@@ -417,6 +417,13 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::UserConfigurations(settings) => {
+            let task = jellyfin::UserConfigurations {
+                all: settings.all.clone(),
+                accounts: settings.accounts.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
         Desired::DisplayPreferences(settings) => {
             let task = jellyfin::DisplayPreferences {
                 client: settings.client.clone(),
@@ -1024,15 +1031,20 @@ fn schema_check(args: &[String]) -> ExitCode {
                 settings.set.len(),
             ),
             // Every field of both maps is a top-level property of
-            // `UserPolicy`, checked for existence, type and enum (§40).
-            Desired::UserPolicies(settings) => {
-                let mut found =
-                    schema::check_paths(&document, jellyfin::USER_POLICY, &settings.all);
+            // `UserPolicy` (§40) or of `UserConfiguration` (§49), checked
+            // for existence, type and enum.
+            Desired::UserPolicies(settings) | Desired::UserConfigurations(settings) => {
+                let component = if matches!(spec.desired, Desired::UserPolicies(_)) {
+                    jellyfin::USER_POLICY
+                } else {
+                    jellyfin::USER_CONFIGURATION
+                };
+                let mut found = schema::check_paths(&document, component, &settings.all);
                 let mut count = settings.all.len();
                 for (name, set) in &settings.accounts {
                     count += set.len();
                     found.extend(
-                        schema::check_paths(&document, jellyfin::USER_POLICY, set)
+                        schema::check_paths(&document, component, set)
                             .into_iter()
                             .map(|f| format!("account {name}: {f}")),
                     );

@@ -2982,6 +2982,48 @@ Field names come from the two recorded answers
 unit this task replaces, and the test that adds a profile to an empty list
 expects exactly that answer in the form field.
 
+## 49. Jellyfin: account configurations (v0.46.0, 2026-10-05)
+
+An account has a second document next to its policy: `UserConfiguration`,
+what its owner chooses under "playback" and "subtitles". The host needs one
+field of it. A `.strm` there is a remote source the server transcodes; a
+subtitle track marked as default makes a client ask for it burnt in, Jellyfin
+then extracts every subtitle track first -- which reads the whole file from
+the provider -- and the client gives up after eight seconds while the
+extraction takes eleven minutes. `SubtitleMode = Default` is the factory
+value of every account, so every new account walks into it.
+
+| task | read | write |
+|---|---|---|
+| `user-configurations` | `GET /Users` (`UserDto` with `Configuration` embedded) | `POST /Users/Configuration?userId={id}` with the whole `UserConfiguration`, per differing account |
+
+**It is `user-policies` with another document** (§40), and the code says so:
+both go through one implementation that differs in the document's name and in
+where the write goes. `all` and `accounts`, the whole document on a write, an
+absent account name as a note -- all as there.
+The account travels in the query: the description of 10.11.11 knows
+`POST /Users/Configuration` only, not a path with the id in it.
+
+**A field the answer does not carry is an error here too -- and one real
+field is such a field.** `UserConfiguration` declares sixteen properties, the
+recorded answer carries fifteen: `AudioLanguagePreference` is left out while
+it is null. A spec naming it passes `schema-check` and fails at the first
+run, with `the answer has no such field`. That is the rule of §40 applied
+without an exception, on purpose: adding a key the answer lacks is how a
+misspelt name gets written back forever, and nothing here needs that field.
+
+**The price is not technical.** A policy is the administrator's; a
+configuration is the owner's. A spec that names `SubtitleMode` in `all` puts
+back, at every run, what somebody changed in their own settings. `accounts`
+is the way to say that one person wants it otherwise.
+
+### Checked how
+
+`tests/fixtures/jellyfin-10.11.11/users.json`, recorded 2026-09-22 for §40,
+carries each account's `Configuration` as recorded; no new answer was needed.
+The enum of `SubtitleMode` sits behind an `allOf` reference in the
+description, and `tests/schema.rs` holds that a value outside it is found.
+
 ## 20. Not in the pilot
 
 
