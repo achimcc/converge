@@ -1,0 +1,66 @@
+[
+  {
+    "allowMetadataMatching": true,
+    "allowScrobbling": true,
+    "collapseSeriesRelationships": false,
+    "coverImage": null,
+    "defaultLanguage": "",
+    "enableMetadata": true,
+    "excludePatterns": [
+      ""
+    ],
+    "folderWatching": true,
+    "folders": [
+      "/tank/data/media/books"
+    ],
+    "id": 1,
+    "includeInDashboard": true,
+    "includeInRecommended": true,
+    "includeInSearch": true,
+    "inheritWebLinksFromFirstChapter": false,
+    "lastScanned": "2026-09-18T00:00:11.6220662",
+    "libraryFileTypes": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "manageCollections": false,
+    "manageReadingLists": false,
+    "metadataProvider": 2,
+    "name": "Buecher",
+    "removePrefixForSortName": false,
+    "type": 2
+  },
+  {
+    "allowMetadataMatching": true,
+    "allowScrobbling": false,
+    "collapseSeriesRelationships": false,
+    "coverImage": null,
+    "defaultLanguage": "",
+    "enableMetadata": true,
+    "excludePatterns": [],
+    "folderWatching": true,
+    "folders": [
+      "/tank/data/media/zeitungen"
+    ],
+    "id": 2,
+    "includeInDashboard": true,
+    "includeInRecommended": true,
+    "includeInSearch": true,
+    "inheritWebLinksFromFirstChapter": false,
+    "lastScanned": "0001-01-01T00:00:00",
+    "libraryFileTypes": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "manageCollections": false,
+    "manageReadingLists": false,
+    "metadataProvider": 4,
+    "name": "Zeitungen",
+    "removePrefixForSortName": false,
+    "type": 1
+  }
+]

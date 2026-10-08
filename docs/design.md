@@ -1489,12 +1489,13 @@ With an auth key (§25) it has one.
 
 | task | read | write |
 |---|---|---|
-| `libraries` | `GET /api/Library/libraries` | `POST /api/Library/update` (the whole library), then `POST /api/Library/scan?libraryId=&force=true` after a change of `type` |
+| `libraries` | `GET /api/Library/libraries` | `POST /api/Library/create` (missing; since v0.47.0, below), `POST /api/Library/update` (the whole library), then `POST /api/Library/scan?libraryId=&force=true` after a change of `type` |
 
 **Found by a folder it holds**, not by id or name: an id is a row, and the
-name is one of the things being set. A folder no library holds is an error --
-converge does not create libraries -- and so is a folder two libraries hold.
-Libraries the spec does not name are listed as notes.
+name is one of the things being set. A folder two libraries hold is an error.
+A folder no library holds was one as well until v0.47.0; since then it is a
+library to create (below). Libraries the spec does not name are listed as
+notes; converge deletes none.
 
 **The update is written whole, from the answer.** `UpdateLibraryDto` requires
 fifteen fields; the answer (`LibraryDto`) carries each under the same name,
@@ -1509,6 +1510,68 @@ library switched from Manga to Book would keep every series as the manga
 parser read it. The host did this before by turning scan timestamps back in
 the database; here it is the scan endpoint with `force=true`, sent only when
 `type` differs.
+
+### A folder no library holds is created (v0.47.0, 2026-10-08)
+
+Until v0.47.0 this was an error, "converge does not create libraries": the
+host's bootstrap unit had made the one library there was. The host then
+declared a second one -- and that unit can no longer sign in, the password
+login being switched off (§25). The auth key is the only administrator's way
+left, so the task creates, as Audiobookshelf's does (§38).
+
+**A change, `(missing) -> (added)`**, one line for the library as a whole;
+`plan` shows it and writes nothing. `name` and `type` become required there
+-- a name that is a non-empty string, a type that is one of `LibraryType`'s
+six numbers. A spec without them fails in `diff`, before anything is written,
+and the message names the folder: the body is built there as well.
+
+**The body is `UpdateLibraryDto` again** -- `POST /api/Library/create` takes
+the same component as the update, and requires the same sixteen fields. There
+is no answer to take them from, so what the spec does not name is filled in:
+
+| field | value | from |
+|---|---|---|
+| `id` | `0` | required by the description; `AddLibrary` does not read it |
+| `folders` | the spec's folder, alone | |
+| `folderWatching`, `includeInDashboard`, `includeInSearch`, `allowMetadataMatching`, `enableMetadata` | `true` | the form of the web interface (`library-settings-modal.component.ts`, `libraryForm`) |
+| `manageCollections`, `manageReadingLists`, `removePrefixForSortName`, `inheritWebLinksFromFirstChapter` | `false` | the same form |
+| `defaultLanguage` | `""` | the same form |
+| `allowScrobbling` | `true`, for type 1 (Comic) `false` | the form; `AddLibrary` switches it off for Comic whatever is sent |
+| `metadataProvider` | `3` (Mangabaka) where the type allows it, else `4` (ComicBookRoundup): types 1 and 5 | the form starts at Mangabaka and moves to the first provider the server lists for the type (`KavitaPlusConfiguration.MetadataProvidersForLibraryTypes`) |
+| `fileGroupTypes` | `[1, 2, 3, 4]`, every group | `LibraryBuilder`, and the form as it opens |
+| `excludePatterns` | `[]` | |
+
+`metadataProvider` is optional in the description and required in fact:
+left out it is `0`, which is no provider, and `ValidateMetadataProvider`
+refuses the request. All of the above was read in Kavita's source at the tag
+`v0.9.1.4` (`Kavita.Server/Controllers/LibraryController.cs`, `AddLibrary`),
+not measured: no create was recorded.
+
+Two of these are choices. The form narrows the file types when the type is
+changed in it (Comic: archives only) -- but a spec cannot name the file
+types, so a narrow default could not be widened from a spec, and a library of
+PDFs declared as Comic would stay empty. And the form sends `[""]` as its
+exclude patterns, an empty pattern, which is its edit list's blank row rather
+than a rule; a spec that wants patterns names `excludePatterns`.
+
+**Then the list is read again, and the library is written as any other.**
+`AddLibrary` does not take every field it is sent: `includeInSearch` is not
+among the ones it copies, and scrobbling is overridden for Comic. So a `200`
+is not "as declared" -- the list is read back, the library that now holds the
+folder is compared field by field, and where it differs the whole-library
+update runs against it, in the same `apply`. A library the list does not
+show after a `200` is an error. The type is the one it was created with, so
+no forced scan follows; Kavita enqueues its own scan of a new library.
+
+The create needs what the update needs: `[Authorize(Policy = AdminPolicy)]`,
+which is `RequireRole("Admin")` (`IdentityServiceExtensions`), and the auth
+key handler gives a key its account's roles as claims
+(`AuthKeyAuthenticationHandler`). Read, not measured.
+
+`tests/fixtures/kavita-0.9.1.4/constructed-libraries-after-create.json` is
+built by hand from the recorded list. `tests/schema.rs` holds that the body
+carries every field `UpdateLibraryDto` requires, each a property of it with a
+value of its type.
 
 Kavita's side navigation keeps a copy of a library's name per user
 (`AppUserSideNavStream.Name`) and never updates it. In 0.9.1.4 the side
@@ -1932,10 +1995,12 @@ out differently, and the name is one of the things the task sets. A folder two
 libraries hold is an error -- nothing says which one is meant. Libraries the
 spec does not name are notes; converge deletes nothing.
 
-**Unlike Kavita's task, this one creates.** Kavita's `POST /api/Library/create`
-would need a library type, a folder list and a field set converge has no
-answer to compare against; Audiobookshelf's `create` needs a name and a folder
-and defaults the rest (`book`, `database`, `google`). So a folder no library
+**This one creates** -- and when it was written, Kavita's task did not:
+Kavita's `POST /api/Library/create` needs a library type, a folder list and
+sixteen required fields with no answer to take them from, while
+Audiobookshelf's `create` needs a name and a folder and defaults the rest
+(`book`, `database`, `google`). Since v0.47.0 Kavita's task creates as well,
+with the defaults written down in §26. So a folder no library
 holds is a change, `(missing) -> (added)`, as with Koel's radio stations
 (§18) and bindery's root folders (§14) -- and `name` becomes required there.
 A spec that names a folder without a name fails in `diff`, before anything is
@@ -3037,6 +3102,6 @@ description, and `tests/schema.rs` holds that a value outside it is found.
   Without that switch -- and for every other task, which refuses it --
   `converge` only sets what the spec names, and appends
   list entries (§8), connections (§9), subscriptions (§10), root folders (§11, §14), providers (§12, §13), tags (§13), bindery's entries (§14), Seerr's servers
-  (§17), Koel's radio stations (§18) and Audiobookshelf's libraries (§38) it is responsible for. SuggestArr's
+  (§17), Koel's radio stations (§18), Kavita's libraries (§26) and Audiobookshelf's libraries (§38) it is responsible for. SuggestArr's
   configuration (§19) is a document, not a list: converge sets the named
   fields and carries every other one back unchanged.

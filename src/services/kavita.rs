@@ -62,6 +62,15 @@ pub const LIBRARY_UPDATE: Endpoint = Endpoint {
     request: Some(Shape::Document("UpdateLibraryDto")),
     response: None,
 };
+/// Makes a library for a folder none holds (design §26). The description
+/// gives it the update's component as its body; it answers the new library,
+/// which the task does not read -- it asks `LIBRARIES` again instead.
+pub const LIBRARY_CREATE: Endpoint = Endpoint {
+    method: "POST",
+    path: "/api/Library/create",
+    request: Some(Shape::Document("UpdateLibraryDto")),
+    response: Some(Shape::Document("LibraryDto")),
+};
 /// `?libraryId=<id>&force=true`: sent after a change of `type` only.
 pub const LIBRARY_SCAN: Endpoint = Endpoint {
     method: "POST",
@@ -69,11 +78,12 @@ pub const LIBRARY_SCAN: Endpoint = Endpoint {
     request: None,
     response: None,
 };
-pub const ENDPOINTS: [Endpoint; 6] = [
+pub const ENDPOINTS: [Endpoint; 7] = [
     SERVER_INFO,
     SETTINGS_READ,
     SETTINGS_WRITE,
     LIBRARIES,
+    LIBRARY_CREATE,
     LIBRARY_UPDATE,
     LIBRARY_SCAN,
 ];
@@ -261,11 +271,13 @@ impl Task for ServerSettings {
 
 // --- libraries (design §26) ------------------------------------------------
 
-/// Libraries by a folder they hold, with the fields to set on each. Kavita's
-/// update does not force a scan after a change of `type` -- its own scan skips
-/// files that did not change on disk, so the series would stay parsed by the
-/// old type's parser. A change of `type` is therefore followed by a forced
-/// scan of that library.
+/// Libraries by a folder they hold, with the fields to set on each; a folder
+/// no library holds is a library to create, and needs a name and a type.
+///
+/// Kavita's update does not force a scan after a change of `type` -- its own
+/// scan skips files that did not change on disk, so the series would stay
+/// parsed by the old type's parser. A change of `type` is therefore followed
+/// by a forced scan of that library.
 pub struct Libraries {
     pub libraries: BTreeMap<String, BTreeMap<String, Value>>,
 }
@@ -285,35 +297,81 @@ fn has_folder(library: &Value, folder: &str) -> bool {
 }
 
 impl Libraries {
-    /// Each spec folder with the one library that holds it. None, or more
-    /// than one, is an error: converge does not create libraries, and it
-    /// does not guess between two.
-    fn matched<'a>(&'a self, current: &'a [Value]) -> Result<Vec<(&'a str, &'a Value)>, Error> {
+    /// Each spec folder with the library that holds it, if any. More than
+    /// one is an error: converge does not guess between two. None is a
+    /// library to create (design §26).
+    fn matched<'a>(
+        &'a self,
+        current: &'a [Value],
+    ) -> Result<Vec<(&'a str, Option<&'a Value>)>, Error> {
         let mut found = Vec::new();
-        let mut missing = Vec::new();
         let mut ambiguous = Vec::new();
         for folder in self.libraries.keys() {
             let holders: Vec<&Value> = current.iter().filter(|l| has_folder(l, folder)).collect();
             match holders.as_slice() {
-                [one] => found.push((folder.as_str(), *one)),
-                [] => missing.push(format!("no library holds the folder {folder}")),
+                [] => found.push((folder.as_str(), None)),
+                [one] => found.push((folder.as_str(), Some(*one))),
                 _ => ambiguous.push(format!(
                     "{} libraries hold the folder {folder}",
                     holders.len()
                 )),
             }
         }
-        if !missing.is_empty() {
-            return Err(Error::NotFound(missing));
+        if ambiguous.is_empty() {
+            Ok(found)
+        } else {
+            Err(Error::Mismatch(ambiguous))
         }
-        if !ambiguous.is_empty() {
-            return Err(Error::Mismatch(ambiguous));
-        }
-        Ok(found)
     }
 
     fn label(folder: &str) -> String {
         format!("{LIBRARY_SUBJECT} {folder}")
+    }
+
+    /// Writes `library` whole where a spec field differs, and forces a scan
+    /// after a change of `type`.
+    fn update(
+        t: &dyn Transport,
+        folder: &str,
+        library: &Value,
+        set: &BTreeMap<String, Value>,
+    ) -> Result<(), Error> {
+        if set
+            .iter()
+            .all(|(field, value)| library.get(field) == Some(value))
+        {
+            return Ok(());
+        }
+        let body = update_body(folder, library, set)?;
+        let reply = t.post_json(LIBRARY_UPDATE.path, &body.to_string())?;
+        if reply.status != 200 {
+            return Err(Error::Status {
+                method: LIBRARY_UPDATE.method,
+                path: LIBRARY_UPDATE.path.to_string(),
+                status: reply.status,
+                validation: refusal(&reply),
+            });
+        }
+        let type_changed = set
+            .get("type")
+            .is_some_and(|desired| library.get("type") != Some(desired));
+        if type_changed {
+            let id = library
+                .get("id")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| Error::MissingField(vec![format!("{}: id", Self::label(folder))]))?;
+            let path = format!("{}?libraryId={id}&force=true", LIBRARY_SCAN.path);
+            let reply = t.post_json(&path, "")?;
+            if reply.status != 200 {
+                return Err(Error::Status {
+                    method: LIBRARY_SCAN.method,
+                    path,
+                    status: reply.status,
+                    validation: refusal(&reply),
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -353,6 +411,81 @@ fn update_body(
     Ok(Value::Object(body))
 }
 
+/// `LibraryType` of the description (0.9.1.4): Manga, Comic, Book, Image,
+/// LightNovel, ComicVine.
+const LIBRARY_TYPES: std::ops::RangeInclusive<i64> = 0..=5;
+/// `LibraryType.Comic`: the one type `AddLibrary` switches scrobbling off for.
+const TYPE_COMIC: i64 = 1;
+/// `LibraryType.ComicVine`.
+const TYPE_COMIC_VINE: i64 = 5;
+/// `MetadataProvider.Mangabaka`, where the web interface's form starts.
+const PROVIDER_MANGABAKA: i64 = 3;
+/// `MetadataProvider.ComicBookRoundup`, the first provider Kavita lists for
+/// the two comic types -- which do not allow Mangabaka.
+const PROVIDER_COMIC_BOOK_ROUNDUP: i64 = 4;
+
+/// The body of `POST /api/Library/create` for a folder no library holds: an
+/// `UpdateLibraryDto` like the update's, but with no answer to take its
+/// sixteen required fields from. `name` and `type` must come from the spec;
+/// everything else the spec does not name is what Kavita's own web interface
+/// would send for a new library of that type (design §26, read in the source
+/// at the tag v0.9.1.4). A spec field wins over a default.
+///
+/// `metadataProvider` is optional in the description, but left out it is 0,
+/// which no library type allows, and Kavita refuses the request.
+///
+/// Called in `diff` as well, so a spec that cannot create fails before
+/// anything is written.
+pub fn create_body(folder: &str, set: &BTreeMap<String, Value>) -> Result<Value, Error> {
+    let label = Libraries::label(folder);
+    let mut problems = Vec::new();
+    if !matches!(set.get("name"), Some(Value::String(name)) if !name.is_empty()) {
+        problems.push(format!(
+            "{label}: no library holds this folder, and the spec gives no name to create one with"
+        ));
+    }
+    let kind = set
+        .get("type")
+        .and_then(Value::as_i64)
+        .filter(|kind| LIBRARY_TYPES.contains(kind));
+    if kind.is_none() {
+        problems.push(format!(
+            "{label}: no library holds this folder, and the spec gives no type (0 to 5) to create one with"
+        ));
+    }
+    let Some(kind) = kind.filter(|_| problems.is_empty()) else {
+        return Err(Error::Mismatch(problems));
+    };
+    let provider = if kind == TYPE_COMIC || kind == TYPE_COMIC_VINE {
+        PROVIDER_COMIC_BOOK_ROUNDUP
+    } else {
+        PROVIDER_MANGABAKA
+    };
+    let mut body = serde_json::json!({
+        "id": 0,
+        "folders": [folder],
+        "folderWatching": true,
+        "includeInDashboard": true,
+        "includeInSearch": true,
+        "manageCollections": false,
+        "manageReadingLists": false,
+        "allowScrobbling": kind != TYPE_COMIC,
+        "allowMetadataMatching": true,
+        "enableMetadata": true,
+        "removePrefixForSortName": false,
+        "inheritWebLinksFromFirstChapter": false,
+        "defaultLanguage": "",
+        "metadataProvider": provider,
+        "fileGroupTypes": [1, 2, 3, 4],
+        "excludePatterns": [],
+    });
+    let fields = body.as_object_mut().expect("an object literal");
+    for (field, value) in set {
+        fields.insert(field.clone(), value.clone());
+    }
+    Ok(body)
+}
+
 impl Task for Libraries {
     type Current = Vec<Value>;
 
@@ -385,7 +518,20 @@ impl Task for Libraries {
         let mut changes = Vec::new();
         let mut missing = Vec::new();
         for (folder, library) in self.matched(current)? {
-            for (field, desired) in &self.libraries[folder] {
+            let set = &self.libraries[folder];
+            let Some(library) = library else {
+                // Built here although nothing is sent: a spec that cannot
+                // create has to fail before the first write.
+                create_body(folder, set)?;
+                changes.push(Change {
+                    subject: Self::label(folder),
+                    field: String::new(),
+                    current: "(missing)".to_string(),
+                    desired: "(added)".to_string(),
+                });
+                continue;
+            };
+            for (field, desired) in set {
                 match library.get(field) {
                     None => missing.push(format!("{}: {field}", Self::label(folder))),
                     Some(now) if now != desired => changes.push(Change {
@@ -415,43 +561,48 @@ impl Task for Libraries {
         named
     }
 
+    /// Creates what no library holds, then writes every library that
+    /// differs. `AddLibrary` does not take every field it is sent
+    /// (`includeInSearch` is not among them, and scrobbling is switched off
+    /// for a Comic library), so a created library is read back from the list
+    /// and goes through the same whole-library update as one that was there.
     fn write(&self, t: &dyn Transport, current: &Vec<Value>) -> Result<(), Error> {
-        for (folder, library) in self.matched(current)? {
-            let set = &self.libraries[folder];
-            if set
-                .iter()
-                .all(|(field, value)| library.get(field) == Some(value))
-            {
-                continue;
+        let matched = self.matched(current)?;
+        let mut bodies = Vec::new();
+        for (folder, library) in &matched {
+            if library.is_none() {
+                bodies.push(create_body(folder, &self.libraries[*folder])?);
             }
-            let body = update_body(folder, library, set)?;
-            let reply = t.post_json(LIBRARY_UPDATE.path, &body.to_string())?;
+        }
+        for body in &bodies {
+            let reply = t.post_json(LIBRARY_CREATE.path, &body.to_string())?;
             if reply.status != 200 {
                 return Err(Error::Status {
-                    method: LIBRARY_UPDATE.method,
-                    path: LIBRARY_UPDATE.path.to_string(),
+                    method: LIBRARY_CREATE.method,
+                    path: LIBRARY_CREATE.path.to_string(),
                     status: reply.status,
                     validation: refusal(&reply),
                 });
             }
-            let type_changed = set
-                .get("type")
-                .is_some_and(|desired| library.get("type") != Some(desired));
-            if type_changed {
-                let id = library.get("id").and_then(Value::as_i64).ok_or_else(|| {
-                    Error::MissingField(vec![format!("{}: id", Self::label(folder))])
-                })?;
-                let path = format!("{}?libraryId={id}&force=true", LIBRARY_SCAN.path);
-                let reply = t.post_json(&path, "")?;
-                if reply.status != 200 {
-                    return Err(Error::Status {
-                        method: LIBRARY_SCAN.method,
-                        path,
-                        status: reply.status,
-                        validation: refusal(&reply),
-                    });
-                }
-            }
+        }
+        // 200 is not "there": ask the list. Kavita commits before it
+        // answers, so a library the list does not show now is an error and
+        // nothing to wait for.
+        let after;
+        let matched = if bodies.is_empty() {
+            matched
+        } else {
+            after = self.read(t)?;
+            self.matched(&after)?
+        };
+        for (folder, library) in matched {
+            let library = library.ok_or_else(|| {
+                Error::NotFound(vec![format!(
+                    "no library holds the folder {folder}, although {} {} answered 200",
+                    LIBRARY_CREATE.method, LIBRARY_CREATE.path
+                )])
+            })?;
+            Self::update(t, folder, library, &self.libraries[folder])?;
         }
         Ok(())
     }
@@ -462,7 +613,10 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::testing::{ok, FakeTransport, Step};
+    use crate::{
+        engine::{run, Mode, Outcome, Timing},
+        testing::{ok, FakeClock, FakeTransport, Step},
+    };
 
     const SETTINGS_JSON: &str = include_str!("../../tests/fixtures/kavita-0.9.1.4/settings.json");
     const INFO_JSON: &str =
@@ -652,19 +806,205 @@ mod tests {
         assert_eq!(written[0].0, "/api/Library/update");
     }
 
+    const AFTER_CREATE_JSON: &str =
+        include_str!("../../tests/fixtures/kavita-0.9.1.4/constructed-libraries-after-create.json");
+    const PAPERS: &str = "/tank/data/media/zeitungen";
+
+    /// The recorded library as declared, and a second one nothing holds yet.
+    fn with_papers(fields: Value) -> Libraries {
+        let mut task = libraries(json!({"name": "Buecher", "type": 2}));
+        task.libraries.insert(
+            PAPERS.to_string(),
+            serde_json::from_value(fields).expect("an object"),
+        );
+        task
+    }
+
+    fn scripted(lists: Vec<Step>, writes: Vec<Step>) -> FakeTransport {
+        FakeTransport::default()
+            .on_get(SERVER_INFO.path, vec![ok(INFO_JSON)])
+            .on_get(LIBRARIES.path, lists)
+            .on_put(writes)
+    }
+
     #[test]
-    fn a_folder_no_library_holds_is_an_error_and_other_libraries_are_notes() {
+    fn a_folder_no_library_holds_is_a_change_and_plan_writes_nothing() {
+        let task = with_papers(json!({"name": "Zeitungen", "type": 1}));
+        let t = scripted(vec![ok(LIBRARIES_JSON)], vec![]);
+        let report = run(Mode::Plan, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        let Outcome::Differs(changes) = report.outcome else {
+            panic!("plan saw no difference");
+        };
+        let changes: Vec<String> = changes.iter().map(|c| c.to_string()).collect();
+        assert_eq!(
+            changes,
+            ["library /tank/data/media/zeitungen: (missing) -> (added)"]
+        );
+        assert!(t.written.borrow().is_empty());
+        // The library that is there is no note: the spec names it.
+        assert_eq!(report.notes, Vec::<String>::new());
+    }
+
+    #[test]
+    fn apply_creates_reads_back_and_then_writes_what_create_did_not_take() {
+        // `AddLibrary` (0.9.1.4) does not read `includeInSearch`; the library
+        // comes back with the entity's default, and the update sets it.
+        let task = with_papers(json!({
+            "name": "Zeitungen", "type": 1, "folderWatching": true, "includeInSearch": false
+        }));
+        let mut converged: Value = serde_json::from_str(AFTER_CREATE_JSON).unwrap();
+        converged[1]["includeInSearch"] = json!(false);
+        let t = scripted(
+            vec![
+                ok(LIBRARIES_JSON),
+                ok(AFTER_CREATE_JSON),
+                ok(&converged.to_string()),
+            ],
+            vec![ok("{}"), ok("")],
+        );
+        let report = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        let Outcome::Changed(changes) = report.outcome else {
+            panic!("apply changed nothing");
+        };
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            changes[0].to_string(),
+            "library /tank/data/media/zeitungen: (missing) -> (added)"
+        );
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 2, "{written:?}");
+        assert_eq!(written[0].0, "/api/Library/create");
+        assert_eq!(
+            serde_json::from_str::<Value>(&written[0].1).unwrap(),
+            json!({
+                "id": 0,
+                "name": "Zeitungen",
+                "type": 1,
+                "folders": [PAPERS],
+                "folderWatching": true,
+                "includeInDashboard": true,
+                "includeInSearch": false,
+                "manageCollections": false,
+                "manageReadingLists": false,
+                "allowScrobbling": false,
+                "allowMetadataMatching": true,
+                "enableMetadata": true,
+                "removePrefixForSortName": false,
+                "inheritWebLinksFromFirstChapter": false,
+                "defaultLanguage": "",
+                "metadataProvider": 4,
+                "fileGroupTypes": [1, 2, 3, 4],
+                "excludePatterns": []
+            })
+        );
+        // The library the list now shows, written whole; no scan, since the
+        // type is the one it was created with.
+        assert_eq!(written[1].0, "/api/Library/update");
+        let update: Value = serde_json::from_str(&written[1].1).unwrap();
+        assert_eq!(update["id"], json!(2));
+        assert_eq!(update["name"], json!("Zeitungen"));
+        assert_eq!(update["folders"], json!([PAPERS]));
+        assert_eq!(update["includeInSearch"], json!(false));
+    }
+
+    #[test]
+    fn a_created_library_that_already_is_as_declared_is_not_updated() {
+        let task = with_papers(json!({"name": "Zeitungen", "type": 1}));
+        let t = scripted(
+            vec![ok(LIBRARIES_JSON), ok(AFTER_CREATE_JSON)],
+            vec![ok("{}")],
+        );
+        run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1, "{written:?}");
+        assert_eq!(written[0].0, "/api/Library/create");
+    }
+
+    #[test]
+    fn a_library_to_be_created_without_a_name_or_a_type_fails_before_any_write() {
+        for (fields, word) in [
+            (json!({"type": 1}), "name"),
+            (json!({"name": "", "type": 1}), "name"),
+            (json!({"name": "Zeitungen"}), "type"),
+            (json!({"name": "Zeitungen", "type": 9}), "type"),
+            (json!({"name": "Zeitungen", "type": "1"}), "type"),
+            (json!({"folderWatching": true}), "type"),
+        ] {
+            let task = with_papers(fields.clone());
+            let t = scripted(vec![ok(LIBRARIES_JSON)], vec![ok("{}")]);
+            let current = task.read(&t).unwrap();
+            let err = task.diff(&current).err().unwrap().to_string();
+            assert!(
+                err.contains(PAPERS) && err.contains(word),
+                "{fields}: {err}"
+            );
+            assert!(task.write(&t, &current).is_err(), "{fields}");
+            assert!(t.written.borrow().is_empty(), "{fields}");
+        }
+    }
+
+    #[test]
+    fn a_created_library_the_list_does_not_show_is_an_error() {
+        let task = with_papers(json!({"name": "Zeitungen", "type": 1}));
+        let t = scripted(vec![ok(LIBRARIES_JSON)], vec![ok("{}")]);
+        let current = task.read(&t).unwrap();
+        let err = task.write(&t, &current).err().unwrap().to_string();
+        assert!(err.contains(PAPERS) && err.contains("create"), "{err}");
+        assert_eq!(t.written.borrow().len(), 1);
+    }
+
+    #[test]
+    fn a_refused_create_shows_kavitas_sentence_and_stops() {
+        let task = with_papers(json!({"name": "Buecher", "type": 1}));
+        let t = scripted(
+            vec![ok(LIBRARIES_JSON)],
+            vec![Step::Answer(
+                400,
+                "\"Library name already exists\"".to_string(),
+            )],
+        );
+        let current = task.read(&t).unwrap();
+        let err = task.write(&t, &current).err().unwrap().to_string();
+        assert!(err.contains("/api/Library/create"), "{err}");
+        assert!(err.contains("HTTP 400"), "{err}");
+        assert!(err.contains("Library name already exists"), "{err}");
+        assert_eq!(t.written.borrow().len(), 1);
+    }
+
+    #[test]
+    fn the_create_body_fills_what_the_spec_leaves_out_and_the_spec_wins() {
+        let set = |v: Value| -> BTreeMap<String, Value> { serde_json::from_value(v).unwrap() };
+        // The provider the web interface would end up with, per type.
+        for (kind, provider) in [(0, 3), (1, 4), (2, 3), (3, 3), (4, 3), (5, 4)] {
+            let body = create_body(PAPERS, &set(json!({"name": "N", "type": kind}))).unwrap();
+            assert_eq!(body["metadataProvider"], json!(provider), "type {kind}");
+            assert_eq!(body["allowScrobbling"], json!(kind != 1), "type {kind}");
+        }
+        let body = create_body(
+            PAPERS,
+            &set(json!({
+                "name": "N", "type": 1, "metadataProvider": 2,
+                "excludePatterns": ["**/tmp/**"], "manageCollections": true
+            })),
+        )
+        .unwrap();
+        assert_eq!(body["metadataProvider"], json!(2));
+        assert_eq!(body["excludePatterns"], json!(["**/tmp/**"]));
+        assert_eq!(body["manageCollections"], json!(true));
+        assert_eq!(body["folders"], json!([PAPERS]));
+    }
+
+    #[test]
+    fn other_libraries_are_notes_and_a_trailing_slash_names_the_same_folder() {
         let task = Libraries {
-            libraries: [("/tank/elsewhere".to_string(), BTreeMap::new())]
-                .into_iter()
-                .collect(),
+            libraries: [(
+                "/tank/elsewhere".to_string(),
+                serde_json::from_value(json!({"name": "Elsewhere", "type": 0})).unwrap(),
+            )]
+            .into_iter()
+            .collect(),
         };
         let current = task.read(&library_answer(LIBRARIES_JSON)).unwrap();
-        let err = task.diff(&current).err().unwrap().to_string();
-        assert!(
-            err.contains("no library holds the folder /tank/elsewhere"),
-            "{err}"
-        );
         assert_eq!(
             task.notes(&current),
             ["library Buecher is not in the spec and stays as it is"]

@@ -892,6 +892,52 @@ fn a_kavita_library_field_must_be_in_the_update_and_in_the_answer() {
     );
 }
 
+/// The create body has no answer behind it (design §26): every field of it
+/// is written down in the task. So each must be a property of the component
+/// with a value of its type, and none the component requires may be missing.
+#[test]
+fn the_kavita_create_body_is_a_whole_update_library_dto() {
+    use converge::services::kavita::{create_body, LIBRARY_UPDATE_COMPONENT};
+    let required: Vec<String> = kavita()["components"]["schemas"][LIBRARY_UPDATE_COMPONENT]
+        ["required"]
+        .as_array()
+        .expect("the component lists what it requires")
+        .iter()
+        .map(|f| f.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(required.len(), 16);
+    for kind in 0..=5 {
+        let set = serde_json::json!({"name": "Zeitungen", "type": kind})
+            .as_object()
+            .unwrap()
+            .clone()
+            .into_iter()
+            .collect();
+        let body = create_body("/tank/data/media/zeitungen", &set).unwrap();
+        let fields: std::collections::BTreeMap<String, Value> =
+            body.as_object().unwrap().clone().into_iter().collect();
+        assert_eq!(
+            converge::schema::check_paths(&kavita(), LIBRARY_UPDATE_COMPONENT, &fields),
+            Vec::<String>::new(),
+            "type {kind}"
+        );
+        for field in &required {
+            assert!(fields.contains_key(field), "type {kind}: {field}");
+        }
+    }
+    // The check does see a wrong body: a provider outside the enum.
+    let wrong = serde_json::json!({"metadataProvider": 0, "fileGroupTypes": [5]})
+        .as_object()
+        .unwrap()
+        .clone()
+        .into_iter()
+        .collect();
+    assert_eq!(
+        converge::schema::check_paths(&kavita(), LIBRARY_UPDATE_COMPONENT, &wrong).len(),
+        2
+    );
+}
+
 fn authentik() -> Value {
     doc("authentik-2026.5.6")
 }
