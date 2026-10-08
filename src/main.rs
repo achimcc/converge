@@ -306,6 +306,12 @@ fn reconcile_one(
                 };
                 run(mode, &task, &transport, &SystemClock, timing)
             }
+            QuestarrTask::SearchSettings(settings) => {
+                let task = questarr::SearchSettings {
+                    settings: settings.clone(),
+                };
+                run(mode, &task, &transport, &SystemClock, timing)
+            }
             QuestarrTask::ProwlarrSync { url, api_key } => {
                 let task = questarr::ProwlarrSync {
                     url: url.clone(),

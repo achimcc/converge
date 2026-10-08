@@ -163,6 +163,7 @@ enum TaskName {
     EpgSources,
     ChannelEpg,
     ImportConfig,
+    SearchSettings,
     ProwlarrSync,
     LanguageProfiles,
 }
@@ -234,7 +235,9 @@ impl TaskName {
             | TaskName::NetworkAccess
             | TaskName::EpgSources
             | TaskName::ChannelEpg => service == Service::Dispatcharr,
-            TaskName::ImportConfig | TaskName::ProwlarrSync => service == Service::Questarr,
+            TaskName::ImportConfig | TaskName::SearchSettings | TaskName::ProwlarrSync => {
+                service == Service::Questarr
+            }
             TaskName::LanguageProfiles => service == Service::Bazarr,
         }
     }
@@ -802,6 +805,8 @@ pub enum QuestarrTask {
     DownloadClients(BTreeMap<String, QuestarrClient>),
     /// Fields of the signed-in account's import configuration.
     ImportConfig(BTreeMap<String, serde_json::Value>),
+    /// Fields of the signed-in account's search settings.
+    SearchSettings(BTreeMap<String, serde_json::Value>),
     /// The Prowlarr whose indexers Questarr copies: its base URL as Questarr
     /// reaches it, and the credential that holds its API key.
     ProwlarrSync { url: String, api_key: String },
@@ -1242,7 +1247,7 @@ impl Spec {
             TaskName::DownloadClients if raw.service == Service::Questarr => {
                 Desired::Questarr(questarr_desired(raw.task, raw.desired).map_err(invalid)?)
             }
-            TaskName::ImportConfig | TaskName::ProwlarrSync => {
+            TaskName::ImportConfig | TaskName::SearchSettings | TaskName::ProwlarrSync => {
                 Desired::Questarr(questarr_desired(raw.task, raw.desired).map_err(invalid)?)
             }
             TaskName::DownloadClients | TaskName::RootFolders | TaskName::ProwlarrInstances
@@ -2445,6 +2450,7 @@ impl Spec {
             Desired::Questarr(ref d) => match &d.task {
                 QuestarrTask::DownloadClients(_) => "download-clients",
                 QuestarrTask::ImportConfig(_) => "import-config",
+                QuestarrTask::SearchSettings(_) => "search-settings",
                 QuestarrTask::ProwlarrSync { .. } => "prowlarr-sync",
             },
             Desired::AuthentikSettings(_) => "settings",
@@ -2598,6 +2604,45 @@ fn questarr_desired(task: TaskName, desired: serde_json::Value) -> Result<Questa
             Ok(QuestarrDesired {
                 username: d.username,
                 task: QuestarrTask::ImportConfig(d.config),
+            })
+        }
+        TaskName::SearchSettings => {
+            use crate::services::questarr::SEARCH_SETTINGS_FIELDS;
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Search {
+                username: String,
+                settings: BTreeMap<String, serde_json::Value>,
+            }
+            let d: Search = serde_json::from_value(desired).map_err(|e| format!("desired: {e}"))?;
+            username_ok(&d.username)?;
+            if d.settings.is_empty() {
+                return Err("desired.settings names no field".to_string());
+            }
+            // Questarr answers an unknown key with 200 and drops it, and
+            // takes an interval of 0; said here, both stop the build.
+            for (field, value) in &d.settings {
+                let fault = match field.as_str() {
+                    "autoSearchEnabled" | "autoDownloadEnabled" | "autoSearchUnreleased" => {
+                        (!value.is_boolean()).then(|| "must be true or false".to_string())
+                    }
+                    "searchIntervalHours" => (value.as_u64().is_none_or(|n| n < 1))
+                        .then(|| "must be an integer from 1".to_string()),
+                    other => {
+                        debug_assert!(!SEARCH_SETTINGS_FIELDS.contains(&other));
+                        Some(format!(
+                            "is not a field of the search settings ({})",
+                            SEARCH_SETTINGS_FIELDS.join(", ")
+                        ))
+                    }
+                };
+                if let Some(fault) = fault {
+                    return Err(format!("desired.settings: {field} {fault}"));
+                }
+            }
+            Ok(QuestarrDesired {
+                username: d.username,
+                task: QuestarrTask::SearchSettings(d.settings),
             })
         }
         TaskName::ProwlarrSync => {
@@ -5201,6 +5246,75 @@ mod tests {
         let no_user = questarr(
             "import-config",
             r#"{"username":"","config":{"autoUnpack":true}}"#,
+        );
+        assert!(no_user.is_err(), "empty username");
+    }
+
+    #[test]
+    fn questarr_search_settings_parse_with_their_account() {
+        let spec = questarr(
+            "search-settings",
+            r#"{"username":"achim","settings":{"autoSearchEnabled":true,
+                "autoDownloadEnabled":true,"autoSearchUnreleased":true,
+                "searchIntervalHours":6}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "search-settings");
+        let Desired::Questarr(d) = &spec.desired else {
+            panic!("not a Questarr spec")
+        };
+        assert_eq!(d.username, "achim");
+        let QuestarrTask::SearchSettings(settings) = &d.task else {
+            panic!("not the search settings")
+        };
+        assert_eq!(settings.len(), 4);
+        assert_eq!(settings["autoDownloadEnabled"], true);
+    }
+
+    #[test]
+    fn questarr_search_settings_are_strict() {
+        let refused = |settings: &str| {
+            questarr(
+                "search-settings",
+                &format!(r#"{{"username":"achim","settings":{settings}}}"#),
+            )
+            .unwrap_err()
+            .to_string()
+        };
+        let text = refused("{}");
+        assert!(text.contains("names no field"), "{text}");
+        // Questarr answers an unknown key with 200 and drops it.
+        let text = refused(r#"{"autoDownload":true}"#);
+        assert!(
+            text.contains("autoDownload is not a field of the search settings"),
+            "{text}"
+        );
+        // A field of the same row that belongs to another task.
+        let text = refused(r#"{"transferMode":"copy"}"#);
+        assert!(
+            text.contains("transferMode is not a field of the search settings"),
+            "{text}"
+        );
+        let text = refused(r#"{"autoDownloadEnabled":"true"}"#);
+        assert!(
+            text.contains("autoDownloadEnabled must be true or false"),
+            "{text}"
+        );
+        // Questarr takes 0; a search every 0 hours is none.
+        let text = refused(r#"{"searchIntervalHours":0}"#);
+        assert!(
+            text.contains("searchIntervalHours must be an integer from 1"),
+            "{text}"
+        );
+        let text = refused(r#"{"searchIntervalHours":1.5}"#);
+        assert!(
+            text.contains("searchIntervalHours must be an integer from 1"),
+            "{text}"
+        );
+
+        let no_user = questarr(
+            "search-settings",
+            r#"{"username":"","settings":{"autoSearchEnabled":true}}"#,
         );
         assert!(no_user.is_err(), "empty username");
     }

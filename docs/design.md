@@ -2933,6 +2933,23 @@ signed-in account's that is read and written. Unlike the download clients'
 not know is a `400`), and the spec is checked the same way, so a typo stops
 the build instead of the unit. Only differing fields are sent.
 
+### Search settings (v0.48.0, 2026-10-08)
+
+`GET` and `PATCH /api/settings`, the same per-user row seen whole. The task
+`search-settings` names four of its fields: `autoSearchEnabled`,
+`searchIntervalHours`, `autoDownloadEnabled` and `autoSearchUnreleased`. The
+last two are off by default, and with them off Questarr searches on its
+schedule and downloads nothing -- every wanted game waits for a hand. (With
+`autoDownloadEnabled` on, 1.4.2 still downloads only when exactly one match
+is left; several matches stay a notification.)
+
+This `PATCH` is **not** strict: an unknown key is answered with `200` and
+dropped, and an interval of `0` is taken. So the list of fields is kept in
+converge and the spec checked against it -- a typo stops the build -- and
+the engine's read-back is what tells a write that took from one that was
+dropped. The import fields of the row are refused here; they have their own
+endpoint and task.
+
 ### Prowlarr sync
 
 Questarr keeps no Prowlarr connection. `POST /api/indexers/prowlarr/sync`

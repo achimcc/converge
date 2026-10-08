@@ -2392,10 +2392,12 @@ const QUESTARR_CLIENTS: &str = r#"{"username":"achim","clients":{
                "secret_fields":{"username":"sabnzbd-api-key"}},
     "qbittorrent":{"set":{"type":"qbittorrent","url":"10.0.10.11","port":8080,"useSsl":false,"username":"admin","category":"questarr","enabled":true},
                    "secret_fields":{"password":"qbittorrent-webui-password"}}}}"#;
+const QUESTARR_SEARCH: &str =
+    r#"{"username":"achim","settings":{"autoDownloadEnabled":true,"autoSearchUnreleased":true}}"#;
 const QUESTARR_SYNC: &str = r#"{"username":"achim","url":"http://10.0.10.10:9696","secret_fields":{"apiKey":"prowlarr-api-key"}}"#;
 
 #[test]
-fn schema_check_for_questarr_validates_its_three_tasks_without_an_openapi_file() {
+fn schema_check_for_questarr_validates_its_four_tasks_without_an_openapi_file() {
     let dir = tempfile::tempdir().unwrap();
     let base = "http://10.0.183.10:5000";
     let clients = write_questarr_spec(
@@ -2419,7 +2421,14 @@ fn schema_check_for_questarr_validates_its_three_tasks_without_an_openapi_file()
         "prowlarr-sync",
         QUESTARR_SYNC,
     );
-    let out = schema_check("questarr", None, &[&clients, &import, &sync]);
+    let search = write_questarr_spec(
+        dir.path(),
+        "search.json",
+        base,
+        "search-settings",
+        QUESTARR_SEARCH,
+    );
+    let out = schema_check("questarr", None, &[&clients, &import, &sync, &search]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(
         out.status.code(),
@@ -2428,7 +2437,7 @@ fn schema_check_for_questarr_validates_its_three_tasks_without_an_openapi_file()
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("questarr: no OpenAPI description exists; 3 spec(s) valid"),
+        stdout.contains("questarr: no OpenAPI description exists; 4 spec(s) valid"),
         "{stdout}"
     );
 
@@ -2445,6 +2454,22 @@ fn schema_check_for_questarr_validates_its_three_tasks_without_an_openapi_file()
     assert!(
         String::from_utf8_lossy(&out.stderr)
             .contains("apiKey is not one of Questarr's secret fields"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // A key Questarr would take with 200 and drop stops the build.
+    let bad = write_questarr_spec(
+        dir.path(),
+        "bad-search.json",
+        base,
+        "search-settings",
+        r#"{"username":"achim","settings":{"autoDownload":true}}"#,
+    );
+    let out = schema_check("questarr", None, &[&bad]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("autoDownload is not a field of the search settings"),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );

@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.47.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.48.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11, 0.13), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11),
 **SuggestArr** (2.14), **Kavita** (0.9), **Audiobookshelf** (2.36),
 **Dispatcharr** (0.31), **authentik** (2026.5), **Questarr** (1.4) and **Bazarr** (1.6), each replacing a shell unit
@@ -75,6 +75,7 @@ or an OpenTofu resource on the host it was written for:
 | Dispatcharr | `channel-epg` | per channel (by the name the sync gives it): the guide entry -- a source by name and a tvg-id --, a display name and a logo by URL (created when missing), written as the channel's override, which the channel sync leaves alone; fallback streams by name, played after the channel's own when it fails -- only from the same group, since another group's sync would delete the channel; and a fixed channel number, also in the override, which every numbering of the sync treats as taken |
 | Questarr | `download-clients` | download clients by name: a missing one is added, a differing field is patched alone; SABnzbd's API key lives in `username` there and is compared unseen, a `password` is answered masked and handed over on every apply; two clients of one name are refused. Every task signs in with the one account's name and password, once per run -- and the first apply sets that account up (a plan never does) |
 | Questarr | `import-config` | fields of the signed-in account's import configuration (post-processing, transfer mode, library root, ...): only the differing ones are written |
+| Questarr | `search-settings` | fields of the signed-in account's search settings (`autoSearchEnabled`, `searchIntervalHours`, `autoDownloadEnabled`, `autoSearchUnreleased`): only the differing ones are written. Questarr takes an unknown key without a word, so the spec is checked against the four names |
 | Questarr | `prowlarr-sync` | the indexers of one Prowlarr, copied into Questarr: a plan sees whether any indexer comes from it, an apply syncs once -- Questarr keeps no connection, and the key is answered masked |
 | Bazarr | `language-profiles` | language profiles by name, each with its languages in order (two-letter code, and the switches `hi`, `forced`, `audio_exclude`, `audio_only_include`); a missing profile is added under the next free id, differing languages are written. Bazarr takes the profiles only as a whole list and deletes what a list leaves out, so every write carries all of them -- the ones the spec does not name exactly as read. Nothing is removed; a language Bazarr does not know is an error, and so is a change of the languages under a cutoff that names one |
 | authentik | `settings` | fields of the tenant settings (`/admin/settings/`), by name — those outside the blueprint schema; `PATCH` carries only what differs |

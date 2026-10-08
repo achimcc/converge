@@ -66,3 +66,22 @@ Questarr shows and what it hides:
 - A synced indexer's `url` is `<Prowlarr URL>/<Prowlarr id>/api`; a second
   sync reports `0 added, 2 updated` and resets `categories` to `[]`.
 - The answer to `PATCH /api/imports/config` equals the `GET` that follows.
+
+## Added 2026-10-08: `/api/settings`
+
+Recorded 2026-10-08 around 18:40 CEST the same way: a Questarr **1.4.2**
+(the same Nix build) started in a throwaway directory on a workstation,
+listening on `127.0.0.1:5999`, with a made-up account `fixture`; the database
+was deleted afterwards. The ids in these files belong to that instance.
+
+- `settings-default.json` -- `GET /api/settings` of the fresh account
+  (Questarr creates the row with its defaults on that request)
+- `settings-patched.json` -- the answer to
+  `PATCH {"autoDownloadEnabled":true,"autoSearchUnreleased":true}`
+- `settings-set.json` -- the `GET` after it
+- `settings-refused.json` -- `PATCH {"searchIntervalHours":"six"}` (400)
+- `settings-unknown-field.json` -- `PATCH {"noSuchField":true}`: **200**, the
+  row unchanged and the key not in the answer
+
+Also seen and not kept: `PATCH {"searchIntervalHours":0}` is answered with
+200 and stored.

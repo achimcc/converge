@@ -28,3 +28,8 @@ imports-config-patched PATCH /api/imports/config -> 200
 imports-config-set GET /api/imports/config -> 200
 imports-config-refused PATCH /api/imports/config -> 400
 imports-config-unknown-field PATCH /api/imports/config -> 400
+settings-default GET /api/settings -> 200
+settings-patched PATCH /api/settings -> 200
+settings-set GET /api/settings -> 200
+settings-refused PATCH /api/settings -> 400
+settings-unknown-field PATCH /api/settings -> 200

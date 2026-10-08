@@ -543,6 +543,113 @@ impl Task for ImportConfig {
     }
 }
 
+// --- search settings --------------------------------------------------------
+
+pub const SETTINGS: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/settings",
+    request: None,
+    response: None,
+};
+
+/// The fields of the user settings that steer the automatic search
+/// (`userSettings`, `shared/schema.ts`). The row holds more -- the import
+/// configuration among it, which has its own endpoint and task -- and
+/// `PATCH /api/settings` takes any key without a word: an unknown one is
+/// answered with 200 and dropped. So the list is kept here, and the spec is
+/// checked against it.
+pub const SEARCH_SETTINGS_FIELDS: [&str; 4] = [
+    "autoSearchEnabled",
+    "autoDownloadEnabled",
+    "autoSearchUnreleased",
+    "searchIntervalHours",
+];
+
+/// The search settings of the account that signed in: whether wanted games
+/// are searched for on a schedule, how often, and whether a single match is
+/// sent to the download client. Kept per user, like the import configuration.
+pub struct SearchSettings {
+    pub settings: BTreeMap<String, Value>,
+}
+
+impl SearchSettings {
+    const SUBJECT: &'static str = "search settings";
+
+    /// The change lines and the body a `PATCH` has to carry: what differs,
+    /// and nothing else.
+    fn changes_of(
+        &self,
+        current: &Map<String, Value>,
+        missing: &mut Vec<String>,
+    ) -> (Vec<Change>, Map<String, Value>) {
+        let (mut changes, mut body) = (Vec::new(), Map::new());
+        for (field, desired) in &self.settings {
+            match current.get(field) {
+                None => missing.push(format!("{}: {field}", Self::SUBJECT)),
+                Some(now) if now != desired => {
+                    changes.push(Change {
+                        subject: Self::SUBJECT.to_string(),
+                        field: field.clone(),
+                        current: shortened(now),
+                        desired: shortened(desired),
+                    });
+                    body.insert(field.clone(), desired.clone());
+                }
+                Some(_) => {}
+            }
+        }
+        (changes, body)
+    }
+}
+
+impl Task for SearchSettings {
+    type Current = Map<String, Value>;
+
+    fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
+        probe(t)
+    }
+
+    /// Questarr creates the row with its defaults on the first `GET`, so a
+    /// fresh account answers like any other.
+    fn read(&self, t: &dyn Transport) -> Result<Self::Current, Error> {
+        let path = SETTINGS.path;
+        let reply = t.get(path)?;
+        expect_status_at("GET", path, &reply, &[200])?;
+        serde_json::from_value(decode(path, &reply.body)?).map_err(|e| Error::Decode {
+            path: path.to_string(),
+            reason: crate::error::shape(&e),
+        })
+    }
+
+    fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        let mut missing = Vec::new();
+        let (changes, _) = self.changes_of(current, &mut missing);
+        if !missing.is_empty() {
+            return Err(Error::MissingField(missing));
+        }
+        Ok(changes)
+    }
+
+    fn notes(&self, _current: &Self::Current) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// One `PATCH` with the differing fields. Questarr leaves every field
+    /// the body omits; a value of the wrong type is a 400, a key it does not
+    /// know is not -- the engine's read-back is what tells a write that took
+    /// from one that was dropped.
+    fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        let mut missing = Vec::new();
+        let (_, body) = self.changes_of(current, &mut missing);
+        if body.is_empty() {
+            return Ok(());
+        }
+        let path = SETTINGS.path;
+        let reply = t.patch_json(path, &text_of("PATCH", path, &body)?)?;
+        expect_status_at("PATCH", path, &reply, &[200])
+    }
+}
+
 // --- Prowlarr sync ----------------------------------------------------------
 
 pub const INDEXERS: Endpoint = Endpoint {
@@ -1217,6 +1324,121 @@ mod tests {
         let task = hosts_import();
         let t =
             import(vec![ok(IMPORT_DEFAULT)]).on_put(vec![Step::Answer(400, IMPORT_REFUSED.into())]);
+        let error = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default())
+            .err()
+            .unwrap();
+        assert!(
+            matches!(error, Error::Status { status: 400, .. }),
+            "{error}"
+        );
+    }
+
+    // --- search settings ----------------------------------------------------
+
+    const SETTINGS_DEFAULT: &str =
+        include_str!("../../tests/fixtures/questarr-1.4.2/settings-default.json");
+    const SETTINGS_SET: &str =
+        include_str!("../../tests/fixtures/questarr-1.4.2/settings-set.json");
+    const SETTINGS_REFUSED: &str =
+        include_str!("../../tests/fixtures/questarr-1.4.2/settings-refused.json");
+
+    fn hosts_search() -> SearchSettings {
+        SearchSettings {
+            settings: map(json!({
+                "autoSearchEnabled": true,
+                "autoDownloadEnabled": true,
+                "autoSearchUnreleased": true,
+                "searchIntervalHours": 6
+            })),
+        }
+    }
+
+    fn search(settings: Vec<Step>) -> FakeTransport {
+        FakeTransport::default()
+            .on_get("/api/health", vec![ok(HEALTH_OK)])
+            .on_get("/api/settings", settings)
+    }
+
+    #[test]
+    fn fresh_search_settings_get_only_what_differs() {
+        // Questarr's defaults: search on, every 6 hours, but no automatic
+        // download and no search for games it holds to be unreleased.
+        let task = hosts_search();
+        let t = search(vec![ok(SETTINGS_DEFAULT), ok(SETTINGS_SET)]).on_put(vec![ok(SETTINGS_SET)]);
+        let report = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        let Outcome::Changed(changes) = &report.outcome else {
+            panic!("{:?}", report.outcome)
+        };
+        let fields: Vec<&str> = changes.iter().map(|c| c.field.as_str()).collect();
+        assert_eq!(fields, ["autoDownloadEnabled", "autoSearchUnreleased"]);
+        assert!(changes.iter().all(|c| c.subject == "search settings"));
+        assert_eq!(
+            (changes[0].current.as_str(), changes[0].desired.as_str()),
+            ("false", "true")
+        );
+
+        assert_eq!(t.written.borrow().len(), 1);
+        let (path, body) = sent(&t, 0);
+        assert_eq!(path, "/api/settings");
+        assert_eq!(
+            body,
+            json!({"autoDownloadEnabled": true, "autoSearchUnreleased": true})
+        );
+        assert_eq!(*t.calls.borrow(), [("PATCH", path)]);
+    }
+
+    #[test]
+    fn matching_search_settings_are_left_alone() {
+        let task = hosts_search();
+        let t = search(vec![ok(SETTINGS_SET)]);
+        let report = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        assert_eq!(report.outcome, Outcome::Unchanged);
+        assert!(report.handed_over.is_empty());
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_plan_of_search_settings_writes_nothing() {
+        let task = hosts_search();
+        let t = search(vec![ok(SETTINGS_DEFAULT)]);
+        let report = run(Mode::Plan, &task, &t, &FakeClock::new(), Timing::default()).unwrap();
+        assert!(matches!(report.outcome, Outcome::Differs(_)));
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_search_setting_questarr_does_not_answer_is_not_a_change() {
+        let mut task = hosts_search();
+        task.settings
+            .insert("autoDownload".to_string(), json!(true));
+        let t = search(vec![ok(SETTINGS_DEFAULT)]);
+        let error = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default())
+            .err()
+            .unwrap();
+        assert!(matches!(error, Error::MissingField(_)), "{error}");
+        assert!(
+            error.to_string().contains("search settings: autoDownload"),
+            "{error}"
+        );
+        assert!(t.written.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_write_questarr_dropped_is_an_error_not_a_success() {
+        // What an unknown key gets: 200 and the row as it was. The answer to
+        // the PATCH proves nothing; the read after it does.
+        let task = hosts_search();
+        let t = search(vec![ok(SETTINGS_DEFAULT), ok(SETTINGS_DEFAULT)])
+            .on_put(vec![ok(SETTINGS_DEFAULT)]);
+        let result = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default());
+        assert!(result.is_err(), "a write that did not take passed");
+    }
+
+    #[test]
+    fn refused_search_settings_are_an_error_with_their_status() {
+        let task = hosts_search();
+        let t = search(vec![ok(SETTINGS_DEFAULT)])
+            .on_put(vec![Step::Answer(400, SETTINGS_REFUSED.into())]);
         let error = run(Mode::Apply, &task, &t, &FakeClock::new(), Timing::default())
             .err()
             .unwrap();
