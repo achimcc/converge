@@ -137,3 +137,12 @@ is a sparse string map: it carries `livetv-favoritechannelsattop` as the
 string `"false"`, two keys whose value is `null` (`dashboardTheme`, `tvhome`),
 and three whose key is a library id and a view name. No key of it names a
 credential.
+
+- `collections-virtualfolders.json`, `collections-library-films.json`,
+  `collections-boxsets.json` -- recorded 2026-10-10 around 13:00 CEST from
+  the host's Jellyfin 10.11.11 for `collections` (design §51), the key in a
+  header file. **Cut down on the workstation** to what the task reads:
+  `Name`, `ItemId`, `CollectionType` of the libraries; `Name`, `Id`, `Type`,
+  `ProviderIds` of the library `Filme`'s films
+  (`/Items?parentId=…&includeItemTypes=Movie&recursive=true&fields=ProviderIds`);
+  the first twenty of 712 box sets. No credential in any of them.

@@ -19,3 +19,9 @@ Recorded 2026-10-10 around 10:57 CEST from a running Radarr 6.4.4.10685
 
 None of the three carries a secret; each was looked at as a shape (paths and
 types) before it was copied here.
+
+- `importlist-stored.json` -- `GET /api/v3/importlist` after the list was
+  added, cut to `id`, `name`, `implementation`; and `importlist-movie.json`
+  -- `GET /api/v3/importlist/movie`, the fifty films of that list, cut to
+  `tmdbId`, `title`, `lists`. Recorded 2026-10-10 around 12:40 CEST for
+  `collections` (design §51). Neither carries a credential.

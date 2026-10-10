@@ -126,6 +126,7 @@ enum TaskName {
     UserPolicies,
     UserConfigurations,
     DisplayPreferences,
+    Collections,
     Connections,
     TrailerProfiles,
     AccountSubscriptions,
@@ -187,6 +188,7 @@ impl TaskName {
             | TaskName::NamedConfiguration
             | TaskName::UserPolicies
             | TaskName::UserConfigurations
+            | TaskName::Collections
             | TaskName::DisplayPreferences => service == Service::Jellyfin,
             TaskName::Connections | TaskName::TrailerProfiles => service == Service::Trailarr,
             TaskName::AccountSubscriptions => service == Service::Ntfy,
@@ -372,6 +374,32 @@ impl NamedKey {
             NamedKey::LiveTv => "LiveTvOptions",
         }
     }
+}
+
+/// Jellyfin collections by name (design §51).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CollectionSettings {
+    pub collections: BTreeMap<String, CollectionEntry>,
+}
+
+/// One Jellyfin collection: the films of `library` whose TMDb id is on a
+/// Radarr import list (design §51).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CollectionEntry {
+    pub library: String,
+    pub source: CollectionSource,
+}
+
+/// The Radarr the list lives in, its own credential, and the list by name.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CollectionSource {
+    pub service: Service,
+    pub base_url: String,
+    pub api_key_credential: String,
+    pub import_list: String,
 }
 
 /// Jellyfin account policies (design §40). `all` holds what every account
@@ -758,6 +786,7 @@ pub enum Desired {
     NamedConfiguration(NamedConfigurationSettings),
     UserPolicies(UserPolicySettings),
     UserConfigurations(UserPolicySettings),
+    Collections(CollectionSettings),
     DisplayPreferences(DisplayPreferencesSettings),
     Connections(TrailarrConnections),
     TrailerProfiles(TrailerProfileSettings),
@@ -2010,6 +2039,47 @@ impl Spec {
                     Desired::UserConfigurations(settings)
                 }
             }
+            TaskName::Collections => {
+                let settings: CollectionSettings = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                if settings.collections.is_empty() {
+                    return Err(invalid(
+                        "desired.collections names no collection".to_string(),
+                    ));
+                }
+                for (name, entry) in &settings.collections {
+                    let at = format!("desired.collections.{name}");
+                    if name.trim().is_empty() || name.trim() != name {
+                        return Err(invalid(format!(
+                            "desired.collections: {name:?} is not a collection name"
+                        )));
+                    }
+                    if entry.library.is_empty() {
+                        return Err(invalid(format!("{at}.library is empty")));
+                    }
+                    // Only Radarr keeps import lists whose films this task
+                    // reads; Sonarr's would be series, not films.
+                    if entry.source.service != Service::Radarr {
+                        return Err(invalid(format!("{at}.source.service must be radarr")));
+                    }
+                    if entry.source.import_list.is_empty() {
+                        return Err(invalid(format!("{at}.source.import_list is empty")));
+                    }
+                    if !entry.source.base_url.starts_with("http://")
+                        && !entry.source.base_url.starts_with("https://")
+                    {
+                        return Err(invalid(format!(
+                            "{at}.source.base_url is not an http(s) URL"
+                        )));
+                    }
+                    credential_name(
+                        &entry.source.api_key_credential,
+                        &format!("{at}.source.api_key_credential"),
+                    )
+                    .map_err(invalid)?;
+                }
+                Desired::Collections(settings)
+            }
             TaskName::DisplayPreferences => {
                 let settings: DisplayPreferencesSettings = serde_json::from_value(raw.desired)
                     .map_err(|e| invalid(format!("desired: {e}")))?;
@@ -2426,6 +2496,7 @@ impl Spec {
             Desired::NamedConfiguration(_) => "named-configuration",
             Desired::UserPolicies(_) => "user-policies",
             Desired::UserConfigurations(_) => "user-configurations",
+            Desired::Collections(_) => "collections",
             Desired::DisplayPreferences(_) => "display-preferences",
             Desired::Connections(_) => "connections",
             Desired::TrailerProfiles(_) => "trailer-profiles",
@@ -5065,6 +5136,47 @@ mod tests {
             r#"{"providers":{"Radarr":{"implementation":"Radarr","app_profile":"Standard"}}}"#,
         );
         assert!(reason(elsewhere).contains("prowlarr indexers spec"));
+    }
+
+    /// `collections` (design §51): a Jellyfin spec whose films come from a
+    /// Radarr import list, read with a credential of its own.
+    #[test]
+    fn a_collection_names_a_library_and_a_radarr_list() {
+        let spec = |source: &str| {
+            parse(&format!(
+                r#"{{"service":"jellyfin","base_url":"http://jelly:8096","api_key_credential":"k",
+                    "task":"collections","desired":{{"collections":{{"Linke Filme":{{
+                      "library":"Filme","source":{source}}}}}}}}}"#
+            ))
+        };
+        let good = r#"{"service":"radarr","base_url":"http://127.0.0.1:7878",
+                       "api_key_credential":"radarr-api-key","import_list":"Liste"}"#;
+        let spec_ok = spec(good).unwrap();
+        assert_eq!(spec_ok.task_name(), "collections");
+        let Desired::Collections(settings) = &spec_ok.desired else {
+            panic!("{:?}", spec_ok.desired);
+        };
+        assert_eq!(
+            settings.collections["Linke Filme"].source.import_list,
+            "Liste"
+        );
+
+        for (bad, why) in [
+            (good.replace("\"radarr\"", "\"sonarr\""), "must be radarr"),
+            (good.replace("Liste", ""), "import_list is empty"),
+            (
+                good.replace("radarr-api-key", "../x"),
+                "not a credential name",
+            ),
+            (
+                good.replace("http://127", "ftp://127"),
+                "not an http(s) URL",
+            ),
+        ] {
+            assert!(reason(spec(&bad)).contains(why), "{why}");
+        }
+        // Only Jellyfin keeps collections.
+        assert!(servarr("radarr", "collections", r#"{"collections":{}}"#).is_err());
     }
 
     /// `import-lists` belongs to Radarr and Sonarr, and its quality profile

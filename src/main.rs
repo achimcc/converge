@@ -11,8 +11,9 @@ use converge::{
     error::Error,
     schema,
     services::{
-        arr, audiobookshelf, authentik, bazarr, bindery, dispatcharr, jellyfin, kavita, koel,
-        lidarr, ntfy, providers, prowlarr, questarr, seerr, servarr, suggestarr, trailarr,
+        arr, audiobookshelf, authentik, bazarr, bindery, collections, dispatcharr, jellyfin,
+        kavita, koel, lidarr, ntfy, providers, prowlarr, questarr, seerr, servarr, suggestarr,
+        trailarr,
     },
     spec::{Desired, DispatcharrTask, QuestarrTask, Service, Spec},
 };
@@ -428,6 +429,38 @@ fn reconcile_one(
             let task = jellyfin::UserConfigurations {
                 all: settings.all.clone(),
                 accounts: settings.accounts.clone(),
+            };
+            run(mode, &task, &transport, &SystemClock, timing)
+        }
+        // Design §51: a second transport, to the Radarr the list lives in,
+        // with its own credential -- read before the first request, as
+        // every other credential is.
+        Desired::Collections(settings) => {
+            let mut sources = Vec::new();
+            for entry in settings.collections.values() {
+                let key =
+                    read_credential(credentials, &entry.source.api_key_credential).map_err(fail)?;
+                sources.push(HttpTransport::new(
+                    &entry.source.base_url,
+                    entry.source.service.key_header(),
+                    entry.source.service.key_value(key),
+                    REQUEST_TIMEOUT,
+                ));
+            }
+            let task = collections::Collections {
+                collections: settings
+                    .collections
+                    .iter()
+                    .zip(&sources)
+                    .map(|((name, entry), transport)| collections::Wanted {
+                        name: name.clone(),
+                        library: entry.library.clone(),
+                        source: collections::Source {
+                            transport,
+                            import_list: entry.source.import_list.clone(),
+                        },
+                    })
+                    .collect(),
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
@@ -891,7 +924,13 @@ fn schema_check(args: &[String]) -> ExitCode {
             wire.extend(prowlarr::wire_types());
             (endpoints, wire)
         }
-        "jellyfin" => (jellyfin::ENDPOINTS.to_vec(), jellyfin::wire_types()),
+        "jellyfin" => {
+            let mut endpoints = jellyfin::ENDPOINTS.to_vec();
+            endpoints.extend(collections::ENDPOINTS);
+            let mut wire = jellyfin::wire_types();
+            wire.extend(collections::wire_types());
+            (endpoints, wire)
+        }
         "trailarr" => (trailarr::ENDPOINTS.to_vec(), trailarr::wire_types()),
         "kavita" => (kavita::ENDPOINTS.to_vec(), kavita::wire_types()),
         "dispatcharr" => (dispatcharr::ENDPOINTS.to_vec(), dispatcharr::wire_types()),
@@ -1064,6 +1103,10 @@ fn schema_check(args: &[String]) -> ExitCode {
             // `DisplayPreferencesDto`): its keys are not properties a schema
             // could know. Only the endpoints are checked, above.
             Desired::DisplayPreferences(_) => (Vec::new(), 0),
+            // A collection names a library, a list and a Radarr: no field of a
+            // Jellyfin document. The endpoints and wire types are checked
+            // with the service's own (design §51).
+            Desired::Collections(_) => (Vec::new(), 0),
             Desired::ScheduledTaskTriggers(triggers) => {
                 let list = serde_json::Value::Array(
                     triggers

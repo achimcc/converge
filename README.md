@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.49.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.50.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11, 0.13), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11),
 **SuggestArr** (2.14), **Kavita** (0.9), **Audiobookshelf** (2.36),
 **Dispatcharr** (0.31), **authentik** (2026.5), **Questarr** (1.4) and **Bazarr** (1.6), each replacing a shell unit
@@ -45,6 +45,7 @@ or an OpenTofu resource on the host it was written for:
 | Jellyfin | `server-configuration` | fields of `ServerConfiguration`, by path |
 | Jellyfin | `named-configuration` | fields of a named configuration (`network`, `branding`, `livetv`), by path, checked against its component |
 | Jellyfin | `library-options` | fields of the named libraries' `LibraryOptions`, by path |
+| Jellyfin | `collections` | collections by name, each holding exactly the films of one library whose TMDb id is on a Radarr import list (read from that Radarr with its own credential): a missing collection is created, a missing film added, a film the list does not account for removed. Films the library lacks yet are a note. Collections the spec does not name are left alone |
 | Jellyfin | `scheduled-task-triggers` | the trigger list of tasks whose key starts with a prefix |
 | Jellyfin | `plugin-configurations` | fields of plugin configurations by path, keys from credentials, entries of shared lists by key, library ids by library name |
 | Jellyfin | `user-policies` | fields of `UserPolicy` every account must carry (`all`) and the ones single accounts carry instead (`accounts`, by the account's name). Jellyfin replaces a policy as a whole, so each differing account's policy is read, the named fields are changed and everything else travels back untouched; a field its answer does not carry is an error before anything is written, while an account name the service does not hold **yet** is a note and is skipped -- such an account comes into being at its owner's first sign-in |

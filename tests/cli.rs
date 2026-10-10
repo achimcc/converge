@@ -103,7 +103,7 @@ fn schema_check_reads_jellyfin_specs_and_rejects_a_trigger_type_outside_the_enum
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("jellyfin: 17 endpoints and their wire types match"),
+        stdout.contains("jellyfin: 21 endpoints and their wire types match"),
         "{stdout}"
     );
     assert!(
@@ -300,7 +300,7 @@ fn schema_check_counts_both_account_maps_and_names_the_account_of_a_finding() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(
-        stdout.contains("jellyfin: 17 endpoints and their wire types match"),
+        stdout.contains("jellyfin: 21 endpoints and their wire types match"),
         "{stdout}"
     );
 }

@@ -1,0 +1,7 @@
+[
+  {
+    "id": 1,
+    "name": "50 politisch linke Filme",
+    "implementation": "TMDbListImport"
+  }
+]

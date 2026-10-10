@@ -1,0 +1,105 @@
+{
+  "Items": [
+    {
+      "Name": "10 Tage",
+      "Id": "b98aa7eb180d88000f4f895a8ff1a506",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "28 Days/Weeks Later",
+      "Id": "c1b7a0077c407700232691eebb595f45",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "48 Stunden",
+      "Id": "b02bc79396c341bed85064e2eaf37597",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "96 Hours",
+      "Id": "27132134adcf09711158032577cdf41c",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "100 % bei Rotten Tomatoes",
+      "Id": "7688cc6a174fb95d2500f93574378b35",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "300",
+      "Id": "301ff97da58db68cf434fccc93ab6501",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "365 Days",
+      "Id": "e95215a837e3fa6632bf1e445cd373aa",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "The Accountant",
+      "Id": "ecc2e8cc485b1acc2dc05bd01de3033e",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "Ace Ventura",
+      "Id": "d3f4d70e7c72a6e2ba23be9b5258ff23",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "Afro Samurai",
+      "Id": "63abfbf3d69574408fb543ef353d9109",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "After...",
+      "Id": "46c138b2651159b5d4eb8b759ecc6a66",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "Akte X",
+      "Id": "34e91760eea3b338110170d23c859f86",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "Aladdin",
+      "Id": "f92cc504ea85533769ebcf5afed054f1",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "Alice im Wunderland",
+      "Id": "9323767c56b3dae30d0029f129117a7c",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "Alien Romulus",
+      "Id": "6824d839ed6edeb6d221e8fe43b5871b",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "Alienoid",
+      "Id": "fae9ea7abf8e5993f13cc826aedac36d",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "Allein zu Haus",
+      "Id": "bff5bb63aa9b449206b325f8884d575e",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "Alles steht Kopf",
+      "Id": "0dbaccb8b531ba8e5105ab1184816074",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "Allmächtig",
+      "Id": "c6ca5379d1404129304936e9ecb6440d",
+      "Type": "BoxSet"
+    },
+    {
+      "Name": "The Amazing Spider-Man",
+      "Id": "83272271d77212266e877aeab802323f",
+      "Type": "BoxSet"
+    }
+  ],
+  "TotalRecordCount": 20
+}

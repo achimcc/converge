@@ -1024,3 +1024,28 @@ fn the_hosts_two_settings_are_fields_of_the_answer_and_of_the_patch() {
         Vec::<String>::new()
     );
 }
+
+// --- collections (design §51) -------------------------------------------------
+
+/// `schema-check` does not look at a query; the parameters the task sends
+/// are held against the description here, so a renamed one fails a test
+/// instead of a run.
+#[test]
+fn the_collection_query_parameters_exist() {
+    use converge::services::collections::QUERY_PARAMETERS;
+    let openapi = doc("jellyfin-10.11.11");
+    for (path, method, names) in QUERY_PARAMETERS {
+        let declared: Vec<String> = openapi["paths"][path][method]["parameters"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{method} {path} has no parameters"))
+            .iter()
+            .filter_map(|p| p["name"].as_str().map(str::to_string))
+            .collect();
+        for name in names {
+            assert!(
+                declared.iter().any(|d| d == name),
+                "{method} {path}: {name}"
+            );
+        }
+    }
+}

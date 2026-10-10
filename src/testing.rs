@@ -49,6 +49,8 @@ impl Clock for FakeClock {
 pub enum Step {
     Answer(u16, String),
     Refused,
+    /// What ureq reports when a request outlives its time limit.
+    TimedOut,
 }
 
 pub fn ok(body: &str) -> Step {
@@ -112,6 +114,11 @@ fn play(step: Option<Step>, method: &'static str, path: &str) -> Result<Reply, E
             method,
             path: path.to_string(),
             reason: "connection refused".to_string(),
+        }),
+        Some(Step::TimedOut) => Err(Error::Request {
+            method,
+            path: path.to_string(),
+            reason: "timeout: global".to_string(),
         }),
         None => panic!("test did not script {method} {path}"),
     }

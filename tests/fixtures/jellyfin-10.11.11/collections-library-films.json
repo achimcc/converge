@@ -1,0 +1,1208 @@
+{
+  "Items": [
+    {
+      "Name": "11:14",
+      "Id": "ce97580957eab8f9189288b801714655",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0331811",
+        "Tmdb": "9282"
+      }
+    },
+    {
+      "Name": "187 - Eine tödliche Zahl",
+      "Id": "3091b53f0d78f27db27792299b254f5a",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0118531",
+        "Tmdb": "6072"
+      }
+    },
+    {
+      "Name": "Afronauts",
+      "Id": "ca3535b52dac1e09692dc78b1154a4ff",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt3334028",
+        "Tmdb": "266714"
+      }
+    },
+    {
+      "Name": "Almost Famous - Fast berühmt",
+      "Id": "92475f6f21d237b8c2293a1af66b4b84",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0181875",
+        "Tmdb": "786"
+      }
+    },
+    {
+      "Name": "The Amateur",
+      "Id": "652e3d9d08b90ad74cb131d737eeb99a",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0899043",
+        "Tmdb": "1087891"
+      }
+    },
+    {
+      "Name": "Arthur & Diana",
+      "Id": "d8379510f15fa83f83f7dae31634d495",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt28660113",
+        "Tmdb": "1160042"
+      }
+    },
+    {
+      "Name": "Auf kurze Distanz",
+      "Id": "9ae4801002bfe4bfb4a017c01e7b8b46",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt4595360",
+        "Tmdb": "385498"
+      }
+    },
+    {
+      "Name": "Auftrag Rache",
+      "Id": "53d23e9f1d7a5e715241c55626b98ca7",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt1226273",
+        "Tmdb": "12201"
+      }
+    },
+    {
+      "Name": "Backrooms",
+      "Id": "40dc86fe87e4aa98355ceefb97778ce3",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt26657236",
+        "Tmdb": "1083381"
+      }
+    },
+    {
+      "Name": "Bad Education",
+      "Id": "32c79e6c5afea4a89f313f6bd4071d44",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt8206668",
+        "Tmdb": "530723"
+      }
+    },
+    {
+      "Name": "Bad Samaritan - Im Visier des Killers",
+      "Id": "b5d300c7aca211c3e328b6786192e0bd",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt3203528",
+        "Tmdb": "467632"
+      }
+    },
+    {
+      "Name": "Bank Job",
+      "Id": "2a4e712311ad21d3ca86e74231d2ca63",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0200465",
+        "Tmdb": "8848"
+      }
+    },
+    {
+      "Name": "Barry Lyndon",
+      "Id": "ddccd7a76bf61922fb18f5ad9e7c8669",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0072684",
+        "Tmdb": "3175"
+      }
+    },
+    {
+      "Name": "BlackBerry - Klick einer Generation",
+      "Id": "ffab1fe62e29b2011e475f6428713958",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt21867434",
+        "Tmdb": "1016084"
+      }
+    },
+    {
+      "Name": "Blood & Sinners",
+      "Id": "31d7affc948f96d28671809fe43a62db",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt31193180",
+        "Tmdb": "1233413"
+      }
+    },
+    {
+      "Name": "The Body - Die Leiche",
+      "Id": "1b9803f19671441d2fa15fa50fdb2112",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt1937149",
+        "Tmdb": "111083"
+      }
+    },
+    {
+      "Name": "Buried - Lebend begraben",
+      "Id": "fc47ec98b8e511042b184b52678da107",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt1462758",
+        "Tmdb": "26388"
+      }
+    },
+    {
+      "Name": "The Clovehitch Killer",
+      "Id": "27c5c4dccd7e7eae8acebddb1ceec191",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt6269368",
+        "Tmdb": "544431"
+      }
+    },
+    {
+      "Name": "The Collector",
+      "Id": "145742d06ac45350ef3c917ad2fd7e42",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0844479",
+        "Tmdb": "21407",
+        "TmdbCollection": "165369"
+      }
+    },
+    {
+      "Name": "Companion - Die perfekte Begleitung",
+      "Id": "aa36f52f6bd4398e28afdaeb4c1cba9b",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt26584495",
+        "Tmdb": "1084199"
+      }
+    },
+    {
+      "Name": "Compliance",
+      "Id": "398a5a92b5e218c365a0b8225d229ce0",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt1971352",
+        "Tmdb": "84188"
+      }
+    },
+    {
+      "Name": "Dallas Buyers Club",
+      "Id": "96cbcd6eef0ae863cfa0749e2a735dd4",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0790636",
+        "Tmdb": "152532"
+      }
+    },
+    {
+      "Name": "Das Lehrerzimmer",
+      "Id": "f7afa411bbcd4af2d83e18fc0594d7ab",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt26612950",
+        "Tmdb": "998022"
+      }
+    },
+    {
+      "Name": "Das Salz der Erde",
+      "Id": "185a516b6b2e08bbac3ea80d93047106",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0047443",
+        "Tmdb": "23620"
+      }
+    },
+    {
+      "Name": "Das Zeiträtsel",
+      "Id": "752e01522c9ee7c57ea6552a9694fb00",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt1620680",
+        "Tmdb": "407451"
+      }
+    },
+    {
+      "Name": "Der Brutalist",
+      "Id": "79ba5a422dcf7ac68405d039f130b540",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt8999762",
+        "Tmdb": "549509"
+      }
+    },
+    {
+      "Name": "Der Fall Richard Jewell",
+      "Id": "cd70095840e2cded9527db532e6327a1",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt3513548",
+        "Tmdb": "292011"
+      }
+    },
+    {
+      "Name": "Didi",
+      "Id": "37276c1132571c5bb9261e695cd45baa",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt30319503",
+        "MdbListCriticSource": "metacritic",
+        "Tmdb": "1158915"
+      }
+    },
+    {
+      "Name": "Die besten Jahre",
+      "Id": "d6126aba26f471c89208065fc6fbbc98",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0346336",
+        "Tmdb": "11659"
+      }
+    },
+    {
+      "Name": "Die dunkelste Stunde",
+      "Id": "47512b7dcc13ec7c9a5d31f256e724ec",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt4555426",
+        "Tmdb": "399404"
+      }
+    },
+    {
+      "Name": "Die fetten Jahre sind vorbei",
+      "Id": "cf1aaddfa2ba9214df95e49c28e28aba",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0408777",
+        "Tmdb": "276"
+      }
+    },
+    {
+      "Name": "Die Fremde in Dir",
+      "Id": "4dd9378a9b1a19bcb8cfdec27ca31e8a",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0476964",
+        "Tmdb": "4413"
+      }
+    },
+    {
+      "Name": "Die Peitsche im Genick",
+      "Id": "e82ab79d18eb4687e19cfaf7fec9dd20",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0056945",
+        "Tmdb": "51092"
+      }
+    },
+    {
+      "Name": "Die üblichen Verdächtigen",
+      "Id": "b64a406cb03d6686f4dea44cdc9e25bd",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0114814",
+        "Tmdb": "629"
+      }
+    },
+    {
+      "Name": "Dope",
+      "Id": "9755d221b55959ad08522cdb51120d69",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt3850214",
+        "Tmdb": "308639"
+      }
+    },
+    {
+      "Name": "Drive-Away Dolls",
+      "Id": "a43524823b61c79c027fad81b0614024",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt19356262",
+        "Tmdb": "957304"
+      }
+    },
+    {
+      "Name": "Dumb Money - Schnelles Geld",
+      "Id": "5e25c41561772d88ebc1df72051efeee",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt13957560",
+        "Tmdb": "792293"
+      }
+    },
+    {
+      "Name": "Ein Freund von mir",
+      "Id": "1f4f14550c312f719e95d504e81d39a3",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0441762",
+        "Tmdb": "1964"
+      }
+    },
+    {
+      "Name": "El Camino: Ein „Breaking Bad“-Film",
+      "Id": "2f876818f4ecf0353e22c1cecc3061de",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt9243946",
+        "Tmdb": "559969"
+      }
+    },
+    {
+      "Name": "Enter Nowhere",
+      "Id": "1e15f29e7253437c02bd61ee699c332b",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt1631707",
+        "Tmdb": "98568"
+      }
+    },
+    {
+      "Name": "EPiC: Elvis Presley in Concert",
+      "Id": "da58fa530f34bc92723c7215a215942a",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt35003538",
+        "Tmdb": "1445363"
+      }
+    },
+    {
+      "Name": "Escape Room",
+      "Id": "8fed9eb9e0e79cd5f21f5462fd21ce44",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt5886046",
+        "Tmdb": "522681",
+        "TmdbCollection": "769423"
+      }
+    },
+    {
+      "Name": "Fair Play",
+      "Id": "5400c6cc41a8cef60fc85f59e1ef8045",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt16304446",
+        "Tmdb": "910571"
+      }
+    },
+    {
+      "Name": "Finch",
+      "Id": "d79e44f1e4e453f595d85461c6ddcb0d",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt3420504",
+        "Tmdb": "522402"
+      }
+    },
+    {
+      "Name": "Foo Fighters: Back and Forth",
+      "Id": "12703ce447258e71476843ee5d8e8f08",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt1853563",
+        "Tmdb": "61488"
+      }
+    },
+    {
+      "Name": "Free Rainer - Dein Fernseher lügt",
+      "Id": "d748db6e3ab6a42b018cdd4c74975f60",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0810868",
+        "Tmdb": "1912"
+      }
+    },
+    {
+      "Name": "Furiosa: A Mad Max Saga",
+      "Id": "2ea8ff5596eda1721606b5f989ebfba2",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt12037194",
+        "Tmdb": "786892",
+        "TmdbCollection": "8945"
+      }
+    },
+    {
+      "Name": "Ghostlight",
+      "Id": "ff59d9dc620bfc7e4344f6ed8828f2fb",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt30321095",
+        "Tmdb": "1214469"
+      }
+    },
+    {
+      "Name": "Gilbert Grape - Irgendwo in Iowa",
+      "Id": "f4035fb66d6bdbf5c7d620f914052ba8",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0108550",
+        "Tmdb": "1587"
+      }
+    },
+    {
+      "Name": "Gnade",
+      "Id": "55ff13f40bb721c833da6148f816a6a4",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt2179055",
+        "Tmdb": "124529"
+      }
+    },
+    {
+      "Name": "Good Boy - Wir wollen nur dein Bestes",
+      "Id": "0624fbaa2bec80331722d62e3b5b7433",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt34381258",
+        "Tmdb": "1381027"
+      }
+    },
+    {
+      "Name": "The Good Neighbor",
+      "Id": "9ce458665dcc5b187042a85d2916f649",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt2262315",
+        "Tmdb": "339994"
+      }
+    },
+    {
+      "Name": "Hidden - Die Angst holt dich ein",
+      "Id": "ccd0668c69b4367a467b0f3f3ffc710d",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt2131532",
+        "Tmdb": "360784"
+      }
+    },
+    {
+      "Name": "Hijacking",
+      "Id": "1db489afdad9d81f4b68687d740c52d1",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt2216240",
+        "Tmdb": "127846"
+      }
+    },
+    {
+      "Name": "A History of Violence",
+      "Id": "876b1845314d0b0b4617f9138aaa54a9",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0399146",
+        "Tmdb": "59"
+      }
+    },
+    {
+      "Name": "The Housemaid - Wenn sie wüsste",
+      "Id": "a4179328f7f0c203db28e77125fae580",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt27543632",
+        "Tmdb": "1368166",
+        "TmdbCollection": "1611146"
+      }
+    },
+    {
+      "Name": "How to Make a Killing",
+      "Id": "8f1b7ad3737a05973481f154dcbbcb2f",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt33984333",
+        "Tmdb": "1210732"
+      }
+    },
+    {
+      "Name": "I Can Only Imagine: Der Song meines Lebens",
+      "Id": "cabb9e9c824f8c0638a875e5ab4c6ac5",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt6450186",
+        "Tmdb": "470878",
+        "TmdbCollection": "1474745"
+      }
+    },
+    {
+      "Name": "I Love Boosters",
+      "Id": "2a249ddbd860d7ec7cfd8eb0f6d6d255",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt30827810",
+        "Tmdb": "1227877"
+      }
+    },
+    {
+      "Name": "If I Go Will They Miss Me",
+      "Id": "084b5d29a007526ea8196fc2f132f22d",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt39151344",
+        "Tmdb": "1596248"
+      }
+    },
+    {
+      "Name": "In ihrem Haus",
+      "Id": "abf2e2d2dd63ef7cf93c14105e9095a6",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt1964624",
+        "Tmdb": "121875"
+      }
+    },
+    {
+      "Name": "Inglourious Basterds",
+      "Id": "1356186a5bc3149f8f0b2ee2181113e5",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0361748",
+        "Tmdb": "16869"
+      }
+    },
+    {
+      "Name": "The Invite",
+      "Id": "1f734d96465ed7a19ba5e6bd908cc5bb",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt14173636",
+        "Tmdb": "950028"
+      }
+    },
+    {
+      "Name": "It Follows",
+      "Id": "18429c8d4a3d1a311a4f3301bf93b813",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt3235888",
+        "Tmdb": "270303",
+        "TmdbCollection": "1198581"
+      }
+    },
+    {
+      "Name": "The Jacket",
+      "Id": "26bc49e67ecb25f4532e1dad78b0d340",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0366627",
+        "Tmdb": "9667"
+      }
+    },
+    {
+      "Name": "Johanna von Orleans",
+      "Id": "4289656ba3cc6805d970d6fd289988be",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0151137",
+        "Tmdb": "10047"
+      }
+    },
+    {
+      "Name": "Just Mercy",
+      "Id": "107f20c933fc7c897710369efc99c6d1",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt4916630",
+        "Tmdb": "522212"
+      }
+    },
+    {
+      "Name": "K2: Katastrophe im Eis",
+      "Id": "e4a94439ba10f180324048bd2a1f2152",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt39150288",
+        "Tmdb": "1596303"
+      }
+    },
+    {
+      "Name": "Karla",
+      "Id": "770984f0b996d468dfd5ceaa5d8c7942",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt37021896",
+        "Tmdb": "1480424"
+      }
+    },
+    {
+      "Name": "Kidnapped",
+      "Id": "f3a2d15f5329d89e36fe93bd37aa2e26",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt1629377",
+        "Tmdb": "48393"
+      }
+    },
+    {
+      "Name": "Kimi",
+      "Id": "42b3a1a22d24e2fb278d99688270c52d",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt14128670",
+        "Tmdb": "800510"
+      }
+    },
+    {
+      "Name": "La isla mínima - Mörderland",
+      "Id": "87e75a3c99da1b7274bb22d2a32732c1",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt3253930",
+        "Tmdb": "236735"
+      }
+    },
+    {
+      "Name": "La Mala Educación - Schlechte Erziehung",
+      "Id": "25abf8cacffd384eae03bc7d8b7a59ce",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0275491",
+        "Tmdb": "140"
+      }
+    },
+    {
+      "Name": "Land and Freedom",
+      "Id": "8814be2a14e245941133788ec404d23f",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0114671",
+        "Tmdb": "38884"
+      }
+    },
+    {
+      "Name": "The Last House",
+      "Id": "4a7b4147fa2ead602d783716064c3640",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt32268156",
+        "MdbListCriticSource": "metacritic",
+        "Tmdb": "1284041"
+      }
+    },
+    {
+      "Name": "Lee Cronin's The Mummy",
+      "Id": "2618a22a774bc05123647dde89bec504",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt32612507",
+        "Tmdb": "1304313"
+      }
+    },
+    {
+      "Name": "Legend",
+      "Id": "ec1a4b7878154973390de8bf9caaf8ae",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt3569230",
+        "Tmdb": "276907"
+      }
+    },
+    {
+      "Name": "The Life of Chuck",
+      "Id": "ba12951caa89094ff68581dd6f441f9f",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt12908150",
+        "Tmdb": "842924"
+      }
+    },
+    {
+      "Name": "The Lodge",
+      "Id": "0339473c4035e18a534263ed482ca95b",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt7347846",
+        "Tmdb": "474764"
+      }
+    },
+    {
+      "Name": "Longlegs",
+      "Id": "a7444cbde2746c20d5de3f55c21e647c",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt23468450",
+        "Tmdb": "1226578",
+        "TmdbCollection": "1679129"
+      }
+    },
+    {
+      "Name": "Looper",
+      "Id": "fdd1f0398fd007f8add0b2a2d86a5c6f",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt1276104",
+        "Tmdb": "59967"
+      }
+    },
+    {
+      "Name": "Matewan",
+      "Id": "66b509bcc13d5e0782db0cd4590d4e0b",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0093509",
+        "Tmdb": "24276"
+      }
+    },
+    {
+      "Name": "Mein Freund aus Faro",
+      "Id": "dc566c799bcd076aa19d1a2a4e897d09",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt1176686",
+        "Tmdb": "12588"
+      }
+    },
+    {
+      "Name": "Mercy",
+      "Id": "10e2a6afeb1499bde903ab7cb06d5e72",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt31050594",
+        "MdbListCriticSource": "metacritic",
+        "Tmdb": "1236153"
+      }
+    },
+    {
+      "Name": "Michael",
+      "Id": "4508067a2f9e71e441510ad3f4a983ed",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt11378946",
+        "Tmdb": "936075",
+        "TmdbCollection": "1687197"
+      }
+    },
+    {
+      "Name": "Mickey 17",
+      "Id": "49a7db979f6a1dac0d1efceb7f70a12d",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt12299608",
+        "Tmdb": "696506"
+      }
+    },
+    {
+      "Name": "Missing",
+      "Id": "46eddfe447cd6f0107f0a4256e117c32",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt10855768",
+        "Tmdb": "768362"
+      }
+    },
+    {
+      "Name": "Moonage Daydream",
+      "Id": "3630f54243e090f4e0f8a374e01a3390",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt9883832",
+        "Tmdb": "957457"
+      }
+    },
+    {
+      "Name": "Mud - Kein Ausweg",
+      "Id": "4b47cad4ab0e69c6ecdc11e90b0901c2",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt1935179",
+        "Tmdb": "103731"
+      }
+    },
+    {
+      "Name": "Music by John Williams",
+      "Id": "c93b6f5ddf1cda600ce486b1f0214c0c",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt26420234",
+        "Tmdb": "1076708"
+      }
+    },
+    {
+      "Name": "Night Market - Tödliche Fracht",
+      "Id": "1e7bc925c20216b5f1c28039961375a4",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt2333598",
+        "Tmdb": "127847"
+      }
+    },
+    {
+      "Name": "Nocturama",
+      "Id": "30a42d05ea59ad2b1656447050ac7cc4",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt4795546",
+        "Tmdb": "380623"
+      }
+    },
+    {
+      "Name": "Oasis Dont Look Back in Anger (2026) [imdbid-tt36152310]",
+      "Id": "c042bd1d141624a0382826104d6a2d4e",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt36152310"
+      }
+    },
+    {
+      "Name": "Obsession - Du sollst mich lieben",
+      "Id": "15537e713762f712eb4b0e1587f7d841",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt37287335",
+        "Tmdb": "1339713"
+      }
+    },
+    {
+      "Name": "Ohne Schuld",
+      "Id": "1d9a42357d504663683a5ee94a6e7ddb",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt1217637",
+        "Tmdb": "14556"
+      }
+    },
+    {
+      "Name": "Our Girls",
+      "Id": "ec99b11ca22675d4acf1363b5cd4b6e7",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt36474012",
+        "Tmdb": "1457705"
+      }
+    },
+    {
+      "Name": "Panzerkreuzer Potemkin",
+      "Id": "77a02b7e700d5721068cd628b9a24635",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0015648",
+        "Tmdb": "643"
+      }
+    },
+    {
+      "Name": "Phantastische Tierwesen: Dumbledores Geheimnisse",
+      "Id": "c82db75fc557e767e39e1b1ae94f60f9",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt4123432",
+        "Tmdb": "338953",
+        "TmdbCollection": "435259"
+      }
+    },
+    {
+      "Name": "Planet der Monster",
+      "Id": "6db1603d6558ddf44ded9c68bb2d3b99",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt1637728",
+        "Tmdb": "61341",
+        "TmdbCollection": "1021155"
+      }
+    },
+    {
+      "Name": "Pride",
+      "Id": "17c3ff04001fffcba9b507801b8ea669",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt3169706",
+        "Tmdb": "234200"
+      }
+    },
+    {
+      "Name": "Primate",
+      "Id": "ccb15a48dde2b523a5299918ded2f496",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt33028778",
+        "MdbListCriticSource": "metacritic",
+        "Tmdb": "1315303"
+      }
+    },
+    {
+      "Name": "Promising Young Woman",
+      "Id": "c080993849fab932e48fee4cc636f54c",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt9620292",
+        "Tmdb": "582014"
+      }
+    },
+    {
+      "Name": "Quebranto",
+      "Id": "0f497c9eadb0395376b825111f0bdbfe",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt2633242",
+        "Tmdb": "215782"
+      }
+    },
+    {
+      "Name": "Reality",
+      "Id": "fdd1cf67ba614cdd82824e4138f2b7eb",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt24068064",
+        "Tmdb": "985617"
+      }
+    },
+    {
+      "Name": "Resident Evil",
+      "Id": "b65719e42429884e8045f7b14d383255",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt35538033",
+        "Tmdb": "1423191"
+      }
+    },
+    {
+      "Name": "Resolution - Cabin of Death",
+      "Id": "d9ada0b48e7ae161e56164bc5131d841",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt1977895",
+        "Tmdb": "121606"
+      }
+    },
+    {
+      "Name": "Roter Himmel",
+      "Id": "18accd1cd5740371f14577aed1ef3003",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt26440619",
+        "Tmdb": "900379"
+      }
+    },
+    {
+      "Name": "Schlacht um Algier",
+      "Id": "9c3d31d8df55a334a7914ad39bf4b18f",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0058946",
+        "Tmdb": "17295"
+      }
+    },
+    {
+      "Name": "The Senior - Ein Traum, Ein Wille, Ein letztes Spiel",
+      "Id": "284021ee5bf94ed08f7db457eaaffafb",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt15431864",
+        "Tmdb": "1135303"
+      }
+    },
+    {
+      "Name": "Sick",
+      "Id": "2cc9085ee9dbb2913378ae67938e3359",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt14642626",
+        "Tmdb": "829410"
+      }
+    },
+    {
+      "Name": "Sirāt",
+      "Id": "11a07d55f7b9f60fe1470c43de46ea26",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt32298285",
+        "Tmdb": "1151272"
+      }
+    },
+    {
+      "Name": "Sonne und Beton",
+      "Id": "0fef265751d25864ad9a6fa1bd74c269",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt13273800",
+        "Tmdb": "915980"
+      }
+    },
+    {
+      "Name": "Sophia, der Tod und ich",
+      "Id": "f5154e3c7873e7b97ab2fdf16c66c4e7",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt22490348",
+        "Tmdb": "1088202"
+      }
+    },
+    {
+      "Name": "Sorry We Missed You",
+      "Id": "25146f775d84f58150b5fbb9306a1b55",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt8359816",
+        "Tmdb": "522369"
+      }
+    },
+    {
+      "Name": "Spring - Love is a Monster",
+      "Id": "e708e97adfd5220bcd89ce40cde35194",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt3395184",
+        "Tmdb": "241855"
+      }
+    },
+    {
+      "Name": "Spurlos verschwunden",
+      "Id": "f84d9cd956318b8c2a2d326a5e5d01e8",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0096163",
+        "Tmdb": "8740"
+      }
+    },
+    {
+      "Name": "Stereo",
+      "Id": "7a783943197f910549c1e40b64eede17",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt3348102",
+        "Tmdb": "256311"
+      }
+    },
+    {
+      "Name": "Still",
+      "Id": "e154ef4d47b4c9595800392c067fc828",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt5022702",
+        "Tmdb": "376570"
+      }
+    },
+    {
+      "Name": "Still.",
+      "Id": "9630077e7c25b91d84c94db058132b40",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt5547742",
+        "Tmdb": "994192"
+      }
+    },
+    {
+      "Name": "The Strangers",
+      "Id": "d82909d9bbac5542d5620ff35bc8b63d",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0482606",
+        "Tmdb": "10665",
+        "TmdbCollection": "487765"
+      }
+    },
+    {
+      "Name": "Super Dark Times",
+      "Id": "7147424f39f73e3c40f58719a0dcc801",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt5112578",
+        "Tmdb": "396940"
+      }
+    },
+    {
+      "Name": "The Taking of Deborah Logan",
+      "Id": "a22e2db5f93307565601240f31d697d6",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt3387648",
+        "Tmdb": "297608"
+      }
+    },
+    {
+      "Name": "These Final Hours",
+      "Id": "5dee672f1493e1f228ded7086144cb77",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt2268458",
+        "Tmdb": "199575"
+      }
+    },
+    {
+      "Name": "Tod in den Wäldern",
+      "Id": "fc3bff42fa058ee185ebbde0b6725cfe",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt7149730",
+        "Tmdb": "603119"
+      }
+    },
+    {
+      "Name": "Together - Unzertrennlich",
+      "Id": "ab7b036e35590256cebdc13edbcc873b",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt31184028",
+        "Tmdb": "1242011"
+      }
+    },
+    {
+      "Name": "Toy Story 5",
+      "Id": "9e1a74d4d7c2bdb4c114abcfb9817ba2",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt29355505",
+        "Tmdb": "1084244",
+        "TmdbCollection": "10194"
+      }
+    },
+    {
+      "Name": "Treasure - Familie ist ein fremdes Land",
+      "Id": "fb397d8094384339d1a241c7d49d47cb",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt9462944",
+        "Tmdb": "1220515"
+      }
+    },
+    {
+      "Name": "Verleugnung",
+      "Id": "e51af337aad549fbdae62d33a778ea2a",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt4645330",
+        "Tmdb": "402298"
+      }
+    },
+    {
+      "Name": "What You Wish For",
+      "Id": "5d5038da709fdc635b8a169175c7daf1",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt13638858",
+        "Tmdb": "1126934"
+      }
+    },
+    {
+      "Name": "Wie wilde Tiere",
+      "Id": "41e72a3be6801dfcce91630b9402336d",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt15006566",
+        "Tmdb": "848685"
+      }
+    },
+    {
+      "Name": "Zeit der Kannibalen",
+      "Id": "3eea97cfc56f2548093a2196c3e513c4",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt2723240",
+        "Tmdb": "261192"
+      }
+    },
+    {
+      "Name": "Zimmer 1408",
+      "Id": "42d9cc79bbf977e187ba3f6bacdadbc4",
+      "Type": "Movie",
+      "ProviderIds": {
+        "Imdb": "tt0450385",
+        "Tmdb": "3021"
+      }
+    }
+  ],
+  "TotalRecordCount": 132
+}

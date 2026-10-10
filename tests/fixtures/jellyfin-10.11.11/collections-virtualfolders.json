@@ -1,0 +1,62 @@
+[
+  {
+    "Name": "IPTV Filme (Englisch)",
+    "ItemId": "e6b496ef8ebc310b0ce6c2356571a3ca",
+    "CollectionType": "movies"
+  },
+  {
+    "Name": "Sammlungen",
+    "ItemId": "dbbcb697ad52d5e9939f9ec1e9fc2c07",
+    "CollectionType": "boxsets"
+  },
+  {
+    "Name": "Filme",
+    "ItemId": "7a2175bccb1f1a94152cbd2b2bae8f6d",
+    "CollectionType": "movies"
+  },
+  {
+    "Name": "IPTV Serien",
+    "ItemId": "d589f0d87752c448f74d38510519927a",
+    "CollectionType": "tvshows"
+  },
+  {
+    "Name": "Privat",
+    "ItemId": "23c568cf922e8a8bbf6133ad307b5fb8",
+    "CollectionType": "homevideos"
+  },
+  {
+    "Name": "Musik",
+    "ItemId": "8a05b0252259a1dbd62df97522638439",
+    "CollectionType": "music"
+  },
+  {
+    "Name": "IPTV Serien (Englisch)",
+    "ItemId": "b5d75128eb817c14de4ab6f16b898090",
+    "CollectionType": "tvshows"
+  },
+  {
+    "Name": "IPTV Filme",
+    "ItemId": "789b6fd9b2c9d63d8894e24719c397d0",
+    "CollectionType": "movies"
+  },
+  {
+    "Name": "Serien",
+    "ItemId": "43cfe12fe7d9d8d21251e0964e0232e2",
+    "CollectionType": "tvshows"
+  },
+  {
+    "Name": "Mediathek Serien",
+    "ItemId": "c70af6a113b51f9aab8594b81d74f1b7",
+    "CollectionType": "tvshows"
+  },
+  {
+    "Name": "Filme in 3D",
+    "ItemId": "275fc977f69990c9828204396b4e251c",
+    "CollectionType": "movies"
+  },
+  {
+    "Name": "Mediathek Filme",
+    "ItemId": "7ee571d485deaa484dcede65597cd699",
+    "CollectionType": "movies"
+  }
+]

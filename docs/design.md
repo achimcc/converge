@@ -3150,6 +3150,55 @@ the `TMDbListImport` template, the profiles' names and ids. A stored list is
 service had none to record -- and the test says so. `tests/schema.rs` holds
 the six endpoints against both descriptions.
 
+## 51. Jellyfin: collections fed from a Radarr import list (v0.50.0, 2026-10-10)
+
+The host follows a public TMDb list with Radarr (§50) and wants the same films
+as one collection in Jellyfin. No task, plugin or tool on the host could fill
+a collection from a TMDb list: the collection-import plugin reads MDBList
+only, Auto Collections builds from tags, genres and titles, and Radarr's tags
+reach Jellyfin only through NFO files -- which, switched on, would make Radarr
+the source of every film's metadata in the library.
+
+| task | read | write |
+|---|---|---|
+| `collections` | Radarr: `GET /api/v3/importlist`, `GET /api/v3/importlist/movie`; Jellyfin: `GET /Library/VirtualFolders`, `GET /Items` (box sets, the library's films, a collection's members) | `POST /Collections?name=&ids=`, `POST` and `DELETE /Collections/{id}/Items?ids=` |
+
+**The source is Radarr's stored list, not TMDb.** `GET /api/v3/importlist/movie`
+answers the films Radarr stored at its last sync, each with the ids of the
+lists that named it (`GetAllForLists`, 6.4.4.10685 read): no TMDb key, no
+second copy of the list, and a film that leaves the list leaves the answer.
+The list is named in the spec; its id is looked up, an unknown list and an
+empty one are errors -- a collection fed from nothing would be emptied.
+
+**Two services, two transports.** A spec is Jellyfin's; its `source` names
+the Radarr, its base URL and a credential of its own, read before the first
+request like every other. Nothing is written to Radarr.
+
+**A named collection is owned completely.** Its members are exactly the
+library's films whose `ProviderIds.Tmdb` is on the list. A film on the list
+that the library lacks is a note (it arrives with the next run after its
+import), not a change. A collection that does not exist is created only with
+at least one film: Jellyfin would keep an empty folder nobody can tell from a
+broken one. Two collections of one name are refused.
+
+**Two measured details.** Jellyfin answers a collection's members to an API
+key without a user only with `recursive=true` -- without it the answer is
+empty (10.11.11: 0 against 211). And creating a collection took longer than
+the ten seconds a request may take: `timeout: global`, and the collection
+stood complete when it was read. A write that times out is therefore not an
+error here; the engine reads back until the state is there, and that decides.
+A refused connection stays an error.
+
+### Checked how
+
+`plan` and `apply` ran against the host's Jellyfin 10.11.11 and Radarr
+6.4.4.10685 before release: `plan` 1 difference (12 of 50 films in the
+library), `apply` created it (the timeout above), `plan` unchanged. Fixtures
+under `tests/fixtures/jellyfin-10.11.11/collections-*` and
+`tests/fixtures/radarr-6.4.4.10685/importlist-{stored,movie}.json`;
+`tests/schema.rs` holds the query parameters against the description, which
+`schema-check` does not look at.
+
 ## 20. Not in the pilot
 
 

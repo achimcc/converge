@@ -3,6 +3,7 @@ pub mod audiobookshelf;
 pub mod authentik;
 pub mod bazarr;
 pub mod bindery;
+pub mod collections;
 pub mod dispatcharr;
 pub mod jellyfin;
 pub mod kavita;
