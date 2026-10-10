@@ -30,6 +30,7 @@ fn provider_kind(desired: &Desired) -> providers::Kind {
     match desired {
         Desired::DownloadClients(_) => providers::Kind::DownloadClients,
         Desired::Notifications(_) => providers::Kind::Notifications,
+        Desired::ImportLists(_) => providers::Kind::ImportLists,
         Desired::Indexers(_) => providers::Kind::Indexers,
         Desired::IndexerProxies(_) => providers::Kind::IndexerProxies,
         _ => providers::Kind::Applications,
@@ -698,6 +699,7 @@ fn reconcile_one(
         }
         Desired::DownloadClients(desired)
         | Desired::Notifications(desired)
+        | Desired::ImportLists(desired)
         | Desired::Applications(desired)
         | Desired::Indexers(desired)
         | Desired::IndexerProxies(desired) => {
@@ -724,6 +726,7 @@ fn reconcile_one(
                     template: entry.template.clone(),
                     tags: entry.tags.clone(),
                     app_profile: entry.app_profile.clone(),
+                    quality_profile: entry.quality_profile.clone(),
                     set: entry.set.clone(),
                     fields: entry.fields.clone(),
                     secret_fields,
@@ -1136,6 +1139,7 @@ fn schema_check(args: &[String]) -> ExitCode {
             // are checked here, the entries against the answer at runtime.
             Desired::DownloadClients(desired)
             | Desired::Notifications(desired)
+            | Desired::ImportLists(desired)
             | Desired::Applications(desired)
             | Desired::Indexers(desired)
             | Desired::IndexerProxies(desired) => {

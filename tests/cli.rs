@@ -58,7 +58,7 @@ fn schema_check_passes_for_the_vendored_file() {
     // Exit 0 alone would also pass for a program that does nothing.
     assert!(
         String::from_utf8_lossy(&out.stdout)
-            .contains("radarr: 29 endpoints and their wire types match"),
+            .contains("radarr: 35 endpoints and their wire types match"),
         "{}",
         String::from_utf8_lossy(&out.stdout)
     );

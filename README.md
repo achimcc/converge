@@ -19,7 +19,7 @@ script should have been:
 
 ## Status
 
-Early. **v0.48.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.49.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11, 0.13), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11),
 **SuggestArr** (2.14), **Kavita** (0.9), **Audiobookshelf** (2.36),
 **Dispatcharr** (0.31), **authentik** (2026.5), **Questarr** (1.4) and **Bazarr** (1.6), each replacing a shell unit
@@ -36,6 +36,7 @@ or an OpenTofu resource on the host it was written for:
 | Radarr, Sonarr, Lidarr | `indexer-config` | the same for `config/indexer`: retention, minimum age, maximum size, RSS interval. Only Radarr carries the four extra fields |
 | Radarr, Sonarr, Lidarr | `delay-profiles` | the **default** delay profile -- the one without tags -- by its fields: `preferredProtocol` and the two delays. A tagged profile belongs to whoever set the tag and is left alone; `tags` and `order` cannot be set, they say which profile is meant |
 | Radarr, Sonarr, Lidarr, Prowlarr | `download-clients`, `notifications` | providers by name: top-level fields, `fields` entries by name, secrets from credentials handed over on every `apply` |
+| Radarr, Sonarr | `import-lists` | the same for import lists (a TMDb list, a Trakt list, …); the quality profile by name instead of `qualityProfileId` (never both). What a list then adds and searches is the service's doing, not converge's |
 | Prowlarr | `applications` | the same for Prowlarr's links to Radarr, Sonarr and Lidarr |
 | Prowlarr | `indexers`, `indexer-proxies` | the same, added from a named template; tags by label (missing labels are added); an indexer's app profile by name instead of `appProfileId` (never both); secrets the service shows are compared, never printed |
 | Radarr, Sonarr, Lidarr | `root-folders` | root folders by path; Lidarr's with fields and profiles by name; missing ones are added |

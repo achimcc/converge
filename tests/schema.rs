@@ -623,6 +623,28 @@ fn the_provider_endpoints_match_for_all_four_services() {
     }
 }
 
+/// The host's import list (design §50): its top-level fields are properties
+/// of `ImportListResource`, among them `rootFolderPath`, which a template
+/// answers without -- so this is the check that holds its spelling.
+#[test]
+fn an_import_lists_top_level_fields_are_checked() {
+    let set = serde_json::json!({
+        "enabled": true, "enableAuto": true, "searchOnAdd": true,
+        "monitor": "movieOnly", "minimumAvailability": "released",
+        "rootFolderPath": "/tank/data/media/movies"
+    });
+    assert_eq!(
+        servarr_paths("radarr-6.3.0.10514", "ImportListResource", set),
+        Vec::<String>::new()
+    );
+    let found = servarr_paths(
+        "radarr-6.3.0.10514",
+        "ImportListResource",
+        serde_json::json!({"rootFolder": "/x", "monitor": "everything"}),
+    );
+    assert_eq!(found.len(), 2, "{found:?}");
+}
+
 #[test]
 fn prowlarr_indexer_and_proxy_top_level_fields_are_checked() {
     assert_eq!(

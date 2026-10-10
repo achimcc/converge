@@ -3106,6 +3106,50 @@ carries each account's `Configuration` as recorded; no new answer was needed.
 The enum of `SubtitleMode` sits behind an `allOf` reference in the
 description, and `tests/schema.rs` holds that a value outside it is found.
 
+## 50. Radarr and Sonarr: import lists (v0.49.0, 2026-10-10)
+
+An import list is a provider like a download client: a resource with
+top-level fields and a `fields` list that depends on the implementation
+(`TMDbListImport` has one entry, `listId`). The host wants one -- a public
+TMDb list whose films Radarr adds, monitors and searches by itself. So
+`import-lists` is §12's task with a third resource, `ImportListResource`
+behind `/api/v3/importlist`, and what a list then adds, how often it is read
+(`minRefreshInterval`, twelve hours for TMDb) and what happens to a film that
+leaves the list (`config/importlist`, `listSyncLevel`) is the service's doing.
+
+Two things did not fit, and both show in the recorded answers.
+
+**The quality profile is an id on the wire and a name in the spec.**
+`qualityProfileId` is whatever the database handed out; on the host the
+profiles are created by another tool and their ids are 7 to 12 today.
+`quality_profile` names the profile instead, as `app_profile` does for a
+Prowlarr indexer (§41): the list of profiles is read only when a spec names
+one, a name the service does not have is an error before anything is written,
+and naming both the profile and its id is refused by the parser. Only an
+`import-lists` spec may carry it.
+
+**The template has no `rootFolderPath`.** A list cannot be saved without a
+root folder, and `…/importlist/schema` answers every template without the
+key: it is null there, and Servarr omits null values. §12's rule -- a
+top-level name the answer lacks is a misspelt name -- would refuse the one
+field every list needs. So a kind of provider now declares its **nullable**
+top-level fields, and `import list` declares exactly this one: it may be set
+although the answer lacks it, and where a stored list answers without it, the
+absent key counts as null and is a change, not silence. Every other name
+stays under the rule; `schema-check` holds `rootFolderPath` against
+`ImportListResource` at build time, so the exception cannot hide a typo.
+
+Lidarr's and Prowlarr's lists are not this task: nothing was recorded from
+them, and Lidarr's resource points at two profiles.
+
+### Checked how
+
+`tests/fixtures/radarr-6.4.4.10685/`, recorded 2026-10-10: the empty list,
+the `TMDbListImport` template, the profiles' names and ids. A stored list is
+*constructed* in the test from the request converge sends plus an id -- the
+service had none to record -- and the test says so. `tests/schema.rs` holds
+the six endpoints against both descriptions.
+
 ## 20. Not in the pilot
 
 

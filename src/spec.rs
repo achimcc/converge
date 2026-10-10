@@ -137,6 +137,7 @@ enum TaskName {
     RootFolders,
     DownloadClients,
     Notifications,
+    ImportLists,
     Applications,
     Indexers,
     IndexerProxies,
@@ -202,6 +203,7 @@ impl TaskName {
                     || service == Service::Questarr
             }
             TaskName::Notifications => service.is_servarr() || service == Service::Prowlarr,
+            TaskName::ImportLists => service.is_arr(),
             TaskName::ProwlarrInstances | TaskName::OidcProviders => service == Service::Bindery,
             // `settings` means two different things, as `indexers` does
             // below: bindery's settings by key (§14), and authentik's tenant
@@ -652,6 +654,11 @@ pub struct ProviderEntry {
     /// together with the id.
     #[serde(default)]
     pub app_profile: Option<String>,
+    /// Radarr's or Sonarr's quality profile by name, instead of
+    /// `set.qualityProfileId` (design §50). Only an `import-lists` spec may
+    /// carry it, and never together with the id.
+    #[serde(default)]
+    pub quality_profile: Option<String>,
     #[serde(default)]
     pub set: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
@@ -763,6 +770,7 @@ pub enum Desired {
     RootFolders(RootFolderSettings),
     DownloadClients(ProviderSettings),
     Notifications(ProviderSettings),
+    ImportLists(ProviderSettings),
     Applications(ProviderSettings),
     Indexers(ProviderSettings),
     IndexerProxies(ProviderSettings),
@@ -2261,6 +2269,7 @@ impl Spec {
             }
             TaskName::DownloadClients
             | TaskName::Notifications
+            | TaskName::ImportLists
             | TaskName::Applications
             | TaskName::Indexers
             | TaskName::IndexerProxies => {
@@ -2321,11 +2330,31 @@ impl Spec {
                             )));
                         }
                     }
+                    if let Some(profile) = &provider.quality_profile {
+                        // The id is the database's; an import list is the
+                        // only provider that points at a quality profile
+                        // (design §50).
+                        if !matches!(raw.task, TaskName::ImportLists) {
+                            return Err(invalid(format!(
+                                "{at}.quality_profile belongs to an import-lists spec"
+                            )));
+                        }
+                        if profile.is_empty() {
+                            return Err(invalid(format!("{at}.quality_profile is empty")));
+                        }
+                        if provider.set.contains_key("qualityProfileId") {
+                            return Err(invalid(format!(
+                                "{at}: quality_profile names the profile and qualityProfileId \
+                                 its id -- name one of them"
+                            )));
+                        }
+                    }
                     if provider.set.is_empty()
                         && provider.fields.is_empty()
                         && provider.secret_fields.is_empty()
                         && provider.tags.is_none()
                         && provider.app_profile.is_none()
+                        && provider.quality_profile.is_none()
                     {
                         return Err(invalid(format!("{at} names no field")));
                     }
@@ -2356,6 +2385,7 @@ impl Spec {
                 match raw.task {
                     TaskName::DownloadClients => Desired::DownloadClients(desired),
                     TaskName::Notifications => Desired::Notifications(desired),
+                    TaskName::ImportLists => Desired::ImportLists(desired),
                     TaskName::Indexers => Desired::Indexers(desired),
                     TaskName::IndexerProxies => Desired::IndexerProxies(desired),
                     _ => Desired::Applications(desired),
@@ -2408,6 +2438,7 @@ impl Spec {
             Desired::RootFolders(_) => "root-folders",
             Desired::DownloadClients(_) => "download-clients",
             Desired::Notifications(_) => "notifications",
+            Desired::ImportLists(_) => "import-lists",
             Desired::Applications(_) => "applications",
             Desired::Indexers(_) => "indexers",
             Desired::IndexerProxies(_) => "indexer-proxies",
@@ -5034,6 +5065,55 @@ mod tests {
             r#"{"providers":{"Radarr":{"implementation":"Radarr","app_profile":"Standard"}}}"#,
         );
         assert!(reason(elsewhere).contains("prowlarr indexers spec"));
+    }
+
+    /// `import-lists` belongs to Radarr and Sonarr, and its quality profile
+    /// is a name or an id, never both (design §50).
+    #[test]
+    fn an_import_list_names_a_quality_profile_or_its_id_but_never_both() {
+        let list = |inner: &str| {
+            servarr(
+                "radarr",
+                "import-lists",
+                &format!(
+                    r#"{{"providers":{{"Liste":{{"implementation":"TMDbListImport",{inner}
+                       "fields":{{"listId":"8694037"}}}}}}}}"#
+                ),
+            )
+        };
+        let by_name = list(r#""quality_profile":"HD","#).unwrap();
+        assert_eq!(by_name.task_name(), "import-lists");
+        let Desired::ImportLists(desired) = &by_name.desired else {
+            panic!("{:?}", by_name.desired);
+        };
+        assert_eq!(
+            desired.providers["Liste"].quality_profile.as_deref(),
+            Some("HD")
+        );
+        assert!(list(r#""set":{"qualityProfileId":4},"#).is_ok());
+
+        let both = list(r#""quality_profile":"HD","set":{"qualityProfileId":4},"#);
+        assert!(
+            reason(both).contains("name one of them"),
+            "both are refused"
+        );
+        assert!(reason(list(r#""quality_profile":"","#)).contains("quality_profile is empty"));
+        // No other provider points at a quality profile.
+        let elsewhere = servarr(
+            "radarr",
+            "notifications",
+            r#"{"providers":{"Hook":{"implementation":"Webhook","quality_profile":"HD"}}}"#,
+        );
+        assert!(reason(elsewhere).contains("import-lists spec"));
+        // Lidarr's and Prowlarr's lists are not this task.
+        for service in ["lidarr", "prowlarr"] {
+            assert!(servarr(
+                service,
+                "import-lists",
+                r#"{"providers":{"L":{"implementation":"X","set":{"enabled":true}}}}"#
+            )
+            .is_err());
+        }
     }
 
     #[test]

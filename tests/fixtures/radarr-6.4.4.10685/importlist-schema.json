@@ -1,0 +1,32 @@
+[
+  {
+    "enabled": false,
+    "enableAuto": true,
+    "monitor": "movieOnly",
+    "qualityProfileId": 0,
+    "searchOnAdd": false,
+    "minimumAvailability": "tba",
+    "listType": "tmdb",
+    "listOrder": 1,
+    "minRefreshInterval": "12:00:00",
+    "fields": [
+      {
+        "order": 0,
+        "name": "listId",
+        "label": "ListId",
+        "helpText": "TMDb Id of List to Follow",
+        "value": "",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "TMDb List",
+    "implementation": "TMDbListImport",
+    "configContract": "TMDbListSettings",
+    "infoLink": "https://wiki.servarr.com/radarr/supported#tmdblistimport",
+    "tags": [],
+    "presets": []
+  }
+]

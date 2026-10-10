@@ -1,5 +1,6 @@
-//! Servarr providers: download clients, notifications, Prowlarr's
-//! applications, indexers and indexer proxies (design §12, §13). Each is a
+//! Servarr providers: download clients, notifications, Radarr's and
+//! Sonarr's import lists (design §50), Prowlarr's applications, indexers and
+//! indexer proxies (design §12, §13). Each is a
 //! resource with top-level fields and a `fields` list of
 //! `{name, value, privacy, …}` entries; the entries depend on the
 //! implementation, so the OpenAPI description cannot name them.
@@ -45,6 +46,7 @@ use crate::{
 pub enum Kind {
     DownloadClients,
     Notifications,
+    ImportLists,
     Applications,
     Indexers,
     IndexerProxies,
@@ -63,6 +65,11 @@ pub struct ProviderApi {
     /// The service's tags, read only when a provider names tags.
     pub tags: Endpoint,
     pub tag_create: Endpoint,
+    /// Top-level fields that hold null until somebody sets them. Servarr
+    /// omits null values, so the answer -- and the template a provider is
+    /// added from -- has no such key at all (design §50). Only these may be
+    /// set although the answer lacks them; `schema-check` holds the names.
+    pub nullable: &'static [&'static str],
 }
 
 macro_rules! provider_api {
@@ -112,6 +119,7 @@ macro_rules! provider_api {
                 request: Some(Shape::Document("TagResource")),
                 response: None,
             },
+            nullable: &[],
         }
     };
 }
@@ -132,6 +140,12 @@ pub static NOTIFICATIONS_V3: ProviderApi =
     provider_api!("v3", "notification", "NotificationResource", "notification");
 pub static NOTIFICATIONS_V1: ProviderApi =
     provider_api!("v1", "notification", "NotificationResource", "notification");
+/// An import list's template answers without `rootFolderPath`: it is null
+/// there, and a list cannot be saved without it.
+pub static IMPORT_LISTS_V3: ProviderApi = ProviderApi {
+    nullable: &["rootFolderPath"],
+    ..provider_api!("v3", "importlist", "ImportListResource", "import list")
+};
 pub static APPLICATIONS_V1: ProviderApi =
     provider_api!("v1", "applications", "ApplicationResource", "application");
 pub static INDEXERS_V1: ProviderApi = provider_api!("v1", "indexer", "IndexerResource", "indexer");
@@ -152,6 +166,7 @@ impl ProviderApi {
             Kind::DownloadClients if v1 => Some(&DOWNLOAD_CLIENTS_V1),
             Kind::Notifications if v3 => Some(&NOTIFICATIONS_V3),
             Kind::Notifications if v1 => Some(&NOTIFICATIONS_V1),
+            Kind::ImportLists if v3 => Some(&IMPORT_LISTS_V3),
             Kind::Applications if prowlarr => Some(&APPLICATIONS_V1),
             Kind::Indexers if prowlarr => Some(&INDEXERS_V1),
             Kind::IndexerProxies if prowlarr => Some(&INDEXER_PROXIES_V1),
@@ -176,6 +191,7 @@ impl ProviderApi {
         [
             Kind::DownloadClients,
             Kind::Notifications,
+            Kind::ImportLists,
             Kind::Applications,
             Kind::Indexers,
             Kind::IndexerProxies,
@@ -206,6 +222,11 @@ pub struct ProviderTarget {
     /// (design §41). The two are mutually exclusive -- the spec parser
     /// refuses both at once -- and only an indexer spec may carry it.
     pub app_profile: Option<String>,
+    /// Radarr's or Sonarr's quality profile by name, in place of
+    /// `set.qualityProfileId` (design §50): the id is whatever the database
+    /// handed out, the name is what a spec can know. Only an import list
+    /// carries it, and never together with the id.
+    pub quality_profile: Option<String>,
 }
 
 pub struct Providers {
@@ -221,6 +242,8 @@ pub struct Current {
     pub tags: BTreeMap<String, i64>,
     /// Read only when a provider names an app profile: name to id.
     pub app_profiles: BTreeMap<String, i64>,
+    /// Read only when a provider names a quality profile: name to id.
+    pub quality_profiles: BTreeMap<String, i64>,
 }
 
 fn name_of(entry: &Map<String, Value>) -> Option<&str> {
@@ -335,19 +358,36 @@ impl Providers {
         current: &Current,
     ) -> Result<BTreeMap<String, Value>, String> {
         let mut set = target.set.clone();
-        let Some(name) = &target.app_profile else {
-            return Ok(set);
-        };
-        match current.app_profiles.get(name) {
-            Some(id) => {
-                set.insert("appProfileId".to_string(), Value::from(*id));
-                Ok(set)
+        for (key, field, name, known) in [
+            (
+                "app_profile",
+                "appProfileId",
+                &target.app_profile,
+                &current.app_profiles,
+            ),
+            (
+                "quality_profile",
+                "qualityProfileId",
+                &target.quality_profile,
+                &current.quality_profiles,
+            ),
+        ] {
+            let Some(name) = name else {
+                continue;
+            };
+            match known.get(name) {
+                Some(id) => {
+                    set.insert(field.to_string(), Value::from(*id));
+                }
+                None => {
+                    return Err(format!(
+                        "{}: {key} names {name:?}, which the service does not have",
+                        self.subject(&target.name)
+                    ))
+                }
             }
-            None => Err(format!(
-                "{}: app_profile names {name:?}, which the service does not have",
-                self.subject(&target.name)
-            )),
         }
+        Ok(set)
     }
 
     /// Checks that every name the spec uses exists in `entry` (a provider or
@@ -361,7 +401,7 @@ impl Providers {
     ) {
         let subject = self.subject(&target.name);
         for key in set.keys() {
-            if !entry.contains_key(key) {
+            if !entry.contains_key(key) && !self.api.nullable.contains(&key.as_str()) {
                 missing.push(format!("{subject}: {key}"));
             }
         }
@@ -420,15 +460,20 @@ impl Providers {
         let subject = self.subject(&target.name);
         let mut changes = Vec::new();
         for (key, desired) in set {
-            if let Some(current) = entry.get(key) {
-                if current != desired {
-                    changes.push(Change {
-                        subject: subject.clone(),
-                        field: key.clone(),
-                        current: shortened(current),
-                        desired: shortened(desired),
-                    });
-                }
+            // An absent nullable field holds null; any other absent key was
+            // reported by `check_names`.
+            let current = match entry.get(key) {
+                Some(current) => current,
+                None if self.api.nullable.contains(&key.as_str()) => &Value::Null,
+                None => continue,
+            };
+            if current != desired {
+                changes.push(Change {
+                    subject: subject.clone(),
+                    field: key.clone(),
+                    current: shortened(current),
+                    desired: shortened(desired),
+                });
             }
         }
         for (name, desired) in &target.fields {
@@ -633,11 +678,29 @@ impl Task for Providers {
                 }
             }
         }
+        let mut quality_profiles = BTreeMap::new();
+        if self.providers.iter().any(|p| p.quality_profile.is_some()) {
+            let ep = crate::services::arr::profiles::PROFILE_LIST;
+            for profile in read_list(ep)? {
+                match (name_of(&profile), profile.get("id").and_then(Value::as_i64)) {
+                    (Some(name), Some(id)) => {
+                        quality_profiles.insert(name.to_string(), id);
+                    }
+                    _ => {
+                        return Err(Error::Decode {
+                            path: ep.path.to_string(),
+                            reason: "a quality profile has no name or no integer id".to_string(),
+                        })
+                    }
+                }
+            }
+        }
         Ok(Current {
             entries,
             templates,
             tags,
             app_profiles,
+            quality_profiles,
         })
     }
 
@@ -832,6 +895,7 @@ mod tests {
             template: None,
             tags: None,
             app_profile: None,
+            quality_profile: None,
             set: map(json!({"enable": true, "priority": 1})),
             // The recording masks the user name on the host; the spec uses it.
             fields: map(json!({"host": "10.0.10.11", "port": port,
@@ -849,6 +913,7 @@ mod tests {
             template: None,
             tags: None,
             app_profile: None,
+            quality_profile: None,
             set: map(json!({"enable": true, "priority": 1})),
             fields: map(json!({"host": "10.0.10.10", "port": 8080, "movieCategory": "radarr"})),
             secret_fields: [(
@@ -913,7 +978,13 @@ mod tests {
         );
         assert_eq!(of(Service::Radarr, Kind::Applications), None);
         assert_eq!(of(Service::Jellyfin, Kind::DownloadClients), None);
-        assert_eq!(ProviderApi::endpoints_of(Service::Sonarr).len(), 12);
+        assert_eq!(ProviderApi::endpoints_of(Service::Sonarr).len(), 18);
+        assert_eq!(
+            of(Service::Radarr, Kind::ImportLists),
+            Some("/api/v3/importlist")
+        );
+        assert_eq!(of(Service::Lidarr, Kind::ImportLists), None);
+        assert_eq!(of(Service::Prowlarr, Kind::ImportLists), None);
         assert_eq!(ProviderApi::endpoints_of(Service::Prowlarr).len(), 30);
         assert_eq!(
             of(Service::Prowlarr, Kind::Indexers),
@@ -1118,6 +1189,7 @@ mod tests {
                 template: None,
                 tags: None,
                 app_profile: None,
+                quality_profile: None,
                 set: map(
                     json!({"onReleaseImport": true, "onUpgrade": true, "onRename": true,
                                 "onGrab": false, "onHealthIssue": false, "includeHealthWarnings": false}),
@@ -1142,6 +1214,7 @@ mod tests {
                 template: None,
                 tags: None,
                 app_profile: None,
+                quality_profile: None,
                 set: map(json!({"syncLevel": "fullSync"})),
                 fields: map(
                     json!({"prowlarrUrl": "http://10.0.10.10:9696", "baseUrl": "http://10.0.80.10:8686",
@@ -1243,6 +1316,7 @@ mod tests {
                 secret_fields: secrets(&[("username", "<masked>"), ("password", "<masked>")]),
                 tags: tags(&[]),
                 app_profile: None,
+                quality_profile: None,
             },
             ProviderTarget {
                 name: "TorrentLeech".to_string(),
@@ -1253,6 +1327,7 @@ mod tests {
                 secret_fields: secrets(&[("username", "<masked>"), ("password", "<masked>")]),
                 tags: tags(&[]),
                 app_profile: None,
+                quality_profile: None,
             },
             ProviderTarget {
                 name: "TNTracker".to_string(),
@@ -1263,6 +1338,7 @@ mod tests {
                 secret_fields: secrets(&[("apiKey", "tnt-key-never-print")]),
                 tags: tags(&["umlautadaptarr"]),
                 app_profile: None,
+                quality_profile: None,
             },
             ProviderTarget {
                 name: "Treasure Maps".to_string(),
@@ -1273,6 +1349,7 @@ mod tests {
                 secret_fields: secrets(&[("apiKey", "tm-key-never-print")]),
                 tags: tags(&["umlautadaptarr"]),
                 app_profile: None,
+                quality_profile: None,
             },
             ProviderTarget {
                 name: "MyAnonamouse".to_string(),
@@ -1283,6 +1360,7 @@ mod tests {
                 secret_fields: secrets(&[("mamId", "<masked>")]),
                 tags: tags(&[]),
                 app_profile: None,
+                quality_profile: None,
             },
         ]
     }
@@ -1604,6 +1682,7 @@ mod tests {
                 secret_fields: BTreeMap::new(),
                 tags: tags(&[label]),
                 app_profile: None,
+                quality_profile: None,
             };
         let mut task = Providers {
             api: &INDEXER_PROXIES_V1,
@@ -1635,5 +1714,156 @@ mod tests {
                 .collect::<Vec<_>>(),
             [r#"indexer proxy Tunnel (torrent-01): tags ["vpn"] -> ["umlautadaptarr"]"#]
         );
+    }
+
+    // --- Radarr's import lists (design §50) ---------------------------------
+
+    const RADARR_IMPORT_LISTS: &str =
+        include_str!("../../tests/fixtures/radarr-6.4.4.10685/importlist.json");
+    const RADARR_IMPORT_LIST_SCHEMA: &str =
+        include_str!("../../tests/fixtures/radarr-6.4.4.10685/importlist-schema.json");
+    const RADARR_PROFILE_NAMES: &str =
+        include_str!("../../tests/fixtures/radarr-6.4.4.10685/qualityprofile-names.json");
+    const PROFILE: &str = "Dual Language, sonst Deutsch (1080p)";
+
+    /// The host's list: a TMDb list by its number, into a root folder, with
+    /// the quality profile named.
+    fn tmdb_list(profile: &str) -> Providers {
+        Providers {
+            api: &IMPORT_LISTS_V3,
+            providers: vec![ProviderTarget {
+                name: "50 politisch linke Filme".to_string(),
+                implementation: "TMDbListImport".to_string(),
+                template: None,
+                set: map(json!({
+                    "enabled": true, "enableAuto": true, "searchOnAdd": true,
+                    "monitor": "movieOnly", "minimumAvailability": "released",
+                    "rootFolderPath": "/tank/data/media/movies"
+                })),
+                fields: map(json!({"listId": "8694037"})),
+                secret_fields: BTreeMap::new(),
+                tags: None,
+                app_profile: None,
+                quality_profile: Some(profile.to_string()),
+            }],
+        }
+    }
+
+    fn radarr_lists(lists: Vec<Step>) -> FakeTransport {
+        FakeTransport::default()
+            .on_get("/api/v3/system/status", vec![ok(RADARR_STATUS)])
+            .on_get("/api/v3/importlist", lists)
+            .on_get(
+                "/api/v3/importlist/schema",
+                vec![ok(RADARR_IMPORT_LIST_SCHEMA)],
+            )
+            .on_get("/api/v3/qualityprofile", vec![ok(RADARR_PROFILE_NAMES)])
+    }
+
+    /// The recorded service has no list: it is added from the template, the
+    /// profile's id comes from the name, and `rootFolderPath` -- which the
+    /// template does not carry, being null -- is sent all the same.
+    #[test]
+    fn a_missing_import_list_is_added_with_the_profiles_id_and_the_root_folder() {
+        let task = tmdb_list(PROFILE);
+        let t = radarr_lists(vec![ok(RADARR_IMPORT_LISTS)])
+            .on_put(vec![Step::Answer(201, String::new())]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(current.quality_profiles[PROFILE], 7);
+        let changes = task.diff(&current).unwrap();
+        assert_eq!(changes.len(), 1, "{changes:?}");
+        assert_eq!(
+            changes[0].to_string(),
+            "import list 50 politisch linke Filme: (missing) -> (added)"
+        );
+        task.write(&t, &current).unwrap();
+        let (path, body) = sent(&t, 0);
+        assert_eq!(path, "/api/v3/importlist?forceSave=true");
+        assert_eq!(body["name"], "50 politisch linke Filme");
+        assert_eq!(body["qualityProfileId"], 7);
+        assert_eq!(body["rootFolderPath"], "/tank/data/media/movies");
+        assert_eq!(body["searchOnAdd"], true);
+        assert_eq!(body["configContract"], "TMDbListSettings");
+        assert_eq!(field_value(&body, "listId"), json!("8694037"));
+        assert!(body.get("id").is_none());
+    }
+
+    /// What Radarr answers once the list is stored (constructed from the
+    /// request above plus an id): unchanged. With the root folder gone from
+    /// the answer, the absent key counts as null and is one change -- not
+    /// silence.
+    #[test]
+    fn a_stored_import_list_is_unchanged_and_an_absent_root_folder_is_a_change() {
+        let task = tmdb_list(PROFILE);
+        let t = radarr_lists(vec![ok(RADARR_IMPORT_LISTS)])
+            .on_put(vec![Step::Answer(201, String::new())]);
+        let current = task.read(&t).unwrap();
+        task.write(&t, &current).unwrap();
+        let (_, mut stored) = sent(&t, 0);
+        stored["id"] = 1.into();
+
+        let listed = Value::Array(vec![stored.clone()]).to_string();
+        let t = radarr_lists(vec![ok(&listed)]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+
+        stored.as_object_mut().unwrap().remove("rootFolderPath");
+        stored["qualityProfileId"] = 9.into();
+        let listed = Value::Array(vec![stored]).to_string();
+        let t = radarr_lists(vec![ok(&listed)]).on_put(vec![Step::Answer(202, String::new())]);
+        let current = task.read(&t).unwrap();
+        let changes: Vec<String> = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .map(Change::to_string)
+            .collect();
+        assert_eq!(
+            changes,
+            [
+                "import list 50 politisch linke Filme: qualityProfileId 9 -> 7",
+                "import list 50 politisch linke Filme: rootFolderPath null -> \"/tank/data/media/movies\"",
+            ]
+        );
+        task.write(&t, &current).unwrap();
+        let (path, body) = sent(&t, 0);
+        assert_eq!(path, "/api/v3/importlist/1?forceSave=true");
+        assert_eq!(body["qualityProfileId"], 7);
+    }
+
+    /// A profile name Radarr does not have is an error before any write; and
+    /// a misspelt top-level field is still one, nullable or not.
+    #[test]
+    fn an_unknown_quality_profile_or_field_is_refused_before_any_write() {
+        let task = tmdb_list("Gibt es nicht");
+        let t = radarr_lists(vec![ok(RADARR_IMPORT_LISTS)])
+            .on_put(vec![Step::Answer(201, String::new())]);
+        let current = task.read(&t).unwrap();
+        let err = task.diff(&current).err().unwrap().to_string();
+        assert!(
+            err.contains(
+                "import list 50 politisch linke Filme: quality_profile names \"Gibt es nicht\", \
+                 which the service does not have"
+            ),
+            "{err}"
+        );
+        assert!(task.write(&t, &current).is_err());
+        assert!(t.written.borrow().is_empty());
+
+        let mut task = tmdb_list(PROFILE);
+        task.providers[0]
+            .set
+            .insert("rootFolder".to_string(), json!("/x"));
+        let current = task.read(&t).unwrap();
+        let err = task.diff(&current).err().unwrap().to_string();
+        assert!(err.contains("rootFolder"), "{err}");
+    }
+
+    /// Another kind of provider has no nullable field: a key its answer
+    /// lacks stays an error.
+    #[test]
+    fn only_an_import_list_may_set_a_key_the_answer_lacks() {
+        assert!(DOWNLOAD_CLIENTS_V3.nullable.is_empty());
+        assert_eq!(IMPORT_LISTS_V3.nullable, ["rootFolderPath"]);
     }
 }
