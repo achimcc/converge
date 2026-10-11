@@ -2609,3 +2609,73 @@ fn one_questarr_run_signs_in_once_and_prints_no_secret() {
         assert!(!printed.contains(secret), "{secret} in: {printed}");
     }
 }
+
+/// The setup door (design §52) is closed without a key: no credential is
+/// read -- `CREDENTIALS_DIRECTORY` is not even set -- and no request carries
+/// one.
+#[test]
+fn setup_runs_without_a_credential_and_sends_no_key() {
+    const KAVITA_OPEN: &str =
+        include_str!("fixtures/kavita-0.9.1.4/constructed-admin-exists-false.json");
+    const BINDERY_CLOSED: &str = include_str!("fixtures/bindery-1.33.2/auth-status.json");
+    const BINDERY_HEALTH: &str = include_str!("fixtures/bindery-1.33.2/health.json");
+    let dir = tempfile::tempdir().unwrap();
+    let spec = |service: &str, base: &str| {
+        let path = dir.path().join(format!("{service}-setup.json"));
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"service":"{service}","base_url":"{base}","task":"setup","desired":{{"username":"bootstrap"}}}}"#
+            ),
+        )
+        .unwrap();
+        path
+    };
+
+    let kavita = Server::start(vec![
+        ("GET", "/api/Health", 200, "Ok".into()),
+        ("GET", "/api/Admin/exists", 200, KAVITA_OPEN.into()),
+    ]);
+    let out = converge()
+        .arg("plan")
+        .arg(spec("kavita", &kavita.base_url()))
+        .env_remove("CREDENTIALS_DIRECTORY")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(2), "{stdout}");
+    assert!(
+        stdout
+            .contains("kavita setup: would change setup: (open) -> (closed by account bootstrap)"),
+        "{stdout}"
+    );
+
+    let bindery = Server::start(vec![
+        ("GET", "/api/v1/health", 200, BINDERY_HEALTH.into()),
+        ("GET", "/api/v1/auth/status", 200, BINDERY_CLOSED.into()),
+    ]);
+    let out = converge()
+        .arg("apply")
+        .arg(spec("bindery", &bindery.base_url()))
+        .env_remove("CREDENTIALS_DIRECTORY")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("bindery setup: unchanged"), "{stdout}");
+
+    for request in kavita.requests().into_iter().chain(bindery.requests()) {
+        assert_eq!(request.method, "GET", "{}", request.path);
+        let headers = request.headers.to_ascii_lowercase();
+        assert!(
+            !headers.contains("x-api-key") && !headers.contains("authorization"),
+            "{}: {headers}",
+            request.path
+        );
+    }
+}

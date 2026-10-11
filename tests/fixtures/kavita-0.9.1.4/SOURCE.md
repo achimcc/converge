@@ -35,3 +35,12 @@ Keys are in sorted order (`jq -S`). Everything else is as recorded.
 
 Without a key, and with a key Kavita does not know, both endpoints answer
 HTTP 401 with an empty body; `GET /api/Health` answers `Ok` without one.
+
+**The setup door (design §52), recorded 2026-10-11 without any key:**
+
+- `admin-exists.json` — `GET /api/Admin/exists`, verbatim: `true`, served as
+  `application/json`. `GET /api/Health` answered `Ok` as `text/plain` the same
+  minute; that answer is not kept as a file, the task reads only its status.
+- `constructed-admin-exists-false.json` — built by hand: `false`, what
+  `AdminController.AdminExists` answers while no account holds the admin role
+  (`Kavita.Server/Controllers/AdminController.cs` at `v0.9.1.4`).

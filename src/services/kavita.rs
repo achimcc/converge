@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
@@ -78,7 +78,30 @@ pub const LIBRARY_SCAN: Endpoint = Endpoint {
     request: None,
     response: None,
 };
-pub const ENDPOINTS: [Endpoint; 7] = [
+/// The setup door (design §52). All three answer without a key: the health
+/// check, whether an account holds the admin role, and the registration of
+/// the first account, which Kavita refuses once one does
+/// (`AccountController.RegisterFirstUser`). The registration answers the new
+/// account with its tokens; the task never reads that answer.
+pub const HEALTH: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/Health",
+    request: None,
+    response: None,
+};
+pub const ADMIN_EXISTS: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/Admin/exists",
+    request: None,
+    response: None,
+};
+pub const REGISTER: Endpoint = Endpoint {
+    method: "POST",
+    path: "/api/Account/register",
+    request: Some(Shape::One("RegisterDto")),
+    response: None,
+};
+pub const ENDPOINTS: [Endpoint; 10] = [
     SERVER_INFO,
     SETTINGS_READ,
     SETTINGS_WRITE,
@@ -86,6 +109,9 @@ pub const ENDPOINTS: [Endpoint; 7] = [
     LIBRARY_CREATE,
     LIBRARY_UPDATE,
     LIBRARY_SCAN,
+    HEALTH,
+    ADMIN_EXISTS,
+    REGISTER,
 ];
 
 /// The components a library spec's fields are checked against: the body it
@@ -120,7 +146,21 @@ const UPDATE_OPTIONAL: [&str; 2] = ["defaultLanguage", "metadataProvider"];
 pub const SERVER_SETTINGS: &str = "ServerSettingDto";
 
 pub fn wire_types() -> Vec<schemars::Schema> {
-    vec![schemars::schema_for!(ServerInfoSlimDto)]
+    vec![
+        schemars::schema_for!(ServerInfoSlimDto),
+        schemars::schema_for!(RegisterDto),
+    ]
+}
+
+/// The body of the first registration (design §52). No `Debug`: it carries
+/// the password, which exists only for this one request.
+#[derive(Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterDto {
+    pub username: String,
+    /// Nullable: without one, Kavita takes the name.
+    pub email: Option<String>,
+    pub password: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

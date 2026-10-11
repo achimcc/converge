@@ -3199,6 +3199,65 @@ under `tests/fixtures/jellyfin-10.11.11/collections-*` and
 `tests/schema.rs` holds the query parameters against the description, which
 `schema-check` does not look at.
 
+## 52. The setup door: Kavita and bindery (v0.51.0, 2026-10-11)
+
+Kavita (0.9.1.4) and bindery (1.33.2) give the instance to whoever asks
+first. Kavita's `POST /api/Account/register` makes its caller an
+administrator as long as no account holds that role
+(`AccountController.RegisterFirstUser`); bindery's `POST /api/v1/auth/setup`
+does the same while `users.Count` is 0 (`internal/api/auth.go:146-191`).
+Neither needs a sign-in, and on a name the internet can reach that is a race.
+The host closed both doors with a shell unit each: wait for the service,
+register an account `bootstrap` with a random password, throw the password
+away. Kavita's unit also left a stamp file behind and stopped there for good.
+
+| task | read | write |
+|---|---|---|
+| `setup` | Kavita `GET /api/Admin/exists`; bindery `GET /api/v1/auth/status` (`setupRequired`) | Kavita `POST /api/Account/register`; bindery `POST /api/v1/auth/setup` |
+
+**No key, and none taken.** All of these, and the health checks before them
+(`GET /api/Health`, `GET /api/v1/health`), answer without a key -- bindery
+lists them in `auth.AllowUnauthPath`, so neither its CSRF check nor its
+`X-Requested-With` check applies. A setup spec therefore has no
+`api_key_credential`, and one that names a credential is refused: a key that
+is never sent would only suggest that it is. `main` runs the task before it
+reads any credential, on the anonymous transport. Every other task still
+requires the field; it moved from serde to the parser only so that `setup`
+can leave it out.
+
+**The account is a name; the password exists for one request.** It is 32
+bytes from `/dev/urandom` as 64 hex digits -- above Kavita's six and bindery's
+eight characters, below Kavita's 256 -- built into the body and dropped with
+it. Nothing stores it, so nobody can sign in with it; the host signs in
+through OIDC and reaches the API with a key of its own making. Kavita's body
+is `RegisterDto` with `email` `<name>@invalid` (the reserved top-level
+domain), and `schema-check` holds it against the description. Its answer
+carries the new account's tokens and is never read.
+
+**What is compared is the door, not the account.** Without a key neither
+service says who holds it. So the change is `setup: (open) -> (closed by
+account bootstrap)`, and a closed door is `unchanged` whoever closed it. A
+setup that is refused while the door has closed in between -- Kavita's `400`
+"denied", bindery's `409` -- is an **error**, not a lost race to shrug off:
+the account that holds the door is not this run's. The next run sees the
+door closed and stays green; the one red run is the trace. A refusal for the
+values shows Kavita's sentence or its Identity error codes (never their
+descriptions, which can quote the name), or bindery's `error` string, and
+never the body.
+
+**A plan writes nothing** here either: it reports the open door and stops
+there, as for Questarr's account (§47).
+
+### Checked how
+
+`GET /api/Admin/exists` (`true`, `application/json`), `GET /api/Health`
+(`Ok`, `text/plain`) and bindery's `GET /api/v1/auth/status` were recorded
+without a key from the host's running instances, inside their containers;
+the open states are constructed from them and the source
+(`tests/fixtures/*/SOURCE.md`). `tests/cli.rs` runs both through the binary
+with `CREDENTIALS_DIRECTORY` unset and checks that no request carries a key
+header.
+
 ## 20. Not in the pilot
 
 

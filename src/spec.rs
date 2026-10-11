@@ -168,6 +168,7 @@ enum TaskName {
     SearchSettings,
     ProwlarrSync,
     LanguageProfiles,
+    Setup,
 }
 
 impl TaskName {
@@ -243,6 +244,8 @@ impl TaskName {
                 service == Service::Questarr
             }
             TaskName::LanguageProfiles => service == Service::Bazarr,
+            // The door a first account closes (design §52).
+            TaskName::Setup => service == Service::Kavita || service == Service::Bindery,
         }
     }
 }
@@ -252,7 +255,10 @@ impl TaskName {
 struct RawSpec {
     service: Service,
     base_url: String,
-    api_key_credential: String,
+    /// Required by every task but `setup`, which runs before there is a key
+    /// and refuses one (design §52).
+    #[serde(default)]
+    api_key_credential: Option<String>,
     task: TaskName,
     /// "This spec names the whole collection": the task removes every entry
     /// it does not name. Opt-in per spec, never the default, and only three
@@ -824,6 +830,16 @@ pub enum Desired {
     /// Bazarr's language profiles by name, each with its languages in order
     /// (design §48).
     BazarrLanguageProfiles(BTreeMap<String, Vec<crate::services::bazarr::Language>>),
+    /// The account that closes a service's setup door (design §52).
+    Setup(SetupAccount),
+}
+
+/// Who closes the setup door: only a name. The password is drawn for the
+/// one request and dropped, so a spec cannot carry one.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetupAccount {
+    pub username: String,
 }
 
 /// A Questarr task (design §47). Every task signs in as `username` -- the one
@@ -1245,6 +1261,8 @@ pub struct Spec {
     pub path: PathBuf,
     pub service: Service,
     pub base_url: String,
+    /// Empty for `setup` only, which sends no key (design §52); `main` reads
+    /// no credential for it.
     pub api_key_credential: String,
     /// The spec names the whole collection: what it leaves out is removed
     /// (design §39). False unless the spec says so.
@@ -1279,7 +1297,32 @@ impl Spec {
                 raw.service.name()
             )));
         }
+        let api_key_credential = match (raw.task, raw.api_key_credential) {
+            (TaskName::Setup, None) => String::new(),
+            (TaskName::Setup, Some(_)) => {
+                return Err(invalid(
+                    "task setup runs before there is a key and takes no api_key_credential"
+                        .to_string(),
+                ))
+            }
+            (_, Some(name)) => name,
+            (_, None) => return Err(invalid("missing field `api_key_credential`".to_string())),
+        };
         let desired = match raw.task {
+            TaskName::Setup => {
+                let account: SetupAccount = serde_json::from_value(raw.desired)
+                    .map_err(|e| invalid(format!("desired: {e}")))?;
+                account_name(&account.username, "desired.username").map_err(invalid)?;
+                if account.username.trim() != account.username
+                    || account.username.chars().any(char::is_control)
+                {
+                    return Err(invalid(format!(
+                        "desired.username: {:?} has space around it or a control character",
+                        account.username
+                    )));
+                }
+                Desired::Setup(account)
+            }
             // Before the arms that share the task's name: Questarr's own shape.
             TaskName::DownloadClients if raw.service == Service::Questarr => {
                 Desired::Questarr(questarr_desired(raw.task, raw.desired).map_err(invalid)?)
@@ -2466,7 +2509,7 @@ impl Spec {
             path: path.to_path_buf(),
             service: raw.service,
             base_url: raw.base_url,
-            api_key_credential: raw.api_key_credential,
+            api_key_credential,
             exactly: raw.exactly,
             desired,
         };
@@ -2556,6 +2599,7 @@ impl Spec {
                 QuestarrTask::ProwlarrSync { .. } => "prowlarr-sync",
             },
             Desired::AuthentikSettings(_) => "settings",
+            Desired::Setup(_) => "setup",
         }
     }
 }
@@ -5570,5 +5614,52 @@ mod tests {
             r#""url":"http://10.0.10.10:9696","apiKey":"x",{key}"#
         ));
         assert!(text.contains("unknown field"), "{text}");
+    }
+
+    #[test]
+    fn setup_names_an_account_and_carries_no_key() {
+        let parse = |text: &str| Spec::parse(Path::new("setup.json"), text);
+        for service in ["kavita", "bindery"] {
+            let spec = parse(&format!(
+                r#"{{"service":"{service}","base_url":"http://127.0.0.1:1","task":"setup","desired":{{"username":"bootstrap"}}}}"#
+            ))
+            .unwrap();
+            assert_eq!(spec.task_name(), "setup");
+            assert_eq!(spec.api_key_credential, "");
+            assert_eq!(
+                spec.desired,
+                Desired::Setup(SetupAccount {
+                    username: "bootstrap".to_string()
+                })
+            );
+        }
+        let text = reason(parse(
+            r#"{"service":"kavita","base_url":"http://127.0.0.1:1","api_key_credential":"k","task":"setup","desired":{"username":"bootstrap"}}"#,
+        ));
+        assert!(text.contains("takes no api_key_credential"), "{text}");
+        let text = reason(parse(
+            r#"{"service":"radarr","base_url":"http://127.0.0.1:1","task":"setup","desired":{"username":"bootstrap"}}"#,
+        ));
+        assert!(text.contains("does not belong"), "{text}");
+        // No password in a spec: it is drawn for the one request.
+        let text = reason(parse(
+            r#"{"service":"bindery","base_url":"http://127.0.0.1:1","task":"setup","desired":{"username":"bootstrap","password":"x"}}"#,
+        ));
+        assert!(text.contains("unknown field"), "{text}");
+        for name in ["", " bootstrap", "boot\nstrap"] {
+            let text = reason(parse(&format!(
+                r#"{{"service":"bindery","base_url":"http://127.0.0.1:1","task":"setup","desired":{{"username":{}}}}}"#,
+                serde_json::Value::String(name.to_string())
+            )));
+            assert!(text.contains("desired.username"), "{name:?}: {text}");
+        }
+        // Every other task still needs its key.
+        let text = reason(parse(
+            r#"{"service":"kavita","base_url":"http://127.0.0.1:1","task":"server-settings","desired":{"enableOpds":true}}"#,
+        ));
+        assert!(
+            text.contains("missing field `api_key_credential`"),
+            "{text}"
+        );
     }
 }

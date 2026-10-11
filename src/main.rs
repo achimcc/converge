@@ -12,8 +12,8 @@ use converge::{
     schema,
     services::{
         arr, audiobookshelf, authentik, bazarr, bindery, collections, dispatcharr, jellyfin,
-        kavita, koel, lidarr, ntfy, providers, prowlarr, questarr, seerr, servarr, suggestarr,
-        trailarr,
+        kavita, koel, lidarr, ntfy, providers, prowlarr, questarr, seerr, servarr, setup,
+        suggestarr, trailarr,
     },
     spec::{Desired, DispatcharrTask, QuestarrTask, Service, Spec},
 };
@@ -113,6 +113,28 @@ fn reconcile_one(
         Spec::load(path).map_err(|e| say_error(&format!("{}: error: {e}", path.display())))?;
     let label = format!("{} {}", spec.service.name(), spec.task_name());
     let fail = |e: Error| say_error(&format!("{label}: error: {e}"));
+    // The setup door (design §52) is closed before there is a key: no
+    // credential is read, and no request carries one.
+    if let Desired::Setup(account) = &spec.desired {
+        let door = match spec.service {
+            Service::Kavita => setup::Door::Kavita,
+            Service::Bindery => setup::Door::Bindery,
+            other => {
+                fail(Error::Refused(format!(
+                    "{} has no setup door",
+                    other.name()
+                )));
+                return Err(());
+            }
+        };
+        let task = setup::Setup {
+            door,
+            username: account.username.clone(),
+        };
+        let anonymous = HttpTransport::anonymous(&spec.base_url, REQUEST_TIMEOUT);
+        let report = run(mode, &task, &anonymous, &SystemClock, timing).map_err(fail)?;
+        return Ok(print_report(&label, report));
+    }
     let key = read_credential(credentials, &spec.api_key_credential).map_err(fail)?;
     // SuggestArr has no API key for its configuration endpoints: the
     // credential holds the password of a service account, and the value the
@@ -786,8 +808,17 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        // Handled above, before any credential is read.
+        Desired::Setup(_) => Err(Error::Refused(
+            "setup is run without a key, before this point".to_string(),
+        )),
     }
     .map_err(fail)?;
+    Ok(print_report(&label, report))
+}
+
+/// Prints a run's lines. `true` means a plan found a difference.
+fn print_report(label: &str, report: converge::engine::Report) -> bool {
     say(&format!("{label}: service version {}", report.version));
     for note in &report.notes {
         say(&format!("{label}: note: {note}"));
@@ -798,14 +829,14 @@ fn reconcile_one(
     match report.outcome {
         Outcome::Unchanged => {
             say(&format!("{label}: unchanged"));
-            Ok(false)
+            false
         }
         Outcome::Differs(changes) => {
             for change in &changes {
                 say(&format!("{label}: would change {change}"));
             }
             say(&format!("{label}: {} field(s) differ", changes.len()));
-            Ok(true)
+            true
         }
         Outcome::Changed(changes) => {
             for change in &changes {
@@ -815,7 +846,7 @@ fn reconcile_one(
                 "{label}: changed {} field(s), read back and confirmed",
                 changes.len()
             ));
-            Ok(false)
+            false
         }
     }
 }
@@ -1043,6 +1074,9 @@ fn schema_check(args: &[String]) -> ExitCode {
                 schema::check_paths(&document, kavita::SERVER_SETTINGS, set),
                 set.len(),
             ),
+            // The spec names an account, no field: the endpoints and the
+            // registration's body are checked above (design §52).
+            Desired::Setup(_) => (Vec::new(), 0),
             // Compared with the answer, written with the body of the PATCH:
             // each field must be a property of both, as for a Kavita library.
             Desired::AuthentikSettings(set) => {

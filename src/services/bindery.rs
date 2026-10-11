@@ -33,6 +33,21 @@ pub const HEALTH: Endpoint = Endpoint {
     request: None,
     response: None,
 };
+/// The setup door (design §52). Both pass the auth middleware without a key
+/// (`auth.AllowUnauthPath`), and so does the health check above. The setup
+/// is refused with `409` once any account exists.
+pub const AUTH_STATUS: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/v1/auth/status",
+    request: None,
+    response: None,
+};
+pub const AUTH_SETUP: Endpoint = Endpoint {
+    method: "POST",
+    path: "/api/v1/auth/setup",
+    request: None,
+    response: None,
+};
 
 /// One kind of named entry and where bindery keeps it.
 pub struct ResourceApi {

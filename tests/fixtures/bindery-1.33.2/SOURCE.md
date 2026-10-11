@@ -39,3 +39,12 @@ At recording time the host's desired state matched: `plan` reported
   there is **no `implementation` field** — the kind is `type` (`torznab` /
   `newznab`) — and five of the six rows carry `seedRatioSource: "user"`, put
   there by the host's shell unit, which `PUT`s every row on every guest start.
+
+- `auth-status.json` — `GET /api/v1/auth/status` **without a key**, recorded
+  2026-10-11 from the running bindery inside its container (design §52). The
+  answer is verbatim: four flags and the auth mode, no name, nothing secret.
+  `setupRequired` is `false` -- the host's bindery has its throwaway account.
+- `constructed-auth-status-open.json` — built by hand: the recording with
+  `setupRequired` set to `true`, which is what `Status` answers while
+  `users.Count` is 0 (`internal/api/auth.go:114-143` at `v1.33.2`). A fresh
+  instance to record it from would have had to be set up for the purpose.

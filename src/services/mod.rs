@@ -15,5 +15,6 @@ pub mod prowlarr;
 pub mod questarr;
 pub mod seerr;
 pub mod servarr;
+pub mod setup;
 pub mod suggestarr;
 pub mod trailarr;
