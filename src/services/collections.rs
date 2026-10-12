@@ -194,7 +194,9 @@ fn sent(
 ) -> Result<Option<crate::client::Reply>, Error> {
     match result {
         Ok(reply) => Ok(Some(reply)),
-        Err(Error::Request { reason, .. }) if reason.contains("timeout") => Ok(None),
+        // Sent and not answered (design §54). A refused connection is
+        // `NoAnswer` and stays an error: nothing went out.
+        Err(Error::Unconfirmed { .. }) => Ok(None),
         Err(e) => Err(e),
     }
 }

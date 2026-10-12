@@ -10,6 +10,10 @@ use std::{
     thread,
 };
 
+/// A route with this status takes the request and never answers: a service
+/// that stands still (design §54).
+pub const SILENT: u16 = 0;
+
 #[derive(Clone, Debug)]
 pub struct Recorded {
     pub method: String,
@@ -30,6 +34,8 @@ impl Server {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&seen);
         thread::spawn(move || {
+            // Connections of `SILENT` routes: kept open, never answered.
+            let mut held = Vec::new();
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { return };
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -68,6 +74,12 @@ impl Server {
                     .find(|(m, p, _, _)| *m == method && *p == path)
                     .map(|(_, _, s, b)| (*s, b.clone()))
                     .unwrap_or((404, String::new()));
+                if status == SILENT {
+                    // The request was read in full and recorded; the client
+                    // waits until its own time limit ends.
+                    held.push(stream);
+                    continue;
+                }
                 // A 3xx route's answer is its `Location`.
                 let _ = if (300..400).contains(&status) {
                     write!(

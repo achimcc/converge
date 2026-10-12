@@ -392,12 +392,21 @@ a single `DELETE`:
 
 | command | does | exit |
 |---|---|---|
-| `converge apply [--deadline <s>] <spec>...` | reconcile, write, read back | 0 done, 1 any spec failed |
-| `converge plan [--deadline <s>] <spec>...` | show what `apply` would change | 0 equal, 2 differs, 1 error |
+| `converge apply [--deadline <s>] [--request-timeout <s>] <spec>...` | reconcile, write, read back | 0 done, 1 any spec failed, 3 no answer and nothing written |
+| `converge plan [--deadline <s>] [--request-timeout <s>] <spec>...` | show what `apply` would change | 0 equal, 2 differs, 1 error, 3 no answer |
 | `converge schema-check --service <radarr\|sonarr\|lidarr\|prowlarr\|jellyfin\|trailarr\|kavita\|dispatcharr\|authentik> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
 | `converge schema-check --service <ntfy\|bindery\|seerr\|koel\|suggestarr\|audiobookshelf\|questarr\|bazarr> [--spec <spec>]...` | ntfy, bindery and Questarr publish no OpenAPI description, Bazarr's hides the endpoint that writes, Seerr's misnames its fields, Koel's describes a long-gone version, SuggestArr's covers only its public `/api/v1`: only validate the specs (`--openapi` is refused) | 0 / 1 |
 
 Several specs are processed in order; one failing does not skip the next.
+
+**Exit 3 means "try again as it is"** (`docs/design.md` §54): the service
+did not answer -- a request outlived its time limit, the connection was
+refused, the service never became ready, the deadline ended -- and this run
+had sent no write. A write that went out and got no answer is exit 1 and says
+so; so is every silence after a write. One spec failing for another reason
+makes the whole run exit 1. `--request-timeout` is the time one request may
+take (default 10 s, at most the deadline); `--deadline` (default 300 s) ends
+the whole run of one spec.
 
 Trailarr drops body fields its models do not have without a word — the
 host's old shell unit sent `monitor` where Trailarr 0.11.5 has

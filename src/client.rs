@@ -1,4 +1,9 @@
-use std::{fs, path::Path, time::Duration};
+use std::{
+    fs,
+    path::Path,
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 
 use serde::Deserialize;
 
@@ -53,6 +58,32 @@ pub struct HttpTransport {
     header: &'static str,
     key: Secret,
     accept_json: bool,
+    /// Every request of this transport is a read, whatever its verb: the
+    /// POST of a sign-in changes nothing a spec describes.
+    reads_only: bool,
+    /// A write of this transport has gone out, answered or not (design §54).
+    wrote: AtomicBool,
+}
+
+/// Where a request that got no answer was lost.
+enum Lost {
+    /// Before the request could travel: no address, no connection.
+    BeforeSending,
+    /// Somewhere after: the time limit ended, the connection broke.
+    Unanswered,
+    /// Not a lost answer at all: a malformed URI, a protocol violation.
+    Otherwise,
+}
+
+fn lost(e: &ureq::Error) -> Lost {
+    use ureq::{Error as E, Timeout as T};
+    match e {
+        E::HostNotFound | E::ConnectionFailed => Lost::BeforeSending,
+        E::Timeout(T::Resolve | T::Connect) => Lost::BeforeSending,
+        E::Io(io) if io.kind() == std::io::ErrorKind::ConnectionRefused => Lost::BeforeSending,
+        E::Timeout(_) | E::Io(_) => Lost::Unanswered,
+        _ => Lost::Otherwise,
+    }
 }
 
 impl HttpTransport {
@@ -81,7 +112,24 @@ impl HttpTransport {
             header,
             key,
             accept_json: false,
+            reads_only: false,
+            wrote: AtomicBool::new(false),
         }
+    }
+
+    /// A transport whose requests are all reads, for a sign-in that only
+    /// fetches a token: its POST creates nothing a spec describes, so one
+    /// that gets no answer is "no answer", not an unconfirmed write (§54).
+    pub fn reads_only(mut self) -> Self {
+        self.reads_only = true;
+        self
+    }
+
+    /// Whether a write of this transport has gone out -- answered, refused
+    /// by status or left without an answer. A write that could not even be
+    /// connected does not count: nothing reached the service.
+    pub fn wrote(&self) -> bool {
+        self.wrote.load(Ordering::Relaxed)
     }
 
     /// A transport without a key, for the one request that fetches one:
@@ -114,23 +162,62 @@ impl HttpTransport {
         }
     }
 
+    /// Reads the answer, and says which kind of failure a missing one is
+    /// (design §54): a read without an answer, or a request that never
+    /// left, is `NoAnswer`; a write that went out and was not answered is
+    /// `Unconfirmed`. Notes on the way whether a write has gone out.
     fn finish(
+        &self,
         method: &'static str,
         path: &str,
         result: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
     ) -> Result<Reply, Error> {
-        let fail = |reason: String| Error::Request {
-            method,
-            path: path.to_string(),
-            reason,
+        let write = method != "GET" && !self.reads_only;
+        let answer = result.and_then(|mut response| {
+            let status = response.status().as_u16();
+            let body = response.body_mut().read_to_string()?;
+            Ok(Reply { status, body })
+        });
+        let e = match answer {
+            Ok(reply) => {
+                if write {
+                    self.wrote.store(true, Ordering::Relaxed);
+                }
+                return Ok(reply);
+            }
+            Err(e) => e,
         };
-        let mut response = result.map_err(|e| fail(e.to_string()))?;
-        let status = response.status().as_u16();
-        let body = response
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| fail(e.to_string()))?;
-        Ok(Reply { status, body })
+        let (path, reason) = (path.to_string(), e.to_string());
+        match lost(&e) {
+            Lost::BeforeSending => Err(Error::NoAnswer {
+                method,
+                path,
+                reason,
+            }),
+            Lost::Unanswered if !write => Err(Error::NoAnswer {
+                method,
+                path,
+                reason,
+            }),
+            Lost::Unanswered => {
+                self.wrote.store(true, Ordering::Relaxed);
+                Err(Error::Unconfirmed {
+                    method,
+                    path,
+                    reason,
+                })
+            }
+            Lost::Otherwise => {
+                if write {
+                    self.wrote.store(true, Ordering::Relaxed);
+                }
+                Err(Error::Request {
+                    method,
+                    path,
+                    reason,
+                })
+            }
+        }
     }
 }
 
@@ -171,7 +258,7 @@ impl Transport for HttpTransport {
             let result = self.headers(self.agent.get(&url)).call();
             let response = match result {
                 Ok(r) if r.status().is_redirection() => r,
-                other => return Self::finish("GET", path, other),
+                other => return self.finish("GET", path, other),
             };
             let status = response.status().as_u16();
             let location = response
@@ -204,7 +291,7 @@ impl Transport for HttpTransport {
             .headers(self.agent.put(format!("{}{path}", self.base_url)))
             .content_type("application/json")
             .send(body);
-        Self::finish("PUT", path, result)
+        self.finish("PUT", path, result)
     }
 
     fn post_json(&self, path: &str, body: &str) -> Result<Reply, Error> {
@@ -212,7 +299,7 @@ impl Transport for HttpTransport {
             .headers(self.agent.post(format!("{}{path}", self.base_url)))
             .content_type("application/json")
             .send(body);
-        Self::finish("POST", path, result)
+        self.finish("POST", path, result)
     }
 
     fn patch_json(&self, path: &str, body: &str) -> Result<Reply, Error> {
@@ -220,7 +307,7 @@ impl Transport for HttpTransport {
             .headers(self.agent.patch(format!("{}{path}", self.base_url)))
             .content_type("application/json")
             .send(body);
-        Self::finish("PATCH", path, result)
+        self.finish("PATCH", path, result)
     }
 
     /// No body, and no redirect is followed: a 3xx comes back as a status
@@ -229,7 +316,7 @@ impl Transport for HttpTransport {
         let result = self
             .headers(self.agent.delete(format!("{}{path}", self.base_url)))
             .call();
-        Self::finish("DELETE", path, result)
+        self.finish("DELETE", path, result)
     }
 
     fn post_form(&self, path: &str, fields: &[(&str, &str)]) -> Result<Reply, Error> {
@@ -237,7 +324,7 @@ impl Transport for HttpTransport {
             .headers(self.agent.post(format!("{}{path}", self.base_url)))
             .content_type("application/x-www-form-urlencoded")
             .send(form_body(fields));
-        Self::finish("POST", path, result)
+        self.finish("POST", path, result)
     }
 }
 

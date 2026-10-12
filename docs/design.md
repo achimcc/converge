@@ -3303,6 +3303,99 @@ recorded `import.mode` (`SOURCE.md`). Two tests: the listed key is read as
 unset, written once and found on the read back; and a misspelt key next to a
 listed one is still reported as not found.
 
+## 54. No answer is not a failure of the spec (v0.53.0, 2026-10-12)
+
+On the host, `jellyfin-konten` failed 54 times in seven days, and 84 of its
+85 error lines read `timeout: global`. Jellyfin stood still for minutes at a
+time behind its own SQLite write lock; the same request takes milliseconds
+otherwise. converge ended every such run with exit 1, the code of a wrong
+key, a refused write and a spec that does not fit. A caller could not tell
+"try again in ten minutes" from "somebody has to look", and the ten seconds
+one request may take were a constant.
+
+### Exit 3
+
+| exit | means |
+|---|---|
+| 0 | done, or a plan that found no difference |
+| 1 | a spec failed -- including everything below once a write had gone out |
+| 2 | `plan` only: the service differs from the spec |
+| **3** | the service did not answer, and this run had written nothing |
+
+0, 1 and 2 mean what they meant. A caller that only asks "zero or not" sees
+a failure as before; one that tests for 2 after `plan` is not affected,
+because 3 is only returned where 1 was.
+
+"Did not answer" is three errors: a request without an answer
+(`Error::NoAnswer`), a service that never became ready (`NotReady`), and the
+deadline of the run (`Deadline`). `NotReady` includes a service that answers
+503 for two minutes: to the caller that is the same "not now".
+
+Several specs: one failure of the other kind makes the run exit 1, whatever
+else happened. Exit 3 says that *nothing but* silence went wrong.
+
+### After a write, silence is not harmless
+
+A write that was sent and not answered may have been applied. So the
+transport tells two things apart (`client.rs`, `finish`):
+
+- **Lost before sending** -- no address, no connection, connection refused
+  (`HostNotFound`, `ConnectionFailed`, `Timeout::Resolve`/`Connect`, an I/O
+  error of kind `ConnectionRefused`): `NoAnswer` for every verb. Nothing
+  reached the service.
+- **Lost afterwards** -- the time limit ended, the connection broke: for a
+  GET `NoAnswer`; for every other verb `Error::Unconfirmed`, which says
+  "the write was sent and no answer came back; whether the service applied
+  it is unknown" and is exit 1.
+
+The transport also remembers that a write has gone out (`wrote()`): answered
+with any status, or left unconfirmed. `main` asks it when a run ends in one
+of the three errors above. After a write they are exit 1 with a note; the
+state on the service is then something nobody has read. This is where the
+engine's phases matter: `run` is probe, read, diff, and only then remove,
+write, read back, hand over (`engine.rs`). Everything up to the diff is
+reads; a `plan` never gets further.
+
+It errs on the side of exit 1. `hand_over` sends hidden values after every
+`apply`, changed or not; a service that stops answering after that is
+exit 1 although the write changed nothing. A POST that is really a read
+counts as a write. The other direction -- calling an unknown state "nothing
+happened" -- is the one that must not happen.
+
+**A sign-in is a read.** SuggestArr and Dispatcharr hand out a token for a
+POST that changes nothing a spec describes; their transports are built
+`reads_only()`. Questarr's sign-in is not: on the first run it creates the
+account (§47), and the setup door (§52) is a POST that closes it.
+
+The collections task (§51) already treated a create that timed out as "ask
+the read back". It matched on the word "timeout" in the reason; it now
+matches `Unconfirmed`, and a refused connection is still an error there.
+
+### `--request-timeout`
+
+`converge apply|plan --request-timeout <seconds>`: how long one request may
+take, connect to last body byte (ureq's global timeout). Default 10 s, as
+before. It must be positive and must not exceed `--deadline`: the deadline
+is looked at between requests, so a request allowed to outlive it would make
+the deadline a lie. The flag applies to every transport of the run, the
+anonymous ones and a task's second source (§51) included.
+
+### Checked how
+
+`tests/support` got a route that reads the request and never answers.
+`tests/http.rs` against that listener and against a port nothing listens on:
+a silent GET is `NoAnswer` and nothing was written; a silent PUT is
+`Unconfirmed`, was recorded by the listener and counts as written; PUT, POST
+and DELETE to a closed port are `NoAnswer` and do not count; an answered
+write counts whatever its status; a `reads_only` POST without an answer is
+`NoAnswer`. `tests/cli.rs` through the binary: a read without an answer is
+exit 3 for `apply` and `plan`, with no request but GETs recorded; a refused
+connection is exit 3 at the deadline; HTTP 500 stays exit 1; a write sent
+and not answered is exit 1 with its own message; an accepted write whose
+read back runs into the deadline is exit 1 with the note; an unanswered
+spec next to a good one is 3, next to a broken one 1; the flag refuses 0, a
+missing value and a value above the deadline, and reaches the transport.
+
 ## 20. Not in the pilot
 
 

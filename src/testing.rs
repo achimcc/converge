@@ -107,15 +107,23 @@ fn take(queue: Option<&mut VecDeque<Step>>) -> Option<Step> {
     }
 }
 
+/// Mirrors `HttpTransport` (design §54): a refused connection never carried
+/// the request, so it is "no answer" for every verb; a time limit that ends
+/// a write leaves it unconfirmed.
 fn play(step: Option<Step>, method: &'static str, path: &str) -> Result<Reply, Error> {
     match step {
         Some(Step::Answer(status, body)) => Ok(Reply { status, body }),
-        Some(Step::Refused) => Err(Error::Request {
+        Some(Step::Refused) => Err(Error::NoAnswer {
             method,
             path: path.to_string(),
             reason: "connection refused".to_string(),
         }),
-        Some(Step::TimedOut) => Err(Error::Request {
+        Some(Step::TimedOut) if method == "GET" => Err(Error::NoAnswer {
+            method,
+            path: path.to_string(),
+            reason: "timeout: global".to_string(),
+        }),
+        Some(Step::TimedOut) => Err(Error::Unconfirmed {
             method,
             path: path.to_string(),
             reason: "timeout: global".to_string(),

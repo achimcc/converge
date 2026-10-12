@@ -20,6 +20,27 @@ pub enum Error {
         path: String,
         reason: String,
     },
+    /// The service did not answer, and the request was a read or never left:
+    /// it outlived its time limit, the connection was refused or could not
+    /// be made (design §54). Reads like `Request`, so a journal line keeps
+    /// its shape.
+    #[error("{method} {path}: {reason}")]
+    NoAnswer {
+        method: &'static str,
+        path: String,
+        reason: String,
+    },
+    /// A write went out and no answer came back. Whether the service applied
+    /// it is not known -- which is why this is never "no answer" (§54).
+    #[error(
+        "{method} {path}: {reason} -- the write was sent and no answer came back; \
+         whether the service applied it is unknown"
+    )]
+    Unconfirmed {
+        method: &'static str,
+        path: String,
+        reason: String,
+    },
     #[error("{method} {path} answered HTTP {status}{}", validation_suffix(.validation))]
     Status {
         method: &'static str,
@@ -61,6 +82,20 @@ pub enum Error {
     Refused(String),
     #[error("overall deadline of {secs} s exceeded")]
     Deadline { secs: u64 },
+}
+
+impl Error {
+    /// The service gave no usable answer: a read timed out or was refused,
+    /// the service never became ready, or the run's deadline ended. Whether
+    /// that is the harmless kind -- nothing written, safe to try again --
+    /// depends on what the run had sent before; `main` knows that, this
+    /// does not (design §54).
+    pub fn is_no_answer(&self) -> bool {
+        matches!(
+            self,
+            Error::NoAnswer { .. } | Error::NotReady { .. } | Error::Deadline { .. }
+        )
+    }
 }
 
 fn validation_suffix(messages: &[String]) -> String {

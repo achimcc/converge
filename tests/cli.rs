@@ -2679,3 +2679,244 @@ fn setup_runs_without_a_credential_and_sends_no_key() {
         );
     }
 }
+
+// --- No answer (design §54) -------------------------------------------------
+//
+// Through the binary, against a listener that really stands still: exit 3
+// only when the service gave no answer AND this run had written nothing.
+
+fn changed_desired() -> String {
+    let mut changed: serde_json::Value = serde_json::from_str(DESIRED).unwrap();
+    changed["Bluray-1080p"]["min"] = 35.into();
+    changed.to_string()
+}
+
+fn run_with(dir: &Path, args: &[&str], specs: &[&Path]) -> (Option<i32>, String, String) {
+    let out = converge()
+        .args(args)
+        .args(specs)
+        .env("CREDENTIALS_DIRECTORY", dir)
+        .output()
+        .unwrap();
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn a_service_that_stands_still_before_anything_was_written_is_exit_3() {
+    // The probe is answered, the first read is not: the case the host saw
+    // (`GET /Items?...: timeout: global`).
+    let server = Server::start(vec![
+        ("GET", "/api/v3/system/status", 200, STATUS.into()),
+        (
+            "GET",
+            "/api/v3/qualitydefinition",
+            support::SILENT,
+            String::new(),
+        ),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let spec = write_spec(dir.path(), "s.json", &server.base_url(), &changed_desired());
+    for command in ["apply", "plan"] {
+        let (code, stdout, stderr) =
+            run_with(dir.path(), &[command, "--request-timeout", "1"], &[&spec]);
+        assert_eq!(code, Some(3), "{command}: {stdout}{stderr}");
+        assert!(
+            stderr.contains("GET /api/v3/qualitydefinition: timeout"),
+            "{stderr}"
+        );
+        assert!(stderr.contains("nothing was written"), "{stderr}");
+    }
+    assert!(
+        server.requests().iter().all(|r| r.method == "GET"),
+        "nothing may have been written"
+    );
+}
+
+#[test]
+fn a_service_that_refuses_the_connection_is_exit_3_at_the_deadline() {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let dir = tempfile::tempdir().unwrap();
+    let spec = write_spec(
+        dir.path(),
+        "s.json",
+        &format!("http://127.0.0.1:{port}"),
+        DESIRED,
+    );
+    let (code, stdout, stderr) = run_with(
+        dir.path(),
+        &["apply", "--deadline", "2", "--request-timeout", "1"],
+        &[&spec],
+    );
+    assert_eq!(code, Some(3), "{stdout}{stderr}");
+    assert!(stderr.contains("deadline of 2 s exceeded"), "{stderr}");
+}
+
+#[test]
+fn an_answer_that_is_an_error_stays_exit_1() {
+    let server = Server::start(vec![
+        ("GET", "/api/v3/system/status", 200, STATUS.into()),
+        ("GET", "/api/v3/qualitydefinition", 500, String::new()),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let spec = write_spec(dir.path(), "s.json", &server.base_url(), DESIRED);
+    let (code, stdout, stderr) =
+        run_with(dir.path(), &["apply", "--request-timeout", "1"], &[&spec]);
+    assert_eq!(code, Some(1), "{stdout}{stderr}");
+    assert!(stderr.contains("answered HTTP 500"), "{stderr}");
+    assert!(!stderr.contains("nothing was written"), "{stderr}");
+}
+
+#[test]
+fn a_write_that_was_sent_and_not_answered_is_exit_1_and_says_so() {
+    let server = Server::start(vec![
+        ("GET", "/api/v3/system/status", 200, STATUS.into()),
+        ("GET", "/api/v3/qualitydefinition", 200, LIST.into()),
+        (
+            "PUT",
+            "/api/v3/qualitydefinition/update",
+            support::SILENT,
+            String::new(),
+        ),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let spec = write_spec(dir.path(), "s.json", &server.base_url(), &changed_desired());
+    let (code, stdout, stderr) =
+        run_with(dir.path(), &["apply", "--request-timeout", "1"], &[&spec]);
+    assert_eq!(code, Some(1), "{stdout}{stderr}");
+    assert!(
+        stderr.contains("the write was sent and no answer came back"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("nothing was written"), "{stderr}");
+    // Without this the test would not prove the write went out.
+    assert!(server.requests().iter().any(|r| r.method == "PUT"));
+}
+
+#[test]
+fn silence_after_an_answered_write_is_exit_1_not_3() {
+    // The write is accepted, the read back never shows it, the deadline
+    // ends the run: an error of the "no answer" kind -- after a write.
+    let server = Server::start(vec![
+        ("GET", "/api/v3/system/status", 200, STATUS.into()),
+        ("GET", "/api/v3/qualitydefinition", 200, LIST.into()),
+        (
+            "PUT",
+            "/api/v3/qualitydefinition/update",
+            202,
+            String::new(),
+        ),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let spec = write_spec(dir.path(), "s.json", &server.base_url(), &changed_desired());
+    let (code, stdout, stderr) = run_with(
+        dir.path(),
+        &["apply", "--deadline", "2", "--request-timeout", "1"],
+        &[&spec],
+    );
+    assert_eq!(code, Some(1), "{stdout}{stderr}");
+    assert!(stderr.contains("deadline of 2 s exceeded"), "{stderr}");
+    assert!(
+        stderr.contains("a write of this run had gone out"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn one_real_failure_outweighs_an_unanswered_spec_and_a_good_one_does_not_hide_it() {
+    let silent = Server::start(vec![
+        ("GET", "/api/v3/system/status", 200, STATUS.into()),
+        (
+            "GET",
+            "/api/v3/qualitydefinition",
+            support::SILENT,
+            String::new(),
+        ),
+    ]);
+    let good = radarr();
+    let dir = tempfile::tempdir().unwrap();
+    let unanswered = write_spec(dir.path(), "u.json", &silent.base_url(), DESIRED);
+    let fine = write_spec(dir.path(), "f.json", &good.base_url(), DESIRED);
+    let bad = dir.path().join("bad.json");
+    std::fs::write(&bad, r#"{"service":"radarr"}"#).unwrap();
+
+    let (code, stdout, stderr) = run_with(
+        dir.path(),
+        &["apply", "--request-timeout", "1"],
+        &[&unanswered, &fine],
+    );
+    assert_eq!(code, Some(3), "{stdout}{stderr}");
+    assert!(stdout.contains("unchanged"), "{stdout}");
+
+    let (code, stdout, stderr) = run_with(
+        dir.path(),
+        &["apply", "--request-timeout", "1"],
+        &[&unanswered, &bad],
+    );
+    assert_eq!(code, Some(1), "{stdout}{stderr}");
+}
+
+#[test]
+fn the_request_timeout_is_a_positive_number_within_the_deadline() {
+    let dir = tempfile::tempdir().unwrap();
+    let spec = write_spec(dir.path(), "s.json", "http://127.0.0.1:1", DESIRED);
+    for (args, said) in [
+        (
+            vec!["apply", "--request-timeout", "0"],
+            "--request-timeout needs a positive number of seconds",
+        ),
+        (
+            vec!["apply", "--request-timeout"],
+            "--request-timeout needs a positive number of seconds",
+        ),
+        (
+            vec!["apply", "--deadline", "5", "--request-timeout", "6"],
+            "--request-timeout (6 s) must not exceed --deadline (5 s)",
+        ),
+        (
+            // The default deadline is 300 s.
+            vec!["plan", "--request-timeout", "301"],
+            "--request-timeout (301 s) must not exceed --deadline (300 s)",
+        ),
+    ] {
+        // `--request-timeout` as the last word would swallow the spec path.
+        let specs: &[&Path] = if args.len() == 2 { &[] } else { &[&spec] };
+        let (code, stdout, stderr) = run_with(dir.path(), &args, specs);
+        assert_eq!(code, Some(1), "{args:?}: {stdout}{stderr}");
+        assert!(stderr.contains(said), "{args:?}: {stderr}");
+    }
+}
+
+#[test]
+fn the_request_timeout_reaches_the_transport() {
+    // Three probes of one second each fit into a deadline of three; with
+    // the default of ten seconds the first probe alone would outlast it.
+    let server = Server::start(vec![(
+        "GET",
+        "/api/v3/system/status",
+        support::SILENT,
+        String::new(),
+    )]);
+    let dir = tempfile::tempdir().unwrap();
+    let spec = write_spec(dir.path(), "s.json", &server.base_url(), DESIRED);
+    let started = std::time::Instant::now();
+    let (code, stdout, stderr) = run_with(
+        dir.path(),
+        &["plan", "--deadline", "3", "--request-timeout", "1"],
+        &[&spec],
+    );
+    assert_eq!(code, Some(3), "{stdout}{stderr}");
+    // Ten-second requests could not have ended a run inside nine.
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(9),
+        "{:?}",
+        started.elapsed()
+    );
+}

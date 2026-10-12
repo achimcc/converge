@@ -19,12 +19,48 @@ use converge::{
 };
 
 const USAGE: &str = "usage:
-  converge apply [--deadline <seconds>] <spec.json>...
-  converge plan [--deadline <seconds>] <spec.json>...
+  converge apply [--deadline <seconds>] [--request-timeout <seconds>] <spec.json>...
+  converge plan [--deadline <seconds>] [--request-timeout <seconds>] <spec.json>...
   converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr|kavita|dispatcharr|authentik> --openapi <file> [--spec <spec.json>]...
   converge schema-check --service ntfy|bindery|seerr|koel|suggestarr|audiobookshelf|questarr|bazarr [--spec <spec.json>]...";
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long one request may take unless `--request-timeout` says otherwise.
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The exit code for "the service did not answer, and this run had written
+/// nothing" (design §54). 1 stays every other failure, 2 a plan that differs.
+const EXIT_NO_ANSWER: u8 = 3;
+
+/// Why a spec did not go through.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Failure {
+    /// Anything a second try will not change by itself, and everything
+    /// after a write of this run.
+    Failed,
+    /// No answer, nothing written: safe to try again as it is.
+    NoAnswer,
+}
+
+/// Prints the error and says which kind of failure it is. `wrote` is whether
+/// a write of this run had gone out before: after one, a service that stops
+/// answering leaves a state nobody has read, and that is never "no answer".
+fn failure(label: &str, e: &Error, wrote: bool) -> Failure {
+    say_error(&format!("{label}: error: {e}"));
+    if !e.is_no_answer() {
+        return Failure::Failed;
+    }
+    if wrote {
+        say_error(&format!(
+            "{label}: note: a write of this run had gone out before the service stopped \
+             answering; what it kept is unknown until the next run reads it"
+        ));
+        return Failure::Failed;
+    }
+    say_error(&format!(
+        "{label}: note: no answer, and nothing was written (exit {EXIT_NO_ANSWER})"
+    ));
+    Failure::NoAnswer
+}
 
 /// The provider kind of a provider spec; any other spec is not asked.
 fn provider_kind(desired: &Desired) -> providers::Kind {
@@ -58,6 +94,7 @@ fn usage(problem: Option<&str>) -> ExitCode {
 
 fn reconcile(mode: Mode, args: &[String]) -> ExitCode {
     let mut timing = Timing::default();
+    let mut request_timeout = DEFAULT_REQUEST_TIMEOUT;
     let mut paths = Vec::new();
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
@@ -65,6 +102,11 @@ fn reconcile(mode: Mode, args: &[String]) -> ExitCode {
             match rest.next().and_then(|s| s.parse::<u64>().ok()) {
                 Some(secs) if secs > 0 => timing.deadline = Duration::from_secs(secs),
                 _ => return usage(Some("--deadline needs a positive number of seconds")),
+            }
+        } else if arg == "--request-timeout" {
+            match rest.next().and_then(|s| s.parse::<u64>().ok()) {
+                Some(secs) if secs > 0 => request_timeout = Duration::from_secs(secs),
+                _ => return usage(Some("--request-timeout needs a positive number of seconds")),
             }
         } else if arg.starts_with("--") {
             return usage(Some(&format!("unknown option {arg}")));
@@ -75,18 +117,39 @@ fn reconcile(mode: Mode, args: &[String]) -> ExitCode {
     if paths.is_empty() {
         return usage(Some("no spec given"));
     }
+    // One request that may outlive the whole run is a contradiction: the
+    // deadline is only looked at between requests (design §54).
+    if request_timeout > timing.deadline {
+        return usage(Some(&format!(
+            "--request-timeout ({} s) must not exceed --deadline ({} s)",
+            request_timeout.as_secs(),
+            timing.deadline.as_secs()
+        )));
+    }
     let credentials = std::env::var_os("CREDENTIALS_DIRECTORY").map(PathBuf::from);
-    let (mut failed, mut differs) = (false, false);
+    let (mut failed, mut no_answer, mut differs) = (false, false, false);
     let mut tokens = Tokens::new();
     // A failing spec does not skip the next one; it only decides the exit code.
     for path in &paths {
-        match reconcile_one(mode, path, credentials.as_deref(), timing, &mut tokens) {
+        match reconcile_one(
+            mode,
+            path,
+            credentials.as_deref(),
+            timing,
+            request_timeout,
+            &mut tokens,
+        ) {
             Ok(d) => differs |= d,
-            Err(()) => failed = true,
+            Err(Failure::Failed) => failed = true,
+            Err(Failure::NoAnswer) => no_answer = true,
         }
     }
+    // One real failure outweighs any number of unanswered specs: the caller
+    // may only treat the run as "try again" when that is all that went wrong.
     if failed {
         ExitCode::from(1)
+    } else if no_answer {
+        ExitCode::from(EXIT_NO_ANSWER)
     } else if differs {
         ExitCode::from(2)
     } else {
@@ -107,12 +170,17 @@ fn reconcile_one(
     path: &Path,
     credentials: Option<&Path>,
     timing: Timing,
+    request_timeout: Duration,
     tokens: &mut Tokens,
-) -> Result<bool, ()> {
-    let spec =
-        Spec::load(path).map_err(|e| say_error(&format!("{}: error: {e}", path.display())))?;
+) -> Result<bool, Failure> {
+    let spec = Spec::load(path).map_err(|e| {
+        say_error(&format!("{}: error: {e}", path.display()));
+        Failure::Failed
+    })?;
     let label = format!("{} {}", spec.service.name(), spec.task_name());
-    let fail = |e: Error| say_error(&format!("{label}: error: {e}"));
+    // For everything before the first write could have gone out: reading a
+    // credential, building the task, a sign-in that only fetches a token.
+    let fail = |e: Error| failure(&label, &e, false);
     // The setup door (design §52) is closed before there is a key: no
     // credential is read, and no request carries one.
     if let Desired::Setup(account) = &spec.desired {
@@ -120,19 +188,20 @@ fn reconcile_one(
             Service::Kavita => setup::Door::Kavita,
             Service::Bindery => setup::Door::Bindery,
             other => {
-                fail(Error::Refused(format!(
+                return Err(fail(Error::Refused(format!(
                     "{} has no setup door",
                     other.name()
-                )));
-                return Err(());
+                ))));
             }
         };
         let task = setup::Setup {
             door,
             username: account.username.clone(),
         };
-        let anonymous = HttpTransport::anonymous(&spec.base_url, REQUEST_TIMEOUT);
-        let report = run(mode, &task, &anonymous, &SystemClock, timing).map_err(fail)?;
+        let anonymous = HttpTransport::anonymous(&spec.base_url, request_timeout);
+        // The door is closed by a POST: after it, silence is not harmless.
+        let report = run(mode, &task, &anonymous, &SystemClock, timing)
+            .map_err(|e| failure(&label, &e, anonymous.wrote()))?;
         return Ok(print_report(&label, report));
     }
     let key = read_credential(credentials, &spec.api_key_credential).map_err(fail)?;
@@ -142,7 +211,9 @@ fn reconcile_one(
     // one request that carries no key.
     let key = match &spec.desired {
         Desired::SuggestArrConfiguration(desired) => {
-            let anonymous = HttpTransport::anonymous(&spec.base_url, REQUEST_TIMEOUT);
+            // A sign-in fetches a token and changes nothing a spec
+            // describes: its POST is a read (design §54).
+            let anonymous = HttpTransport::anonymous(&spec.base_url, request_timeout).reads_only();
             suggestarr::login(&anonymous, &desired.username, &key).map_err(fail)?
         }
         // The same for Dispatcharr (design §29): a service account's
@@ -152,7 +223,8 @@ fn reconcile_one(
             match tokens.get(&at) {
                 Some(token) => converge::secret::Secret::new(token.clone()),
                 None => {
-                    let anonymous = HttpTransport::anonymous(&spec.base_url, REQUEST_TIMEOUT);
+                    let anonymous =
+                        HttpTransport::anonymous(&spec.base_url, request_timeout).reads_only();
                     let token =
                         dispatcharr::login(&anonymous, &desired.username, &key).map_err(fail)?;
                     tokens.insert(at, token.expose().to_string());
@@ -169,7 +241,10 @@ fn reconcile_one(
             match tokens.get(&at) {
                 Some(token) => converge::secret::Secret::new(token.clone()),
                 None => {
-                    let anonymous = HttpTransport::anonymous(&spec.base_url, REQUEST_TIMEOUT);
+                    // Not `reads_only`: on the very first run this sign-in
+                    // creates the account, and a POST that gets no answer
+                    // may have done so.
+                    let anonymous = HttpTransport::anonymous(&spec.base_url, request_timeout);
                     // Ready first: a unit started with Questarr gets here
                     // before Questarr listens, and the sign-in below would
                     // end the run at a refused connection -- before the
@@ -199,8 +274,8 @@ fn reconcile_one(
                         say(&format!("{label}: 1 field(s) differ"));
                         return Ok(true);
                     }
-                    let token =
-                        questarr::sign_in(&anonymous, &desired.username, &key).map_err(fail)?;
+                    let token = questarr::sign_in(&anonymous, &desired.username, &key)
+                        .map_err(|e| failure(&label, &e, anonymous.wrote()))?;
                     tokens.insert(at, token.expose().to_string());
                     token
                 }
@@ -212,7 +287,7 @@ fn reconcile_one(
         &spec.base_url,
         spec.service.key_header(),
         spec.service.key_value(key),
-        REQUEST_TIMEOUT,
+        request_timeout,
     );
     let transport = if spec.service.accepts_json_only() {
         transport.accept_json()
@@ -466,7 +541,7 @@ fn reconcile_one(
                     &entry.source.base_url,
                     entry.source.service.key_header(),
                     entry.source.service.key_value(key),
-                    REQUEST_TIMEOUT,
+                    request_timeout,
                 ));
             }
             let task = collections::Collections {
@@ -816,7 +891,8 @@ fn reconcile_one(
             "setup is run without a key, before this point".to_string(),
         )),
     }
-    .map_err(fail)?;
+    // From here on a write may have gone out: the transport knows.
+    .map_err(|e| failure(&label, &e, transport.wrote()))?;
     Ok(print_report(&label, report))
 }
 

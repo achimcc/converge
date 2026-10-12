@@ -292,3 +292,106 @@ fn a_redirect_loop_ends() {
         .to_string();
     assert!(err.contains("redirects"), "{err}");
 }
+
+// --- No answer (design §54) -------------------------------------------------
+//
+// A real listener that takes the request and never answers, and a port
+// nothing listens on. What the transport makes of the silence decides
+// whether a run may be tried again as it is.
+
+fn impatient(base: &str) -> HttpTransport {
+    HttpTransport::new(
+        base,
+        "X-Api-Key",
+        Secret::new("s3cret-key-value".into()),
+        Duration::from_secs(1),
+    )
+}
+
+fn closed_port() -> String {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    format!("http://127.0.0.1:{port}")
+}
+
+#[test]
+fn a_read_that_gets_no_answer_is_no_answer_and_nothing_was_written() {
+    let server = Server::start(vec![("GET", "/a", support::SILENT, String::new())]);
+    let t = impatient(&server.base_url());
+    let err = t.get("/a").err().expect("the listener never answers");
+    assert!(
+        matches!(err, converge::error::Error::NoAnswer { .. }),
+        "{err}"
+    );
+    assert!(err.is_no_answer());
+    assert!(err.to_string().starts_with("GET /a: timeout"), "{err}");
+    assert!(!t.wrote());
+}
+
+#[test]
+fn a_write_that_was_sent_and_not_answered_is_unconfirmed() {
+    let server = Server::start(vec![("PUT", "/u", support::SILENT, String::new())]);
+    let t = impatient(&server.base_url());
+    let err = t.put_json("/u", r#"{"a":1}"#).err().unwrap();
+    assert!(
+        matches!(err, converge::error::Error::Unconfirmed { .. }),
+        "{err}"
+    );
+    // Without this the test would not prove the write went out.
+    assert_eq!(server.requests()[0].body, r#"{"a":1}"#);
+    assert!(!err.is_no_answer());
+    assert!(t.wrote());
+    let said = err.to_string();
+    assert!(
+        said.contains("whether the service applied it is unknown"),
+        "{said}"
+    );
+    assert!(!said.contains("s3cret"), "{said}");
+}
+
+#[test]
+fn a_write_that_could_not_be_connected_is_no_answer_and_did_not_go_out() {
+    let t = impatient(&closed_port());
+    for err in [
+        t.put_json("/u", "{}").err().unwrap(),
+        t.post_json("/p", "{}").err().unwrap(),
+        t.delete("/d").err().unwrap(),
+        t.get("/a").err().unwrap(),
+    ] {
+        assert!(
+            matches!(err, converge::error::Error::NoAnswer { .. }),
+            "{err}"
+        );
+    }
+    assert!(!t.wrote());
+}
+
+#[test]
+fn an_answered_write_counts_as_written_whatever_its_status() {
+    let server = Server::start(vec![("PUT", "/u", 500, String::new())]);
+    let t = impatient(&server.base_url());
+    assert!(!t.wrote());
+    assert_eq!(t.put_json("/u", "{}").unwrap().status, 500);
+    assert!(t.wrote());
+}
+
+#[test]
+fn a_sign_in_that_gets_no_answer_is_a_read() {
+    let server = Server::start(vec![(
+        "POST",
+        "/api/auth/login",
+        support::SILENT,
+        String::new(),
+    )]);
+    let anonymous =
+        HttpTransport::anonymous(&server.base_url(), Duration::from_secs(1)).reads_only();
+    let err = anonymous.post_json("/api/auth/login", "{}").err().unwrap();
+    assert!(
+        matches!(err, converge::error::Error::NoAnswer { .. }),
+        "{err}"
+    );
+    assert!(!anonymous.wrote());
+}
