@@ -697,8 +697,11 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
-        Desired::BinderySettings(set) => {
-            let task = bindery::Settings { set: set.clone() };
+        Desired::BinderySettings(set, may_be_unset) => {
+            let task = bindery::Settings {
+                set: set.clone(),
+                may_be_unset: may_be_unset.clone(),
+            };
             run(mode, &task, &transport, &SystemClock, timing)
         }
         Desired::BinderyIndexers(names) => {
@@ -1188,7 +1191,7 @@ fn schema_check(args: &[String]) -> ExitCode {
             | Desired::SuggestArrConfiguration(_)
             | Desired::AccountSubscriptions(_)
             | Desired::BinderyEntries(..)
-            | Desired::BinderySettings(_)
+            | Desired::BinderySettings(..)
             | Desired::BinderyOidcProviders(_)
             | Desired::BinderyIndexers(_)
             | Desired::SeerrMain(_)

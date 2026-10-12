@@ -15,7 +15,7 @@
 //! Nothing is deleted; a secret is never cleared (`clearApiKey` is never
 //! sent).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
 
@@ -761,9 +761,19 @@ impl Task for Indexers {
 
 /// Settings by key: `GET /api/v1/setting/{key}` answers `{key, value}`, and
 /// `PUT` takes `{value}`.
+///
+/// A key nobody has written yet is not in bindery's table, and the answer is
+/// 404 -- the same answer a misspelt key gets. A spec therefore names the keys
+/// that may be unset (`may_be_unset`, design §53): for those, 404 reads as "no
+/// value", and the write creates the row. For every other key 404 stays what
+/// it was, a key that does not exist.
 pub struct Settings {
     pub set: BTreeMap<String, Value>,
+    pub may_be_unset: BTreeSet<String>,
 }
+
+/// Shown as the current value of a setting that has no row yet.
+const UNSET: &str = "(unset)";
 
 fn setting_path(key: &str) -> String {
     format!("/api/v1/setting/{key}")
@@ -787,7 +797,10 @@ impl Task for Settings {
             let path = setting_path(key);
             let reply = t.get(&path)?;
             if reply.status == 404 {
-                unknown.push(format!("setting {key}"));
+                // Unset and allowed to be: no entry, and `diff` reports it.
+                if !self.may_be_unset.contains(key) {
+                    unknown.push(format!("setting {key}"));
+                }
                 continue;
             }
             expect_status_at("GET", &path, &reply, &[200])?;
@@ -813,7 +826,10 @@ impl Task for Settings {
             .map(|(key, desired)| Change {
                 subject: format!("setting {key}"),
                 field: String::new(),
-                current: current.get(key).map(shortened).unwrap_or_default(),
+                current: current
+                    .get(key)
+                    .map(shortened)
+                    .unwrap_or_else(|| UNSET.to_string()),
                 desired: shortened(desired),
             })
             .collect())
@@ -1108,12 +1124,14 @@ mod tests {
     fn a_setting_is_compared_by_value_written_as_value_and_an_unknown_key_is_not_found() {
         let task = Settings {
             set: map(json!({"import.mode": "copy"})),
+            may_be_unset: BTreeSet::new(),
         };
         let t = bindery("/api/v1/setting/import.mode", vec![ok(IMPORT_MODE)]);
         assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
 
         let task = Settings {
             set: map(json!({"import.mode": "move"})),
+            may_be_unset: BTreeSet::new(),
         };
         let t = bindery("/api/v1/setting/import.mode", vec![ok(IMPORT_MODE)])
             .on_put(vec![Step::Answer(200, "{}".into())]);
@@ -1133,6 +1151,7 @@ mod tests {
 
         let task = Settings {
             set: map(json!({"nope": "x"})),
+            may_be_unset: BTreeSet::new(),
         };
         let t = bindery("/api/v1/setting/nope", vec![Step::Answer(404, "{}".into())]);
         assert!(task
@@ -1141,6 +1160,72 @@ mod tests {
             .unwrap()
             .to_string()
             .contains("setting nope"));
+    }
+
+    const SETTING_NOT_FOUND: &str =
+        include_str!("../../tests/fixtures/bindery-1.33.2/setting-not-found.json");
+    const SEARCH_INTERVAL: &str = include_str!(
+        "../../tests/fixtures/bindery-1.33.2/constructed-setting-search.interval.json"
+    );
+
+    #[test]
+    fn a_setting_that_may_be_unset_reads_404_as_no_value_and_is_created_by_the_write() {
+        let task = Settings {
+            set: map(json!({"search.interval": "168h", "import.mode": "copy"})),
+            may_be_unset: ["search.interval".to_string()].into(),
+        };
+        // The recorded 404, then what the service answers once the row exists.
+        let t = FakeTransport::default()
+            .on_get("/api/v1/health", vec![ok(HEALTH_OK)])
+            .on_get("/api/v1/setting/import.mode", vec![ok(IMPORT_MODE)])
+            .on_get(
+                "/api/v1/setting/search.interval",
+                vec![
+                    Step::Answer(404, SETTING_NOT_FOUND.into()),
+                    ok(SEARCH_INTERVAL),
+                ],
+            )
+            .on_put(vec![Step::Answer(200, SEARCH_INTERVAL.into())]);
+        let current = task.read(&t).unwrap();
+        assert!(!current.contains_key("search.interval"));
+        let changes = task.diff(&current).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            changes[0].to_string(),
+            r#"setting search.interval: (unset) -> "168h""#
+        );
+        task.write(&t, &current).unwrap();
+        assert_eq!(t.written.borrow().len(), 1);
+        assert_eq!(
+            sent(&t, 0),
+            (
+                "/api/v1/setting/search.interval".to_string(),
+                json!({"value": "168h"})
+            )
+        );
+        // Read back: the row is there, and nothing is left to change.
+        assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn the_leave_to_be_unset_is_per_key_and_a_misspelt_key_is_still_not_found() {
+        let task = Settings {
+            set: map(json!({"search.interval": "168h", "serach.interval": "168h"})),
+            may_be_unset: ["search.interval".to_string()].into(),
+        };
+        let t = FakeTransport::default()
+            .on_get("/api/v1/health", vec![ok(HEALTH_OK)])
+            .on_get(
+                "/api/v1/setting/search.interval",
+                vec![Step::Answer(404, SETTING_NOT_FOUND.into())],
+            )
+            .on_get(
+                "/api/v1/setting/serach.interval",
+                vec![Step::Answer(404, SETTING_NOT_FOUND.into())],
+            );
+        let message = task.read(&t).err().unwrap().to_string();
+        assert!(message.contains("setting serach.interval"), "{message}");
+        assert!(!message.contains("setting search.interval"), "{message}");
     }
 
     fn oidc(set: serde_json::Value, mit_geheimnis: bool) -> OidcProviders {

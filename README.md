@@ -54,7 +54,7 @@ or an OpenTofu resource on the host it was written for:
 | Trailarr | `connections` | connections to Radarr and Sonarr by name: top-level fields, key from a credential; missing ones are added, and with `exactly` the ones the spec does not name are removed -- never half the list or more |
 | Trailarr | `trailer-profiles` | fields every trailer profile gets |
 | bindery | `download-clients`, `prowlarr-instances` | entries by name: top-level fields; secrets from credentials handed over on every `apply` in a `PUT` with only the secret (bindery answers them empty) |
-| bindery | `root-folders`, `settings` | root folders by path (added when missing); settings by key |
+| bindery | `root-folders`, `settings` | root folders by path (added when missing); settings by key. A key without a row answers 404 like a misspelt one; `desired.may_be_unset` lists the keys for which that reads as "no value" and the write creates the row (design §53) |
 | bindery | `oidc-providers` | the providers of bindery's own login, by `id`: fields compared, `client_secret` handed over on every `apply` (write-only); `PUT` replaces the whole list, so a provider the spec does not name travels back untouched |
 | bindery | `indexers` | the switch over the indexers Prowlarr synced in: the named ones on, every **other** `torznab` one off, anything else left alone. The only task that writes to an entry the spec does not name; a name bindery does not hold is an error. Only rows that differ are written -- each `PUT` takes that row's seed-ratio override away from bindery's Prowlarr syncer |
 | ntfy | `account-subscriptions` | subscriptions of an account; the topics are secrets, read from a credential and never printed |

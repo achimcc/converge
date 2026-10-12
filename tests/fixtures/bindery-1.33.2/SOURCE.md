@@ -48,3 +48,13 @@ At recording time the host's desired state matched: `plan` reported
   `setupRequired` set to `true`, which is what `Status` answers while
   `users.Count` is 0 (`internal/api/auth.go:114-143` at `v1.33.2`). A fresh
   instance to record it from would have had to be set up for the purpose.
+
+- `setting-not-found.json` — `GET /api/v1/setting/search.interval`, recorded
+  2026-10-12 from the running bindery (design §53). The answer is verbatim and
+  came with status **404**: no migration seeds the key, so it has no row until
+  somebody writes it. `import.mode` answered 200 in the same minute.
+- `constructed-setting-search.interval.json` — built by hand after
+  `setting-import.mode.json`: what the same path answers once the row exists
+  (`SettingsHandler.Set` upserts and `Get` returns the row,
+  `internal/api/settings_handler.go:252-304` at `v1.33.2`). Recording it would
+  have meant writing the setting by hand first.

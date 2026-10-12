@@ -3258,6 +3258,51 @@ the open states are constructed from them and the source
 with `CREDENTIALS_DIRECTORY` unset and checks that no request carries a key
 header.
 
+## 53. bindery: a setting nobody has written yet (v0.52.0, 2026-10-12)
+
+bindery keeps its settings as rows by key, and `GET /api/v1/setting/{key}`
+answers **404** for a key without a row (`SettingsHandler.Get`,
+`internal/api/settings_handler.go:252-268` at `v1.33.2`). Some keys get their
+row from a migration (`import.mode`, `013_import_mode.sql`); others have none
+until somebody writes them. `search.interval` is one: the scheduler falls
+back to twelve hours while the row is missing (`scheduler.go:96-99`).
+
+To the `settings` task (§14) a 404 is a key that does not exist, and that is
+right as a default: a misspelt key gets the very same answer, and creating a
+row for it would be worse than failing. So the host could not set
+`search.interval` at all -- the read failed before any write.
+
+A spec now names the keys that may be unset:
+
+```json
+{"settings": {"search.interval": "168h"}, "may_be_unset": ["search.interval"]}
+```
+
+For those keys, and only those, a 404 reads as "no value": the plan shows
+`setting search.interval: (unset) -> "168h"`, the write is the same `PUT`
+(`SettingsHandler.Set` upserts), and the read back finds the row. Every other
+key keeps the strict reading. A key in `may_be_unset` that is not among
+`settings` is refused when the spec is parsed -- the list is a leave for a
+key the spec sets, not a second place to misspell one.
+
+**What the leave costs:** for a listed key, a typo is no longer caught by the
+read. bindery's own validation catches some of it (`validateSettingValue`
+knows `search.interval` and rejects a bad duration with 400), but an unknown
+key is stored as given. The list is therefore short and explicit, and absent
+by default.
+
+**Not converge's business:** bindery reads `search.interval` once at start
+(`scheduler.go:466-470`). A changed value takes effect at the next restart
+of the service; the host restarts it when `plan` reports a difference.
+
+### Checked how
+
+`tests/fixtures/bindery-1.33.2/setting-not-found.json` is the recorded 404
+for `search.interval`; the answer after the write is built by hand after the
+recorded `import.mode` (`SOURCE.md`). Two tests: the listed key is read as
+unset, written once and found on the read back; and a misspelt key next to a
+listed one is still reported as not found.
+
 ## 20. Not in the pilot
 
 

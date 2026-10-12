@@ -810,7 +810,11 @@ pub enum Desired {
     Indexers(ProviderSettings),
     IndexerProxies(ProviderSettings),
     BinderyEntries(BinderyKind, BTreeMap<String, BinderyEntry>),
-    BinderySettings(BTreeMap<String, serde_json::Value>),
+    /// The settings by key, and the keys that may have no row yet (§53).
+    BinderySettings(
+        BTreeMap<String, serde_json::Value>,
+        std::collections::BTreeSet<String>,
+    ),
     BinderyOidcProviders(BTreeMap<String, BinderyEntry>),
     BinderyIndexers(Vec<String>),
     SeerrMain(BTreeMap<String, serde_json::Value>),
@@ -1488,6 +1492,8 @@ impl Spec {
                 #[serde(deny_unknown_fields)]
                 struct Raw {
                     settings: BTreeMap<String, serde_json::Value>,
+                    #[serde(default)]
+                    may_be_unset: std::collections::BTreeSet<String>,
                 }
                 let desired: Raw = serde_json::from_value(raw.desired)
                     .map_err(|e| invalid(format!("desired: {e}")))?;
@@ -1501,7 +1507,17 @@ impl Spec {
                         )));
                     }
                 }
-                Desired::BinderySettings(desired.settings)
+                // The leave is for a key the spec sets. One it does not set
+                // is a slip of the pen, and that is what the leave must not
+                // hide.
+                for key in &desired.may_be_unset {
+                    if !desired.settings.contains_key(key) {
+                        return Err(invalid(format!(
+                            "desired.may_be_unset: {key:?} is not among desired.settings"
+                        )));
+                    }
+                }
+                Desired::BinderySettings(desired.settings, desired.may_be_unset)
             }
             TaskName::Main => {
                 #[derive(Deserialize)]
@@ -2559,7 +2575,7 @@ impl Spec {
             Desired::BinderyEntries(BinderyKind::DownloadClients, _) => "download-clients",
             Desired::BinderyEntries(BinderyKind::ProwlarrInstances, _) => "prowlarr-instances",
             Desired::BinderyEntries(BinderyKind::RootFolders, _) => "root-folders",
-            Desired::BinderySettings(_) => "settings",
+            Desired::BinderySettings(..) => "settings",
             Desired::BinderyOidcProviders(_) => "oidc-providers",
             Desired::BinderyIndexers(_) => "indexers",
             Desired::SeerrMain(_) => "main",
@@ -5033,6 +5049,15 @@ mod tests {
         // `settings` is bindery's task name too, and it keeps its own shape.
         let bindery = r#"{"service":"bindery","base_url":"http://127.0.0.1:8080","api_key_credential":"k","task":"settings","desired":{"settings":{"BaseUrl":"http://x"}}}"#;
         assert!(parse(bindery).is_ok());
+        // A key that may have no row yet (§53) has to be one the spec sets.
+        let unset = r#"{"service":"bindery","base_url":"http://127.0.0.1:8080","api_key_credential":"k","task":"settings","desired":{"settings":{"search.interval":"168h"},"may_be_unset":["search.interval"]}}"#;
+        assert!(matches!(
+            parse(unset).unwrap().desired,
+            Desired::BinderySettings(ref set, ref unset)
+                if set.len() == 1 && unset.contains("search.interval")
+        ));
+        let stray = r#"{"service":"bindery","base_url":"http://127.0.0.1:8080","api_key_credential":"k","task":"settings","desired":{"settings":{"search.interval":"168h"},"may_be_unset":["serach.interval"]}}"#;
+        assert!(reason(parse(stray)).contains("is not among desired.settings"));
         let elsewhere = r#"{"service":"kavita","base_url":"http://127.0.0.1:5000","api_key_credential":"k","task":"settings","desired":{"set":{"a":1}}}"#;
         assert!(reason(parse(elsewhere)).contains("does not belong"));
     }
