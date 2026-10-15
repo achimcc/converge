@@ -28,7 +28,7 @@ or an OpenTofu resource on the host it was written for:
 | service | task | desired state |
 |---|---|---|
 | Radarr, Sonarr | `quality-definitions` | size limits (MB per minute) per quality |
-| Radarr, Sonarr | `quality-profiles` | qualities every profile must allow; with `exactly` and `keep`, the profiles that survive -- every other one is removed once all of them are there. `format_scores` gives a named custom format its score in every profile (in every kept one with `keep`); every other `formatItems` entry stays as its writer left it |
+| Radarr, Sonarr | `quality-profiles` | qualities every profile must allow; with `exactly` and `keep`, the profiles that survive -- every other one is removed once all of them are there, never half the profiles or more (up to six removals pass: a fresh service's defaults). `format_scores` gives a named custom format its score in every profile (in every kept one with `keep`); every other `formatItems` entry stays as its writer left it |
 | Radarr, Sonarr | `custom-formats` | custom formats by name: the switch that puts one into a file name, and its specifications by name with `implementation`, `negate`, `required` and their `fields`. Formats the spec does not name are counted, never listed, and never removed -- `exactly` is refused here |
 | Prowlarr | `app-profiles` | app profiles by name: `enableRss`, `enableAutomaticSearch`, `enableInteractiveSearch`, `minimumSeeders`. A missing one is added |
 | Radarr, Sonarr, Lidarr | `naming`, `media-management` | top-level fields of the configuration document |
@@ -45,7 +45,7 @@ or an OpenTofu resource on the host it was written for:
 | Jellyfin | `server-configuration` | fields of `ServerConfiguration`, by path |
 | Jellyfin | `named-configuration` | fields of a named configuration (`network`, `branding`, `livetv`), by path, checked against its component |
 | Jellyfin | `library-options` | fields of the named libraries' `LibraryOptions`, by path |
-| Jellyfin | `collections` | collections by name, each holding exactly the films of one library whose TMDb id is on a Radarr import list (read from that Radarr with its own credential): a missing collection is created, a missing film added, a film the list does not account for removed. Films the library lacks yet are a note. Collections the spec does not name are left alone |
+| Jellyfin | `collections` | collections by name, each holding exactly the films of one library whose TMDb id is on a Radarr import list (read from that Radarr with its own credential): a missing collection is created, a missing film added, a film the list does not account for removed -- never half the collection or more in one run. Films the library lacks yet are a note. Collections the spec does not name are left alone |
 | Jellyfin | `scheduled-task-triggers` | the trigger list of tasks whose key starts with a prefix |
 | Jellyfin | `plugin-configurations` | fields of plugin configurations by path, keys from credentials, entries of shared lists by key, library ids by library name |
 | Jellyfin | `user-policies` | fields of `UserPolicy` every account must carry (`all`) and the ones single accounts carry instead (`accounts`, by the account's name). Jellyfin replaces a policy as a whole, so each differing account's policy is read, the named fields are changed and everything else travels back untouched; a field its answer does not carry is an error before anything is written, while an account name the service does not hold **yet** is a note and is skipped -- such an account comes into being at its owner's first sign-in |
@@ -368,7 +368,15 @@ a single `DELETE`:
 - **`quality-profiles`** needs `desired.keep`, the profiles that survive —
   required with `exactly`, an error without it, and never empty. Nothing is
   removed until **every** kept profile is there: on the host that means
-  Recyclarr has run, and if it has not, "the rest" is everything.
+  Recyclarr has run, and if it has not, "the rest" is everything. And never
+  half the profiles or more in one run (`would remove 495 of 500 profiles
+  (half or more) -- nothing removed`), except up to six removals: a fresh
+  Radarr or Sonarr ships six profiles of its own, and taking those away next
+  to the written ones is the job `keep` exists for.
+- **`collections`** never removes half a collection's members or more in one
+  run. The empty-list guard does not catch a list that answers with the
+  wrong films — one film the library lacks, and every member would be "not
+  on the list".
 - A **profile a film or a series still hangs on** is refused by the service.
   That is reported by name (`not removed: profile Anime (HTTP 409, still in
   use?)`), never forced; the other removals are still tried and the run ends

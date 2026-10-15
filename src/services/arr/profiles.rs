@@ -255,7 +255,7 @@ impl Task for QualityProfiles {
     }
 
     /// The profiles `keep` does not name -- but only once every kept profile
-    /// is there.
+    /// is there, and never half of them or more.
     ///
     /// On the host this was written for, Recyclarr writes the profiles from
     /// TRaSH's templates and converge takes the rest away. A kept profile
@@ -277,11 +277,30 @@ impl Task for QualityProfiles {
                 keep.len()
             )));
         }
-        Ok(current
+        // NEVER HALF THE PROFILES OR MORE (audit 4, B211), the guard Koel's
+        // stations and Trailarr's connections have. All kept names present
+        // is not enough: a `keep` list cut short in the spec, or a writer
+        // that added hundreds of strays, would otherwise empty the service
+        // down to the kept few in one run.
+        //
+        // UP TO `FRESH_DEFAULTS` REMOVALS PASS ANYWAY. A freshly installed
+        // Radarr or Sonarr carries six profiles of its own, and next to two
+        // written ones removing them IS half or more -- the very job `keep`
+        // was made for, on the day the service is rebuilt. Without the floor
+        // that day would need a hand in the web UI.
+        let surplus: Vec<String> = current
             .iter()
             .filter(|p| self.is_surplus(p))
             .map(subject)
-            .collect())
+            .collect();
+        if surplus.len() > FRESH_DEFAULTS && 2 * surplus.len() >= current.len() {
+            return Err(Error::Refused(format!(
+                "would remove {} of {} profiles (half or more) -- nothing removed",
+                surplus.len(),
+                current.len()
+            )));
+        }
+        Ok(surplus)
     }
 
     /// One `DELETE` per surplus profile. A profile films or series still
@@ -343,6 +362,11 @@ impl Task for QualityProfiles {
         Ok(())
     }
 }
+
+/// The quality profiles a fresh Radarr or Sonarr ships with (Any, SD,
+/// HD-720p, HD-1080p, Ultra-HD, HD - 720p/1080p): removals up to this many
+/// are never refused by the half rule.
+const FRESH_DEFAULTS: usize = 6;
 
 #[cfg(test)]
 mod tests {
@@ -551,6 +575,67 @@ mod tests {
         "Dual Language, sonst Deutsch (1080p)",
         "Rarität, Originalsprache (auch SD)",
     ];
+
+    /// Audit 4, B211 (probe `kb-converge-profiles.rs`): 500 profiles on the
+    /// service, 5 of them kept. Before 0.53.2 the only guard asked whether
+    /// the kept names were there, and 495 `DELETE`s went out.
+    #[test]
+    fn kb_500_profiles_against_5_kept_must_not_delete_495() {
+        let list: Value = serde_json::from_str(RADARR).unwrap();
+        let template = list.as_array().unwrap()[0].clone();
+        let many: Vec<Value> = (0..500)
+            .map(|i| {
+                let mut p = template.clone();
+                p["id"] = Value::from(1000 + i);
+                p["name"] = Value::from(format!("Praeparat {i}"));
+                p
+            })
+            .collect();
+        let body = serde_json::to_string(&many).unwrap();
+        let kept: Vec<String> = (0..5).map(|i| format!("Praeparat {i}")).collect();
+        let kept_refs: Vec<&str> = kept.iter().map(String::as_str).collect();
+        let task = keeping(&kept_refs);
+        let t = listing(&body).on_delete(vec![Step::Answer(200, String::new())]);
+        let current = task.read(&t).expect("read");
+        assert_eq!(
+            task.surplus(&current).unwrap_err().to_string(),
+            "refused: would remove 495 of 500 profiles (half or more) -- nothing removed"
+        );
+        assert!(task.remove(&t, &current).is_err());
+        let deleted = t.deleted.borrow().len();
+        assert!(
+            deleted < 250,
+            "{deleted} of 500 profiles deleted on one run -- no upper bound on removals"
+        );
+        assert_eq!(deleted, 0, "the refusal comes before the first DELETE");
+    }
+
+    /// The floor: a fresh service's six defaults next to two written
+    /// profiles go (6 of 8), seven strays next to two do not (7 of 9).
+    #[test]
+    fn a_fresh_services_six_defaults_pass_the_half_rule_seven_strays_do_not() {
+        let list: Value = serde_json::from_str(RADARR).unwrap();
+        let template = list.as_array().unwrap()[0].clone();
+        let named = |n: usize| -> String {
+            let all: Vec<Value> = (0..n)
+                .map(|i| {
+                    let mut p = template.clone();
+                    p["id"] = Value::from(2000 + i);
+                    p["name"] = Value::from(format!("P{i}"));
+                    p
+                })
+                .collect();
+            serde_json::to_string(&all).unwrap()
+        };
+        let task = keeping(&["P0", "P1"]);
+        let current = task.read(&listing(&named(8))).unwrap();
+        assert_eq!(task.surplus(&current).unwrap().len(), 6);
+        let current = task.read(&listing(&named(9))).unwrap();
+        assert_eq!(
+            task.surplus(&current).unwrap_err().to_string(),
+            "refused: would remove 7 of 9 profiles (half or more) -- nothing removed"
+        );
+    }
 
     fn keeping(names: &[&str]) -> QualityProfiles {
         QualityProfiles {

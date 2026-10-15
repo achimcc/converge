@@ -291,6 +291,31 @@ impl Collections<'_> {
         (add, remove)
     }
 
+    /// NEVER HALF A COLLECTION OR MORE IN ONE RUN (audit 4, B211), the
+    /// guard Koel's stations and Trailarr's connections have. The empty-list
+    /// guard does not cover a list that answers with the wrong films: one
+    /// film the library lacks, and every member is "not on the list". A
+    /// refusal here stops `plan` and `apply` alike, before any write.
+    fn guard(&self, current: &Current) -> Result<(), Error> {
+        for (wanted, found) in self.collections.iter().zip(&current.found) {
+            if found.id.is_none() {
+                continue;
+            }
+            let (_, remove) = Self::delta(found);
+            if !remove.is_empty() && 2 * remove.len() >= found.members.len() {
+                return Err(Error::Refused(format!(
+                    "{}: would remove {} of {} members (half or more) -- nothing changed; \
+                     does import list {} answer what it should?",
+                    Self::subject(&wanted.name),
+                    remove.len(),
+                    found.members.len(),
+                    wanted.source.import_list
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn ids(items: &[&BaseItemDto]) -> String {
         items
             .iter()
@@ -378,6 +403,7 @@ impl Task for Collections<'_> {
     }
 
     fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        self.guard(current)?;
         let mut changes = Vec::new();
         for (wanted, found) in self.collections.iter().zip(&current.found) {
             let subject = Self::subject(&wanted.name);
@@ -433,6 +459,8 @@ impl Task for Collections<'_> {
     }
 
     fn write(&self, t: &dyn Transport, current: &Self::Current) -> Result<(), Error> {
+        // Again here: `write` must not rely on its caller having asked `diff`.
+        self.guard(current)?;
         for (wanted, found) in self.collections.iter().zip(&current.found) {
             match &found.id {
                 None if found.wanted.is_empty() => {}
@@ -564,6 +592,76 @@ mod tests {
 
     fn members_path() -> String {
         format!("/Items?parentId={COLLECTION}&recursive=true&fields=ProviderIds")
+    }
+
+    /// Audit 4, B211 (probe `kb-converge-collections.rs`): Radarr's list
+    /// names ONE film the library lacks. The empty-list guard does not fire,
+    /// nothing is wanted, and before 0.53.2 all nine members were removed.
+    #[test]
+    fn kb_one_foreign_film_on_the_list_must_not_empty_the_collection() {
+        let source = FakeTransport::default()
+            .on_get("/api/v3/importlist", vec![ok(LISTS)])
+            .on_get(
+                "/api/v3/importlist/movie",
+                vec![ok(
+                    r#"[{"tmdbId": 999999999, "title": "Praeparat", "lists": [1]}]"#,
+                )],
+            );
+        let task = task(&source, NAME);
+        let all = wanted_ids();
+        assert_eq!(all.len(), 9);
+        let (boxsets, members) = with_collection(&all);
+        let t = jellyfin(&boxsets)
+            .on_get(&members_path(), vec![ok(&members)])
+            .on_put(vec![Step::Answer(204, String::new())])
+            .on_delete(vec![Step::Answer(204, String::new())]);
+        let current = task.read(&t).expect("read");
+        assert_eq!(
+            task.diff(&current).unwrap_err().to_string(),
+            format!(
+                "refused: collection {NAME}: would remove 9 of 9 members (half or more) -- \
+                 nothing changed; does import list {NAME} answer what it should?"
+            )
+        );
+        assert!(task.write(&t, &current).is_err());
+        assert!(
+            t.deleted.borrow().is_empty(),
+            "a list answer with one foreign film removed members: {:?}",
+            t.deleted.borrow()
+        );
+    }
+
+    /// Fewer than half go: one member that left the list of nine.
+    #[test]
+    fn one_member_off_the_list_is_removed() {
+        let source = radarr();
+        let task = task(&source, NAME);
+        let mut members = wanted_ids();
+        let (boxsets, _) = with_collection(&members);
+        // A tenth member that is not on the list: one of ten goes.
+        let films: Value = serde_json::from_str(FILMS).unwrap();
+        let stray = films["Items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["Id"].as_str().unwrap().to_string())
+            .find(|id| !members.contains(id))
+            .expect("the library holds a film that is not on the list");
+        members.push(stray);
+        let (_, member_body) = with_collection(&members);
+        let t = jellyfin(&boxsets)
+            .on_get(&members_path(), vec![ok(&member_body)])
+            .on_delete(vec![Step::Answer(204, String::new())]);
+        let current = task.read(&t).unwrap();
+        let removals = task
+            .diff(&current)
+            .unwrap()
+            .iter()
+            .filter(|c| c.to_string().ends_with("(not on the list)"))
+            .count();
+        assert_eq!(removals, 1);
+        task.write(&t, &current).unwrap();
+        assert_eq!(t.deleted.borrow().len(), 1);
     }
 
     #[test]
