@@ -34,6 +34,14 @@ start with `/api/v1/` as the 0.11.5 answer's did. The fixtures stay those of
 |---|---|---|
 | `trailarr-0.13.0.json` | https://raw.githubusercontent.com/nandyalu/trailarr/v0.13.0/docs/references/api-docs/openapi.json | `f39a31f4043ee026c8ea95fe8e6501e3f43ad20c0dd7f15c2af4809c7d6dc785` |
 
+`trailarr-0.13.1.json` is the same file at the next release tag, fetched
+2026-10-15 in the afternoon, byte for byte. `info.version` is `v0.13.1`; it
+adds one path (84 against 83) and the fixtures stay those of 0.11.5.
+
+| file | source | sha256 |
+|---|---|---|
+| `trailarr-0.13.1.json` | https://raw.githubusercontent.com/nandyalu/trailarr/v0.13.1/docs/references/api-docs/openapi.json | `d721b3cd0864feac55062cf8d0594c0d2f8e33db0b418fe4ef75821b48a14823` |
+
 `kavita-0.9.1.4.json` comes from the source tree of the release Kavita ships
 as `v0.9.1.4` (https://github.com/kareadita/kavita/archive/v0.9.1.4.tar.gz,
 the nixpkgs source of the package the host deploys; fetched 2026-09-18),

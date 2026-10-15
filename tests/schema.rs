@@ -534,6 +534,40 @@ fn trailarr_0_13_0_still_fits_the_endpoints_types_and_the_hosts_fields() {
     );
 }
 
+/// 0.13.1 (2026-10-04) adds one path and changes none the host uses; the
+/// same check as for 0.13.0, against the file at its release tag.
+#[test]
+fn trailarr_0_13_1_still_fits_the_endpoints_types_and_the_hosts_fields() {
+    let d = doc("trailarr-0.13.1");
+    assert_eq!(trailarr_findings(&d), Vec::<String>::new());
+    let mut map = std::collections::BTreeMap::new();
+    for (k, v) in host_connection().as_object().unwrap() {
+        map.insert(k.clone(), v.clone());
+    }
+    for component in ["ConnectionCreate", "ConnectionUpdate"] {
+        assert_eq!(
+            converge::schema::check_paths(&d, component, &map),
+            Vec::<String>::new(),
+            "{component}"
+        );
+    }
+    let profile: std::collections::BTreeMap<String, Value> =
+        serde_json::from_value(serde_json::json!({
+            "search_query": "{title} {year} deutscher trailer", "always_search": true,
+            "exclude_words": "reaction", "file_format": "mp4",
+            "video_format": "h264", "audio_format": "aac"
+        }))
+        .unwrap();
+    assert_eq!(
+        converge::schema::check_paths(
+            &d,
+            converge::services::trailarr::TRAILER_PROFILE_READ,
+            &profile
+        ),
+        Vec::<String>::new()
+    );
+}
+
 #[test]
 fn monitor_is_not_a_trailarr_field() {
     // What the host's shell unit sent for years; pydantic ignored it.
