@@ -866,7 +866,15 @@ pub enum QuestarrTask {
     SearchSettings(BTreeMap<String, serde_json::Value>),
     /// The Prowlarr whose indexers Questarr copies: its base URL as Questarr
     /// reaches it, and the credential that holds its API key.
-    ProwlarrSync { url: String, api_key: String },
+    /// `allow_insecure_lan` is Questarr 1.5's consent to send that key over
+    /// plain HTTP (`allowInsecureLan` in the sync body); without it, 1.5
+    /// refuses an `http://` Prowlarr with "Refusing to send a
+    /// credential-bearing request over a non-HTTPS connection".
+    ProwlarrSync {
+        url: String,
+        api_key: String,
+        allow_insecure_lan: bool,
+    },
 }
 
 /// One download client: its fields, and the fields whose value comes from a
@@ -2814,6 +2822,8 @@ fn questarr_desired(task: TaskName, desired: serde_json::Value) -> Result<Questa
                 username: String,
                 url: String,
                 secret_fields: BTreeMap<String, String>,
+                #[serde(default)]
+                allow_insecure_lan: bool,
             }
             let d: Sync = serde_json::from_value(desired).map_err(|e| format!("desired: {e}"))?;
             username_ok(&d.username)?;
@@ -2838,6 +2848,7 @@ fn questarr_desired(task: TaskName, desired: serde_json::Value) -> Result<Questa
                 task: QuestarrTask::ProwlarrSync {
                     url: d.url,
                     api_key,
+                    allow_insecure_lan: d.allow_insecure_lan,
                 },
             })
         }
@@ -5591,11 +5602,36 @@ mod tests {
         let Desired::Questarr(d) = &spec.desired else {
             panic!("not a Questarr spec")
         };
-        let QuestarrTask::ProwlarrSync { url, api_key } = &d.task else {
+        let QuestarrTask::ProwlarrSync {
+            url,
+            api_key,
+            allow_insecure_lan,
+        } = &d.task
+        else {
             panic!("not the Prowlarr sync")
         };
         assert_eq!(url, "http://10.0.10.10:9696");
         assert_eq!(api_key, "prowlarr-api-key");
+        assert!(!allow_insecure_lan, "consent to plain HTTP is opt-in");
+    }
+
+    #[test]
+    fn questarr_prowlarr_sync_takes_the_http_consent() {
+        let spec = questarr(
+            "prowlarr-sync",
+            r#"{"username":"achim","url":"http://10.0.10.10:9696","secret_fields":{"apiKey":"prowlarr-api-key"},"allow_insecure_lan":true}"#,
+        )
+        .unwrap();
+        let Desired::Questarr(d) = &spec.desired else {
+            panic!("not a Questarr spec")
+        };
+        let QuestarrTask::ProwlarrSync {
+            allow_insecure_lan, ..
+        } = &d.task
+        else {
+            panic!("not the Prowlarr sync")
+        };
+        assert!(allow_insecure_lan);
     }
 
     #[test]

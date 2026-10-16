@@ -411,10 +411,15 @@ fn reconcile_one(
                 };
                 run(mode, &task, &transport, &SystemClock, timing)
             }
-            QuestarrTask::ProwlarrSync { url, api_key } => {
+            QuestarrTask::ProwlarrSync {
+                url,
+                api_key,
+                allow_insecure_lan,
+            } => {
                 let task = questarr::ProwlarrSync {
                     url: url.clone(),
                     api_key: read_credential(credentials, api_key).map_err(fail)?,
+                    allow_insecure_lan: *allow_insecure_lan,
                     synced: std::cell::RefCell::new(None),
                 };
                 run(mode, &task, &transport, &SystemClock, timing)

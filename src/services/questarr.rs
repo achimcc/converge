@@ -679,6 +679,10 @@ pub struct ProwlarrSync {
     /// Prowlarr's base URL as Questarr reaches it, without a trailing slash.
     pub url: String,
     pub api_key: Secret,
+    /// Questarr 1.5 refuses to send the key over plain HTTP unless the sync
+    /// body carries `allowInsecureLan: true` (routes.js, ssrf.js
+    /// `requireHttps`). Sent only when set, so a 1.4 body stays as it was.
+    pub allow_insecure_lan: bool,
     /// What this run's sync answered, so an apply syncs once, not twice.
     pub synced: RefCell<Option<String>>,
 }
@@ -716,6 +720,9 @@ impl ProwlarrSync {
         let mut body = Map::new();
         body.insert("url".to_string(), Value::from(self.url.clone()));
         body.insert("apiKey".to_string(), Value::from(self.api_key.expose()));
+        if self.allow_insecure_lan {
+            body.insert("allowInsecureLan".to_string(), Value::Bool(true));
+        }
         let reply = t.post_json(path, &text_of("POST", path, &body)?)?;
         expect_status_at("POST", path, &reply, &[200])?;
         let answer: SyncAnswer = serde_json::from_str(&reply.body).map_err(|e| Error::Decode {
@@ -1468,6 +1475,7 @@ mod tests {
         ProwlarrSync {
             url: url.to_string(),
             api_key: Secret::new(PROWLARR_KEY.to_string()),
+            allow_insecure_lan: false,
             synced: RefCell::new(None),
         }
     }
