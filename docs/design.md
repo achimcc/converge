@@ -2266,6 +2266,17 @@ them: it is what turns the provider id of a policy into a name.
 error here either -- a refused write says the status, the account's id in the
 path, and which of the two refusals it was.
 
+**A change of administrator promotes before it demotes** (v0.53.3,
+2026-10-16). Jellyfin answers 403 when a policy write would take the
+administrator right from its last enabled administrator. On jelly-01 the spec
+moved the right from one account to another, disabled one; the writes went in
+the order `GET /Users` names the accounts, the old administrator came first,
+and the run stopped at `403: the key's account may not do this` before the
+new one was promoted -- every run, since the state never moved. The writes
+now go in two stable groups: first every account the write makes an
+administrator or enables, then the rest. A 403 on a write that takes a right
+away says what to do: promote another administrator first.
+
 ## 41. Prowlarr app profiles, custom formats and their scores (2026-09-22)
 
 Three tasks from one inventory of the host, and one thread running through

@@ -1160,12 +1160,19 @@ impl Embedded {
 
     /// One POST per account that differs, each with that account's whole
     /// document as it was read and only the named fields changed.
+    ///
+    /// Accounts that gain a right go first: Jellyfin answers 403 when a
+    /// write would take the administrator right from the last enabled
+    /// administrator, so a change of administrator must promote and enable
+    /// the new one before it demotes the old one -- in whatever order
+    /// `GET /Users` names them (jelly-01, 2026-10-16).
     fn write(
         self,
         t: &dyn Transport,
         users: &[UserDto],
         set_for: impl Fn(&UserDto) -> BTreeMap<String, Value>,
     ) -> Result<(), Error> {
+        let mut pending = Vec::new();
         for user in users {
             let set = set_for(user);
             if set.is_empty() {
@@ -1175,6 +1182,11 @@ impl Embedded {
             if set.iter().all(|(f, d)| document.get(f) == Some(d)) {
                 continue;
             }
+            pending.push((user, set, document));
+        }
+        // Stable: within each group the order stays the answer's.
+        pending.sort_by_key(|(_, set, document)| !grants_access(set, document));
+        for (user, set, document) in pending {
             let mut updated = document.clone();
             for (field, value) in &set {
                 if !updated.contains_key(field) {
@@ -1191,11 +1203,45 @@ impl Embedded {
             let body = serialize(method, &path, &Value::Object(updated))?;
             let reply = t.post_json(&path, &body)?;
             if !matches!(reply.status, 200 | 204) {
-                return Err(refuse_account(method, &path, reply.status));
+                let mut err = refuse_account(method, &path, reply.status);
+                if reply.status == 403 && revokes_access(&set, document) {
+                    if let Error::Status { validation, .. } = &mut err {
+                        validation.push(
+                            "this write takes a right away; if this is the last enabled \
+                             administrator, promote another administrator first"
+                                .to_string(),
+                        );
+                    }
+                }
+                return Err(err);
             }
         }
         Ok(())
     }
+}
+
+/// Whether a write makes an account an administrator or enables it. Such a
+/// write goes before every other one.
+fn grants_access(set: &BTreeMap<String, Value>, document: &Map<String, Value>) -> bool {
+    changes_to(set, document, "IsAdministrator", true)
+        || changes_to(set, document, "IsDisabled", false)
+}
+
+/// Whether a write takes the administrator right away or disables the
+/// account -- what Jellyfin refuses for its last enabled administrator.
+fn revokes_access(set: &BTreeMap<String, Value>, document: &Map<String, Value>) -> bool {
+    changes_to(set, document, "IsAdministrator", false)
+        || changes_to(set, document, "IsDisabled", true)
+}
+
+/// Whether `set` names `field` with `to` and the document does not hold it.
+fn changes_to(
+    set: &BTreeMap<String, Value>,
+    document: &Map<String, Value>,
+    field: &str,
+    to: bool,
+) -> bool {
+    set.get(field) == Some(&Value::Bool(to)) && document.get(field) != Some(&Value::Bool(to))
 }
 
 /// A status the account tasks do not accept. Nothing from the body reaches the
@@ -2445,6 +2491,89 @@ mod tests {
             account("konto1")["Policy"],
             "the whole policy as read, with only IsAdministrator different"
         );
+    }
+
+    /// The host's change of administrator: the only administrator so far
+    /// (`konto1`) is demoted, a disabled account (`konto2`) is promoted and
+    /// enabled. Jellyfin refuses with 403 to take the right from the last
+    /// enabled administrator, so the promotion goes first -- whatever order
+    /// `GET /Users` names the accounts in (jelly-01, 2026-10-16).
+    fn change_of_administrator() -> (UserPolicies, String) {
+        let task = UserPolicies {
+            all: fields(&[("IsAdministrator", json!(false))]),
+            accounts: [(
+                "konto2".to_string(),
+                fields(&[
+                    ("IsAdministrator", json!(true)),
+                    ("IsDisabled", json!(false)),
+                ]),
+            )]
+            .into_iter()
+            .collect(),
+        };
+        let answer = with(USERS_JSON, |v| {
+            let users = v.as_array_mut().unwrap();
+            users.retain(|u| u["Name"] == json!("konto1") || u["Name"] == json!("konto2"));
+            for user in users.iter_mut() {
+                if user["Name"] == json!("konto2") {
+                    user["Policy"]["IsDisabled"] = json!(true);
+                }
+            }
+        });
+        (task, answer)
+    }
+
+    #[test]
+    fn a_promotion_is_written_before_the_demotion_of_the_last_administrator() {
+        let (task, answer) = change_of_administrator();
+        let t = users_transport(&answer);
+        let current = task.read(&t).unwrap();
+        assert_eq!(
+            current
+                .iter()
+                .map(|u| u.name.as_deref().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["konto1", "konto2"],
+            "the answer names the demoted account first"
+        );
+        task.write(&t, &current).unwrap();
+        let order: Vec<String> = t.calls.borrow().iter().map(|(_, p)| p.clone()).collect();
+        assert_eq!(
+            order,
+            vec![
+                format!("/Users/{}/Policy", account_id("konto2")),
+                format!("/Users/{}/Policy", account_id("konto1")),
+            ],
+            "promotion and enabling first, the demotion after"
+        );
+    }
+
+    #[test]
+    fn a_refused_demotion_says_to_promote_another_administrator_first() {
+        let (task, answer) = change_of_administrator();
+        let t = FakeTransport::default()
+            .on_get(USERS.path, vec![ok(&answer)])
+            .on_put(vec![
+                Step::Answer(204, String::new()),
+                Step::Answer(403, String::new()),
+            ]);
+        let current = task.read(&t).unwrap();
+        let err = task.write(&t, &current).err().unwrap().to_string();
+        assert!(err.contains("the key's account may not do this"), "{err}");
+        assert!(err.contains("promote another administrator first"), "{err}");
+    }
+
+    /// A 403 on a write that takes no right away keeps the plain message.
+    #[test]
+    fn a_refused_promotion_carries_no_hint_about_demotion() {
+        let task = host_policies();
+        let t = FakeTransport::default()
+            .on_get(USERS.path, vec![ok(&demoted())])
+            .on_put(vec![Step::Answer(403, String::new())]);
+        let current = task.read(&t).unwrap();
+        let err = task.write(&t, &current).err().unwrap().to_string();
+        assert!(err.contains("the key's account may not do this"), "{err}");
+        assert!(!err.contains("promote another"), "{err}");
     }
 
     /// The host derives its administrators from an authentik group, and a
