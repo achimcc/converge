@@ -3407,6 +3407,47 @@ read back runs into the deadline is exit 1 with the note; an unanswered
 spec next to a good one is 3, next to a broken one 1; the flag refuses 0, a
 missing value and a value above the deadline, and reaches the transport.
 
+## 55. A plan for every unit, without a twin for each (v0.54.0, 2026-10-18)
+
+Audit 4 (B211) asked that the host's maintenance pass show `plan` before it
+starts the 32 converge units of its guests anew. Those units are not alike:
+some call `converge apply` from `ExecStart`, others from a script that copies
+credentials first, runs several specs in a row, plans one setting to decide
+another, or treats an exit code. A `plan` twin per unit would be 32 copies of
+those scripts, each one able to drift from its original.
+
+So the switch sits in converge: `CONVERGE_PLAN_UNTIL=<unix seconds>` makes
+`apply` run as `plan`. The pass sets it in the guest's service manager
+(`systemctl set-environment`), starts the unit as it is, and reads the
+`would change` lines of that invocation from the journal. Everything around
+the call runs as it always does.
+
+### Exit 0 for a difference
+
+Under the switch, a difference ends `apply` with 0, not 2. A script that
+reads `|| rc=$?` would otherwise count the plan as a failure, skip its
+remaining specs or, under `Restart=on-failure`, run again. The caller of a
+maintenance pass reads the lines; the code only says whether converge could
+plan at all (1 and 3 keep their meaning). `converge plan` itself is not
+touched: 2 still means "differs".
+
+### A window that closes by itself
+
+A switch in a service manager outlives the process that set it: a pass that
+dies between `set-environment` and `unset-environment` would leave every
+later `apply` of that guest planning, silently, until the next boot. The
+value is therefore a time, not a flag. It counts only while it lies in the
+future and at most an hour ahead; anything else -- past, further off, not a
+number -- is ignored with a note on stderr, and `apply` writes.
+
+### Checked how
+
+`tests/cli.rs` through the binary against the recorded Radarr answers: a
+fresh window turns a differing `apply` into exit 0 with the plan's line and
+only GETs recorded; a window one second past, two hours ahead or reading
+`morgen` is ignored with its note, and `apply` tries to write; `plan` under
+the switch still exits 2.
+
 ## 20. Not in the pilot
 
 

@@ -416,6 +416,14 @@ makes the whole run exit 1. `--request-timeout` is the time one request may
 take (default 10 s, at most the deadline); `--deadline` (default 300 s) ends
 the whole run of one spec.
 
+**`CONVERGE_PLAN_UNTIL=<unix seconds>` turns `apply` into `plan`** until that
+time (`docs/design.md` §55), with exit 0 where a plan would say 2, so a unit
+around the call goes on to its next step. It is meant for a maintenance pass
+that sets it in a service manager, starts every unit once and reads the
+`would change` lines before the real run. The window is at most an hour; a
+value in the past, further ahead or not a number is ignored with a note, and
+`apply` writes -- a value left behind never stops converge for good.
+
 Trailarr drops body fields its models do not have without a word — the
 host's old shell unit sent `monitor` where Trailarr 0.11.5 has
 `monitor_new_media`. `schema-check --spec` checks every field a connection

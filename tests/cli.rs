@@ -2920,3 +2920,94 @@ fn the_request_timeout_reaches_the_transport() {
         started.elapsed()
     );
 }
+
+fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+fn changed_spec(dir: &Path, base: &str) -> PathBuf {
+    let mut changed: serde_json::Value = serde_json::from_str(DESIRED).unwrap();
+    changed["Bluray-1080p"]["min"] = 35.into();
+    write_spec(dir, "changed.json", base, &changed.to_string())
+}
+
+#[test]
+fn a_fresh_plan_until_turns_apply_into_a_plan_that_exits_0() {
+    let server = radarr();
+    let dir = tempfile::tempdir().unwrap();
+    let path = changed_spec(dir.path(), &server.base_url());
+    let out = converge()
+        .arg("apply")
+        .arg(&path)
+        .env("CREDENTIALS_DIRECTORY", dir.path())
+        .env("CONVERGE_PLAN_UNTIL", (now() + 300).to_string())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    // 0, not 2: the unit around it goes on to its next step, and the
+    // caller reads the lines, not the code.
+    assert_eq!(out.status.code(), Some(0), "{stdout}{stderr}");
+    assert!(
+        stdout.contains("apply only plans and writes nothing"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("would change Bluray-1080p: min 12.5 -> 35"),
+        "{stdout}"
+    );
+    assert!(
+        server.requests().iter().all(|r| r.method == "GET"),
+        "a plan must not write"
+    );
+}
+
+#[test]
+fn a_plan_until_that_is_stale_far_off_or_garbled_is_ignored_and_apply_writes() {
+    for value in [
+        (now() - 1).to_string(),
+        (now() + 7200).to_string(),
+        "morgen".to_string(),
+    ] {
+        let server = radarr();
+        let dir = tempfile::tempdir().unwrap();
+        let path = changed_spec(dir.path(), &server.base_url());
+        let out = converge()
+            .arg("apply")
+            .arg(&path)
+            .env("CREDENTIALS_DIRECTORY", dir.path())
+            .env("CONVERGE_PLAN_UNTIL", &value)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("CONVERGE_PLAN_UNTIL ignored"),
+            "{value}: {stdout}{stderr}"
+        );
+        assert!(!stdout.contains("apply only plans"), "{value}: {stdout}");
+        // The server has no write route; that a write was tried is the point.
+        assert!(
+            server.requests().iter().any(|r| r.method != "GET"),
+            "{value}: apply must try to write"
+        );
+    }
+}
+
+#[test]
+fn plan_until_leaves_plan_itself_at_exit_2() {
+    let server = radarr();
+    let dir = tempfile::tempdir().unwrap();
+    let path = changed_spec(dir.path(), &server.base_url());
+    let out = converge()
+        .arg("plan")
+        .arg(&path)
+        .env("CREDENTIALS_DIRECTORY", dir.path())
+        .env("CONVERGE_PLAN_UNTIL", (now() + 300).to_string())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+}

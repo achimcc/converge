@@ -31,6 +31,32 @@ const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// nothing" (design §54). 1 stays every other failure, 2 a plan that differs.
 const EXIT_NO_ANSWER: u8 = 3;
 
+/// The longest window `CONVERGE_PLAN_UNTIL` may open (design §55). A value
+/// further off is a mistake, not a maintenance pass, and is ignored.
+const PLAN_UNTIL_MAX: Duration = Duration::from_secs(3600);
+
+/// `CONVERGE_PLAN_UNTIL=<unix seconds>` turns `apply` into `plan` until then
+/// (design §55): a maintenance pass shows what every unit would change before
+/// anything is written. The window closes by itself, so a value left behind
+/// in a service manager never stops converge for good. A value in the past,
+/// too far ahead or not a number is ignored, and `apply` writes.
+fn plan_until(now: Duration) -> Option<u64> {
+    let raw = std::env::var("CONVERGE_PLAN_UNTIL").ok()?;
+    match raw.trim().parse::<u64>() {
+        Ok(until) if until > now.as_secs() && until - now.as_secs() <= PLAN_UNTIL_MAX.as_secs() => {
+            Some(until)
+        }
+        _ => {
+            say_error(&format!(
+                "note: CONVERGE_PLAN_UNTIL ignored: {:?} is not a time within the next {} s; apply writes",
+                raw,
+                PLAN_UNTIL_MAX.as_secs()
+            ));
+            None
+        }
+    }
+}
+
 /// Why a spec did not go through.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Failure {
@@ -77,7 +103,25 @@ fn provider_kind(desired: &Desired) -> providers::Kind {
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some("apply") => reconcile(Mode::Apply, &args[1..]),
+        Some("apply") => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            match plan_until(now) {
+                Some(until) => {
+                    say(&format!(
+                        "note: CONVERGE_PLAN_UNTIL={until}: apply only plans and writes nothing"
+                    ));
+                    // 0 for a difference: the unit around this call goes on
+                    // to its next step; the caller reads the lines.
+                    match reconcile(Mode::Plan, &args[1..]) {
+                        c if c == ExitCode::from(2) => ExitCode::SUCCESS,
+                        c => c,
+                    }
+                }
+                None => reconcile(Mode::Apply, &args[1..]),
+            }
+        }
         Some("plan") => reconcile(Mode::Plan, &args[1..]),
         Some("schema-check") => schema_check(&args[1..]),
         _ => usage(None),
