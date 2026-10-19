@@ -2296,6 +2296,7 @@ Hence the split:
 | `app-profiles` | Prowlarr | `GET /api/v1/appprofile` | `POST /api/v1/appprofile`, `PUT …/appprofile/{id}` | `profiles`: name → the four fields |
 | `custom-formats` | Radarr, Sonarr | `GET /api/v3/customformat` | `POST …/customformat`, `PUT …/customformat/{id}` | `formats`: name → the renaming switch and the specifications |
 | `quality-profiles` (extended) | Radarr, Sonarr | as in §5 | as in §5 | `format_scores`: format name → points |
+| `quality-profiles` (v0.55.0, §56) | Radarr | as in §5, plus `GET /api/v3/language` | as in §5 | `languages`: profile name → language name |
 
 The host's answer to the second writer is `except` in Recyclarr's
 configuration: the format stays out of Recyclarr's reach, converge owns it and
@@ -3447,6 +3448,58 @@ fresh window turns a differing `apply` into exit 0 with the plan's line and
 only GETs recorded; a window one second past, two hours ahead or reading
 `morgen` is ignored with its note, and `apply` tries to write; `plan` under
 the switch still exits 2.
+
+## 56. A profile's language (v0.55.0, 2026-10-19)
+
+A Radarr quality profile carries a `language`, and it is checked **before any
+custom format score counts**: a profile on `Original` rejects every release
+that lacks the film's original language -- a pure German dub of an English
+film -- however many points `German DL` would have given it. Recyclarr sets
+the language only from a TRaSH template; a profile written without one (on
+the host: "3D für die VR-Brille (4K, sonst 1080p)") stays on Radarr's default,
+`Original`, and nothing else can move it but the web interface.
+
+So `quality-profiles` takes one more optional field, `languages`: profile name
+→ language name, as the service's language list spells it.
+
+```json
+{ "service": "radarr", "task": "quality-profiles", "…": "…",
+  "desired": { "allow_in_every_profile": ["Unknown"],
+               "languages": { "3D für die VR-Brille (4K, sonst 1080p)": "Any" } } }
+```
+
+`plan` shows `3D für die VR-Brille (4K, sonst 1080p): language Original ->
+Any`; `apply` sends that one profile back with `language` set to the id and
+name the list gives (`Any` is -1, `Original` -2) and every other field as it
+was read.
+
+- **By name, resolved at runtime.** `GET /api/v3/language` is read only when
+  `languages` is in the spec; every other `quality-profiles` spec reads what
+  it read before. An empty list is an error, like every empty answer.
+- **Every name checked before a single write.** A language the list does not
+  have (`not found on the service: language Klingonisch`) or a profile the
+  service lacks (`not found on the service: profile Anime`) stops the run in
+  `plan` and in `apply`, before any `PUT`.
+- **Only kept profiles.** With `exactly` and `keep` (§39), `languages` may
+  name only kept profiles -- the spec parser refuses the others, since a
+  profile on its way out is never written.
+- **Sonarr has no profile language.** Sonarr v4's `QualityProfileResource`
+  has no `language` key, in its description and in the recorded answer. Naming
+  one there is `the spec does not fit the service: profile …: the service has
+  no profile language`, and a Sonarr profile written for another reason does
+  not grow the key: the field is optional and skipped when absent.
+- **Two wire types, as the description names them.** The profile's field is
+  the component `Language` ({id, name}); the list's entries are
+  `LanguageResource` ({id, name, nameLower}). `schema-check` compares both for
+  Radarr. For Sonarr it is handed `arr::sonarr_wire_types`, the same types
+  without the profile's `language` -- otherwise every Sonarr check would
+  report a field Sonarr was never going to have.
+
+Checked against answers recorded from Radarr 6.4.4.10685
+(`tests/fixtures/radarr-6.4.4.10685/language.json`,
+`qualityprofile-language.json`): the change line, the body of the one `PUT`
+(the recorded profile with only `language` changed), no language read without
+the field, and each of the three errors with nothing written.
 
 ## 20. Not in the pilot
 

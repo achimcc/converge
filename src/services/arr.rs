@@ -34,15 +34,16 @@ pub mod formats;
 pub mod profiles;
 
 pub use formats::{CustomFormats, CUSTOM_FORMAT_CREATE, CUSTOM_FORMAT_LIST, CUSTOM_FORMAT_UPDATE};
-pub use profiles::{QualityProfiles, PROFILE_DELETE, PROFILE_LIST, PROFILE_UPDATE};
+pub use profiles::{QualityProfiles, LANGUAGE_LIST, PROFILE_DELETE, PROFILE_LIST, PROFILE_UPDATE};
 
-pub const ENDPOINTS: [Endpoint; 9] = [
+pub const ENDPOINTS: [Endpoint; 10] = [
     SYSTEM_STATUS,
     QUALITY_LIST,
     QUALITY_UPDATE,
     PROFILE_LIST,
     PROFILE_UPDATE,
     PROFILE_DELETE,
+    LANGUAGE_LIST,
     CUSTOM_FORMAT_LIST,
     CUSTOM_FORMAT_CREATE,
     CUSTOM_FORMAT_UPDATE,
@@ -55,7 +56,28 @@ pub fn wire_types() -> Vec<schemars::Schema> {
         schemars::schema_for!(SystemResource),
         schemars::schema_for!(QualityDefinitionResource),
         schemars::schema_for!(profiles::QualityProfileResource),
+        schemars::schema_for!(profiles::LanguageResource),
     ]
+}
+
+/// Sonarr's: the same, except that its `QualityProfileResource` has no
+/// `language` (design §56). The field is optional here and never added on
+/// the way back, so a Sonarr profile without it is read and written as it
+/// is; only the check must not ask Sonarr's description for it.
+pub fn sonarr_wire_types() -> Vec<schemars::Schema> {
+    let mut types = wire_types();
+    for schema in &mut types {
+        if schema.get("title").and_then(serde_json::Value::as_str) == Some("QualityProfileResource")
+        {
+            if let Some(properties) = schema
+                .get_mut("properties")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                properties.remove("language");
+            }
+        }
+    }
+    types
 }
 
 /// Readiness for Radarr and Sonarr: the status endpoint answers with a
@@ -456,8 +478,24 @@ mod tests {
             [
                 "SystemResource",
                 "QualityDefinitionResource",
-                "QualityProfileResource"
+                "QualityProfileResource",
+                "LanguageResource"
             ]
         );
+    }
+
+    #[test]
+    fn only_sonarrs_profile_type_drops_the_language() {
+        let language = |types: Vec<schemars::Schema>| {
+            types
+                .iter()
+                .find(|s| s.as_value()["title"] == "QualityProfileResource")
+                .unwrap()
+                .as_value()["properties"]
+                .get("language")
+                .is_some()
+        };
+        assert!(language(wire_types()));
+        assert!(!language(sonarr_wire_types()));
     }
 }

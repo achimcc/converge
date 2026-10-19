@@ -354,6 +354,9 @@ fn reconcile_one(
                 // The scores of named custom formats (design §41); every
                 // other `formatItems` entry stays as Recyclarr wrote it.
                 format_scores: policy.format_scores.clone().unwrap_or_default(),
+                // A named profile's language (design §56); without it the
+                // language list is not read at all.
+                languages: policy.languages.clone().unwrap_or_default(),
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
@@ -1066,7 +1069,13 @@ fn schema_check(args: &[String]) -> ExitCode {
             let mut endpoints = arr::ENDPOINTS.to_vec();
             endpoints.extend(servarr::V3.task_endpoints());
             endpoints.extend(providers::ProviderApi::endpoints_of(Service::Radarr));
-            (endpoints, arr::wire_types())
+            // Sonarr's profiles have no `language` (design §56).
+            let wire = if service == "sonarr" {
+                arr::sonarr_wire_types()
+            } else {
+                arr::wire_types()
+            };
+            (endpoints, wire)
         }
         "lidarr" => {
             let mut endpoints = vec![servarr::V1.status];
@@ -1126,8 +1135,9 @@ fn schema_check(args: &[String]) -> ExitCode {
         }
         let (spec_findings, count) = match &spec.desired {
             // Typed tasks: their fields are the wire types checked above.
-            // `format_scores` names custom formats, not fields -- what the
-            // service has is a runtime question (design §41).
+            // `format_scores` names custom formats and `languages` profiles
+            // and languages, not fields -- what the service has is a runtime
+            // question (design §41, §56).
             Desired::QualityDefinitions(_)
             | Desired::QualityProfiles(_)
             | Desired::LidarrQualityProfiles(_)

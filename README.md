@@ -28,7 +28,7 @@ or an OpenTofu resource on the host it was written for:
 | service | task | desired state |
 |---|---|---|
 | Radarr, Sonarr | `quality-definitions` | size limits (MB per minute) per quality |
-| Radarr, Sonarr | `quality-profiles` | qualities every profile must allow; with `exactly` and `keep`, the profiles that survive -- every other one is removed once all of them are there, never half the profiles or more (up to six removals pass: a fresh service's defaults). `format_scores` gives a named custom format its score in every profile (in every kept one with `keep`); every other `formatItems` entry stays as its writer left it |
+| Radarr, Sonarr | `quality-profiles` | qualities every profile must allow; with `exactly` and `keep`, the profiles that survive -- every other one is removed once all of them are there, never half the profiles or more (up to six removals pass: a fresh service's defaults). `format_scores` gives a named custom format its score in every profile (in every kept one with `keep`); every other `formatItems` entry stays as its writer left it. `languages` sets a named profile's language (Radarr only; Sonarr v4's profiles have none) |
 | Radarr, Sonarr | `custom-formats` | custom formats by name: the switch that puts one into a file name, and its specifications by name with `implementation`, `negate`, `required` and their `fields`. Formats the spec does not name are counted, never listed, and never removed -- `exactly` is refused here |
 | Prowlarr | `app-profiles` | app profiles by name: `enableRss`, `enableAutomaticSearch`, `enableInteractiveSearch`, `minimumSeeders`. A missing one is added |
 | Radarr, Sonarr, Lidarr | `naming`, `media-management` | top-level fields of the configuration document |
@@ -304,6 +304,24 @@ specs is the host's to arrange.
   }
 }
 ```
+
+A Radarr profile's **language** is checked before any score counts: on
+`Original` a profile rejects every release without the film's original
+language, a German dub of an English film among them. Recyclarr sets it only
+from a TRaSH template, so a profile without one stays on `Original`.
+`languages` on a `quality-profiles` spec names the language per profile, by
+the names `GET /api/v3/language` answers (`Any`, `Original`, `German`, …):
+
+```json
+"desired": {
+  "allow_in_every_profile": ["Unknown"],
+  "languages": { "3D für die VR-Brille (4K, sonst 1080p)": "Any" }
+}
+```
+
+`plan` shows `3D für die VR-Brille (4K, sonst 1080p): language Original ->
+Any`. An unknown language, a profile the service lacks, or a service whose
+profiles have no language (Sonarr v4) is an error before anything is written.
 
 Prowlarr's app profiles say how an indexer is searched, and they are the only
 place `minimumSeeders` can be set at all. An indexer may name its profile

@@ -330,6 +330,12 @@ pub struct ProfilePolicy {
     /// not name stays as it is, because Recyclarr writes those.
     #[serde(default)]
     pub format_scores: Option<BTreeMap<String, i64>>,
+    /// The language a named profile must have: profile name → language name
+    /// as the service's language list spells it (`Any`, `Original`,
+    /// `German`, …; design §56). Absent where the spec says nothing about
+    /// languages; a profile it does not name keeps the one it has.
+    #[serde(default)]
+    pub languages: Option<BTreeMap<String, String>>,
 }
 
 /// Fields by path in each named library's `LibraryOptions`.
@@ -1877,6 +1883,28 @@ impl Spec {
                         ));
                     }
                 }
+                if let Some(languages) = &policy.languages {
+                    if languages.is_empty() {
+                        return Err(invalid("desired.languages names no profile".to_string()));
+                    }
+                    if languages
+                        .iter()
+                        .any(|(profile, language)| profile.is_empty() || language.is_empty())
+                    {
+                        return Err(invalid(
+                            "desired.languages: a profile or language name is empty".to_string(),
+                        ));
+                    }
+                    // A profile on its way out is never written; naming its
+                    // language would be a wish nothing fulfils.
+                    if let Some(keep) = &policy.keep {
+                        if let Some(gone) = languages.keys().find(|p| !keep.contains(p)) {
+                            return Err(invalid(format!(
+                                "desired.languages names {gone:?}, which keep removes"
+                            )));
+                        }
+                    }
+                }
                 Desired::QualityProfiles(policy)
             }
             TaskName::CustomFormats => {
@@ -3309,6 +3337,7 @@ mod tests {
                 allow_in_every_profile: vec!["Unknown".to_string()],
                 keep: None,
                 format_scores: None,
+                languages: None,
             })
         );
     }
@@ -3381,6 +3410,7 @@ mod tests {
                 allow_in_every_profile: vec!["Unknown".to_string()],
                 keep: Some(vec!["Anime".to_string(), "HD".to_string()]),
                 format_scores: None,
+                languages: None,
             })
         );
     }
@@ -5334,6 +5364,56 @@ mod tests {
             r#"["Unknown"],"format_scores":{"3D":1.5}}"#,
         );
         assert!(parse(&fraction).is_err());
+    }
+
+    #[test]
+    fn languages_are_optional_by_profile_name_and_may_not_be_empty() {
+        let spec = parse(PROFILES).unwrap();
+        let Desired::QualityProfiles(policy) = &spec.desired else {
+            panic!("{:?}", spec.desired);
+        };
+        assert_eq!(policy.languages, None);
+
+        let with = PROFILES.replace(
+            r#"["Unknown"]}"#,
+            r#"["Unknown"],"languages":{"3D für die VR-Brille (4K, sonst 1080p)":"Any"}}"#,
+        );
+        let spec = parse(&with).unwrap();
+        let Desired::QualityProfiles(policy) = &spec.desired else {
+            panic!("{:?}", spec.desired);
+        };
+        assert_eq!(
+            policy.languages.as_ref().unwrap()["3D für die VR-Brille (4K, sonst 1080p)"],
+            "Any"
+        );
+
+        let empty = PROFILES.replace(r#"["Unknown"]}"#, r#"["Unknown"],"languages":{}}"#);
+        assert!(reason(parse(&empty)).contains("names no profile"));
+        for blank in [r#"{"":"Any"}"#, r#"{"HD":""}"#] {
+            let spec = PROFILES.replace(
+                r#"["Unknown"]}"#,
+                &format!(r#"["Unknown"],"languages":{blank}}}"#),
+            );
+            assert!(reason(parse(&spec)).contains("is empty"), "{blank}");
+        }
+        // A language is a name, not an id.
+        let id = PROFILES.replace(r#"["Unknown"]}"#, r#"["Unknown"],"languages":{"HD":-1}}"#);
+        assert!(parse(&id).is_err());
+    }
+
+    #[test]
+    fn languages_may_name_only_kept_profiles() {
+        let kept = PROFILES.replace(
+            r#"["Unknown"]}"#,
+            r#"["Unknown"],"keep":["HD"],"languages":{"HD":"Any"}}"#,
+        );
+        assert!(parse(&with_exactly(&kept, "true")).is_ok());
+        let gone = PROFILES.replace(
+            r#"["Unknown"]}"#,
+            r#"["Unknown"],"keep":["HD"],"languages":{"Anime":"Any"}}"#,
+        );
+        assert!(reason(parse(&with_exactly(&gone, "true")))
+            .contains(r#"desired.languages names "Anime", which keep removes"#));
     }
 
     fn questarr(task: &str, desired: &str) -> Result<Spec, Error> {

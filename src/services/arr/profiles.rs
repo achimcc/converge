@@ -4,6 +4,9 @@
 //! which order, grouped how) belongs to whoever defined the profile -- on the
 //! host this was written for, Recyclarr and TRaSH's templates. converge only
 //! flips `allowed` on a top-level item that is already there.
+//!
+//! Besides the ladder: the scores of named custom formats (design §41) and,
+//! for named profiles, the profile's language (design §56).
 
 use std::collections::BTreeMap;
 
@@ -41,6 +44,39 @@ pub const PROFILE_DELETE: Endpoint = Endpoint {
     response: None,
 };
 
+/// Every language the service knows, two pseudo-languages among them: `Any`
+/// (id -1) and `Original` (id -2). Read only when the spec names a
+/// profile's language (design §56).
+pub const LANGUAGE_LIST: Endpoint = Endpoint {
+    method: "GET",
+    path: "/api/v3/language",
+    request: None,
+    response: Some(Shape::List("LanguageResource")),
+};
+
+/// One entry of `GET /api/v3/language`. `nameLower` stays in `rest`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LanguageResource {
+    pub id: i32,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(flatten)]
+    #[schemars(skip)]
+    pub rest: Map<String, Value>,
+}
+
+/// A profile's language, as Radarr's `QualityProfileResource` carries it --
+/// its own component, `Language`, not `LanguageResource`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Language {
+    pub id: i32,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(flatten)]
+    #[schemars(skip)]
+    pub rest: Map<String, Value>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct QualityProfileResource {
     pub id: i32,
@@ -57,6 +93,11 @@ pub struct QualityProfileResource {
         skip_serializing_if = "Option::is_none"
     )]
     pub format_items: Option<Vec<ProfileFormatItemResource>>,
+    /// The language a release must have before any score counts (design
+    /// §56). Radarr's profiles carry it; Sonarr v4's have no such key, and
+    /// none may appear on the way back -- hence `skip_serializing_if`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<Language>,
     #[serde(flatten)]
     #[schemars(skip)]
     pub rest: Map<String, Value>,
@@ -100,6 +141,18 @@ pub struct QualityProfiles {
     /// where the spec names none; every other `formatItems` entry stays as
     /// it is, because Recyclarr writes those (design §41).
     pub format_scores: BTreeMap<String, i64>,
+    /// The language a named profile must have, by profile name and language
+    /// name (design §56). Empty where the spec names none -- and then the
+    /// language list is not even read.
+    pub languages: BTreeMap<String, String>,
+}
+
+/// What `read` hands on: the profiles, and the languages the service knows
+/// (empty unless the spec names a profile's language).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Profiles {
+    pub profiles: Vec<QualityProfileResource>,
+    pub languages: Vec<LanguageResource>,
 }
 
 fn profile_name(profile: &QualityProfileResource) -> &str {
@@ -134,10 +187,83 @@ impl QualityProfiles {
         }
     }
 
+    /// The language each named profile must have, by profile id, as the
+    /// service's language list spells it (design §56). Every name is checked
+    /// before anything is returned, so an error stops the run before a
+    /// single write.
+    fn language_targets(&self, current: &Profiles) -> Result<BTreeMap<i32, Language>, Error> {
+        let mut targets = BTreeMap::new();
+        let mut not_found = Vec::new();
+        let mut no_language = Vec::new();
+        for (wanted, language) in &self.languages {
+            let profile = current
+                .profiles
+                .iter()
+                .find(|p| profile_name(p) == wanted.as_str());
+            let known = current
+                .languages
+                .iter()
+                .find(|l| l.name.as_deref() == Some(language.as_str()));
+            let Some(profile) = profile else {
+                not_found.push(format!("profile {wanted}"));
+                continue;
+            };
+            let Some(known) = known else {
+                let unknown = format!("language {language}");
+                if !not_found.contains(&unknown) {
+                    not_found.push(unknown);
+                }
+                continue;
+            };
+            // Sonarr v4: the quality profile has no key for it. Adding one
+            // would be a field the service does not have.
+            if profile.language.is_none() {
+                no_language.push(format!(
+                    "{}: the service has no profile language",
+                    subject(profile)
+                ));
+                continue;
+            }
+            // A profile on its way out is not written (the spec parser lets
+            // `languages` name only kept profiles).
+            if self.is_surplus(profile) {
+                continue;
+            }
+            targets.insert(
+                profile.id,
+                Language {
+                    id: known.id,
+                    name: known.name.clone(),
+                    rest: Map::new(),
+                },
+            );
+        }
+        if !not_found.is_empty() {
+            return Err(Error::NotFound(not_found));
+        }
+        if !no_language.is_empty() {
+            return Err(Error::Mismatch(no_language));
+        }
+        Ok(targets)
+    }
+
     /// The profile as it should be, or `None` if it already is.
-    fn corrected(&self, profile: &QualityProfileResource) -> Option<QualityProfileResource> {
+    fn corrected(
+        &self,
+        profile: &QualityProfileResource,
+        language: Option<&Language>,
+    ) -> Option<QualityProfileResource> {
         let mut fixed = profile.clone();
         let mut changed = false;
+        if let (Some(target), Some(have)) = (language, fixed.language.as_mut()) {
+            if have.id != target.id {
+                // Only id and name; anything else the service put there
+                // travels back as it was.
+                have.id = target.id;
+                have.name.clone_from(&target.name);
+                changed = true;
+            }
+        }
         for item in fixed.items.iter_mut().flatten() {
             let name = item.quality.as_ref().and_then(|q| q.name.as_deref());
             if let Some(name) = name {
@@ -190,7 +316,7 @@ impl QualityProfiles {
 }
 
 impl Task for QualityProfiles {
-    type Current = Vec<QualityProfileResource>;
+    type Current = Profiles;
 
     fn probe(&self, t: &dyn Transport) -> Result<String, Probe> {
         probe(t)
@@ -211,14 +337,36 @@ impl Task for QualityProfiles {
         if let Some(index) = list.iter().position(|p| p.name.is_none()) {
             return Err(Error::MissingName { path, index });
         }
-        Ok(list)
+        // The language list only where the spec names a profile's language:
+        // every other spec reads what it read before (design §56).
+        let languages = if self.languages.is_empty() {
+            Vec::new()
+        } else {
+            let path = LANGUAGE_LIST.path.to_string();
+            let reply = t.get(LANGUAGE_LIST.path)?;
+            expect_status(&LANGUAGE_LIST, &reply, &[200])?;
+            let languages: Vec<LanguageResource> =
+                serde_json::from_str(&reply.body).map_err(|e| Error::Decode {
+                    path: path.clone(),
+                    reason: crate::error::shape(&e),
+                })?;
+            if languages.is_empty() {
+                return Err(Error::EmptyList { path });
+            }
+            languages
+        };
+        Ok(Profiles {
+            profiles: list,
+            languages,
+        })
     }
 
     fn diff(&self, current: &Self::Current) -> Result<Vec<Change>, Error> {
+        let languages = self.language_targets(current)?;
         let mut missing = Vec::new();
         let mut unknown = Vec::new();
         let mut changes = Vec::new();
-        for profile in current {
+        for profile in &current.profiles {
             if self.is_surplus(profile) {
                 continue;
             }
@@ -235,6 +383,16 @@ impl Task for QualityProfiles {
                 }
             }
             self.score_changes(profile, &mut unknown, &mut changes);
+            if let (Some(target), Some(have)) = (languages.get(&profile.id), &profile.language) {
+                if have.id != target.id {
+                    changes.push(Change {
+                        subject: profile_name(profile).to_string(),
+                        field: "language".to_string(),
+                        current: have.name.clone().unwrap_or_else(|| have.id.to_string()),
+                        desired: target.name.clone().unwrap_or_else(|| target.id.to_string()),
+                    });
+                }
+            }
         }
         // A quality that is not a top-level rung cannot be switched on without
         // rebuilding the ladder -- which is not converge's to do. Say so.
@@ -268,7 +426,12 @@ impl Task for QualityProfiles {
         };
         let present = keep
             .iter()
-            .filter(|k| current.iter().any(|p| profile_name(p) == k.as_str()))
+            .filter(|k| {
+                current
+                    .profiles
+                    .iter()
+                    .any(|p| profile_name(p) == k.as_str())
+            })
             .count();
         if present < keep.len() {
             return Err(Error::Refused(format!(
@@ -288,6 +451,7 @@ impl Task for QualityProfiles {
         // written ones removing them IS half or more -- the very job `keep`
         // was made for, on the day the service is rebuilt. Without the floor
         // that day would need a hand in the web UI.
+        let current = &current.profiles;
         let surplus: Vec<String> = current
             .iter()
             .filter(|p| self.is_surplus(p))
@@ -314,7 +478,7 @@ impl Task for QualityProfiles {
         // Nothing is removed while a kept profile is missing.
         self.surplus(current)?;
         let mut refused = Vec::new();
-        for profile in current.iter().filter(|p| self.is_surplus(p)) {
+        for profile in current.profiles.iter().filter(|p| self.is_surplus(p)) {
             let path = PROFILE_DELETE.path.replace("{id}", &profile.id.to_string());
             let reply = t.delete(&path)?;
             if ![200, 202].contains(&reply.status) {
@@ -336,17 +500,19 @@ impl Task for QualityProfiles {
         // Nothing is written while a named format is missing from a profile:
         // `corrected` would silently leave that score alone.
         let mut unknown = Vec::new();
-        for profile in current.iter().filter(|p| !self.is_surplus(p)) {
+        for profile in current.profiles.iter().filter(|p| !self.is_surplus(p)) {
             self.score_changes(profile, &mut unknown, &mut Vec::new());
         }
         if !unknown.is_empty() {
             return Err(Error::NotFound(unknown));
         }
-        for profile in current {
+        // Nor while a named profile or language is missing.
+        let languages = self.language_targets(current)?;
+        for profile in &current.profiles {
             if self.is_surplus(profile) {
                 continue;
             }
-            let Some(fixed) = self.corrected(profile) else {
+            let Some(fixed) = self.corrected(profile, languages.get(&profile.id)) else {
                 continue;
             };
             let path = PROFILE_UPDATE.path.replace("{id}", &profile.id.to_string());
@@ -385,6 +551,7 @@ mod tests {
             allow_in_every_profile: vec!["Unknown".to_string()],
             keep: None,
             format_scores: BTreeMap::new(),
+            languages: BTreeMap::new(),
         }
     }
 
@@ -419,7 +586,7 @@ mod tests {
     fn the_recorded_state_already_allows_unknown_everywhere() {
         for body in [RADARR, SONARR] {
             let current = task().read(&listing(body)).unwrap();
-            assert_eq!(current.len(), 5);
+            assert_eq!(current.profiles.len(), 5);
             assert_eq!(task().diff(&current).unwrap(), vec![]);
         }
     }
@@ -642,6 +809,7 @@ mod tests {
             allow_in_every_profile: vec!["Unknown".to_string()],
             keep: Some(names.iter().map(ToString::to_string).collect()),
             format_scores: BTreeMap::new(),
+            languages: BTreeMap::new(),
         }
     }
 
@@ -765,5 +933,173 @@ mod tests {
                 .to_string(),
             "PUT /api/v3/qualityprofile/7 answered HTTP 500"
         );
+    }
+
+    // --- languages (design §56) -------------------------------------------
+
+    /// Radarr 6.4.4: six profiles; 7 and 8 carry `Any`, 9 to 12 `Original`.
+    const RADARR_644: &str =
+        include_str!("../../../tests/fixtures/radarr-6.4.4.10685/qualityprofile-language.json");
+    const LANGUAGES_644: &str =
+        include_str!("../../../tests/fixtures/radarr-6.4.4.10685/language.json");
+    const VR: &str = "3D für die VR-Brille (4K, sonst 1080p)";
+
+    fn speaking(pairs: &[(&str, &str)]) -> QualityProfiles {
+        QualityProfiles {
+            languages: pairs
+                .iter()
+                .map(|(p, l)| ((*p).to_string(), (*l).to_string()))
+                .collect(),
+            ..task()
+        }
+    }
+
+    fn with_languages(profiles: &str) -> FakeTransport {
+        listing(profiles).on_get(LANGUAGE_LIST.path, vec![ok(LANGUAGES_644)])
+    }
+
+    #[test]
+    fn a_profile_on_original_is_one_change_to_any() {
+        let task = speaking(&[(VR, "Any")]);
+        let current = task.read(&with_languages(RADARR_644)).unwrap();
+        assert_eq!(current.languages.len(), 60);
+        assert_eq!(
+            task.diff(&current)
+                .unwrap()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            [format!("{VR}: language Original -> Any")]
+        );
+    }
+
+    #[test]
+    fn a_profile_that_already_has_the_language_is_no_change() {
+        let task = speaking(&[(
+            "Dual Language, sonst Deutsch, sonst Original (1080p)",
+            "Any",
+        )]);
+        let current = task.read(&with_languages(RADARR_644)).unwrap();
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+    }
+
+    /// Only profile 12 is sent, and it is the recorded profile with nothing
+    /// changed but `language` -- id and name of `Any` as the list has them.
+    #[test]
+    fn the_write_changes_the_language_and_nothing_else() {
+        let task = speaking(&[(VR, "Any")]);
+        let t = with_languages(RADARR_644).on_put(vec![Step::Answer(202, String::new())]);
+        let current = task.read(&t).unwrap();
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1, "{written:?}");
+        assert_eq!(written[0].0, "/api/v3/qualityprofile/12");
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        let recorded: Value = serde_json::from_str(RADARR_644).unwrap();
+        let mut expected = recorded
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == 12)
+            .unwrap()
+            .clone();
+        expected["language"] = serde_json::json!({"id": -1, "name": "Any"});
+        assert_eq!(sent, expected);
+    }
+
+    /// Without `languages` the language list is never asked for: the fake
+    /// transport panics on a request it was not scripted for.
+    #[test]
+    fn without_languages_the_language_list_is_not_read() {
+        let current = task().read(&listing(RADARR_644)).unwrap();
+        assert!(current.languages.is_empty());
+        assert_eq!(task().diff(&current).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn an_unknown_language_is_an_error_naming_it_before_any_write() {
+        let task = speaking(&[(VR, "Klingonisch")]);
+        let t = with_languages(RADARR_644).on_put(vec![Step::Answer(202, String::new())]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(
+            task.diff(&current).unwrap_err().to_string(),
+            "not found on the service: language Klingonisch"
+        );
+        assert!(task.write(&t, &current).is_err());
+        assert!(t.written.borrow().is_empty(), "nothing was written");
+    }
+
+    #[test]
+    fn a_profile_the_service_lacks_is_an_error_before_any_write() {
+        let task = speaking(&[(VR, "Any"), ("Anime", "Japanese")]);
+        let t = with_languages(RADARR_644).on_put(vec![Step::Answer(202, String::new())]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(
+            task.diff(&current).unwrap_err().to_string(),
+            "not found on the service: profile Anime"
+        );
+        assert!(task.write(&t, &current).is_err());
+        assert!(t.written.borrow().is_empty(), "nothing was written");
+    }
+
+    /// Sonarr v4's profiles have no `language` key (description and
+    /// recording alike). Naming one is an error, not a key added.
+    #[test]
+    fn a_profile_without_a_language_key_is_an_error_before_any_write() {
+        let list: Value = serde_json::from_str(SONARR).unwrap();
+        let name = list[0]["name"].as_str().unwrap().to_string();
+        let task = speaking(&[(&name, "Any")]);
+        let t = with_languages(SONARR).on_put(vec![Step::Answer(202, String::new())]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(
+            task.diff(&current).unwrap_err().to_string(),
+            format!(
+                "the spec does not fit the service: profile {name}: \
+                 the service has no profile language"
+            )
+        );
+        assert!(task.write(&t, &current).is_err());
+        assert!(t.written.borrow().is_empty(), "nothing was written");
+    }
+
+    /// And a Sonarr profile written for another reason does not grow one.
+    #[test]
+    fn a_sonarr_profile_travels_back_without_a_language_key() {
+        let body = with_unknown_off(SONARR, 7);
+        let t = listing(&body).on_put(vec![Step::Answer(202, String::new())]);
+        let current = task().read(&t).unwrap();
+        task().write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        let sent: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert!(sent.get("language").is_none(), "{sent}");
+        let recorded: Value = serde_json::from_str(SONARR).unwrap();
+        let expected = recorded
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == 7)
+            .unwrap()
+            .clone();
+        assert_eq!(sent, expected);
+    }
+
+    /// With `keep`, a kept profile's language is set and the surplus ones
+    /// are neither measured nor written.
+    #[test]
+    fn with_keep_the_language_of_a_kept_profile_is_set() {
+        let task = QualityProfiles {
+            languages: [(VR.to_string(), "Any".to_string())].into_iter().collect(),
+            ..keeping(&[VR, "Dual Language, sonst Deutsch, sonst Original (1080p)"])
+        };
+        let t = with_languages(RADARR_644)
+            .on_put(vec![Step::Answer(202, String::new())])
+            .on_delete(vec![Step::Answer(200, String::new())]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(task.diff(&current).unwrap().len(), 1);
+        assert_eq!(task.surplus(&current).unwrap().len(), 4);
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].0, "/api/v3/qualityprofile/12");
     }
 }

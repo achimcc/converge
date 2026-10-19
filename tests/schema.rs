@@ -7,8 +7,17 @@ fn doc(name: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
+/// Sonarr's profile has no `language`; its wire types say so.
+fn arr_wire_types(openapi: &Value) -> Vec<schemars::Schema> {
+    if openapi["info"]["title"] == "Sonarr" {
+        arr::sonarr_wire_types()
+    } else {
+        arr::wire_types()
+    }
+}
+
 fn findings(openapi: &Value) -> Vec<String> {
-    check(openapi, &arr::ENDPOINTS, &arr::wire_types())
+    check(openapi, &arr::ENDPOINTS, &arr_wire_types(openapi))
 }
 
 fn properties<'a>(d: &'a mut Value, component: &str) -> &'a mut serde_json::Map<String, Value> {
@@ -154,6 +163,29 @@ fn a_renamed_property_inside_a_list_is_found() {
     assert_eq!(
         findings(&d),
         ["QualityProfileQualityItemResource.allowed: not in the OpenAPI description"]
+    );
+}
+
+/// A profile's language (design §56): Radarr's `Language` inside the
+/// profile and `LanguageResource` in the language list are both compared;
+/// Sonarr's profile is not asked for one.
+#[test]
+fn the_profile_language_and_the_language_list_are_checked() {
+    let mut d = doc("radarr-6.3.0.10514");
+    properties(&mut d, "Language").remove("name");
+    properties(&mut d, "LanguageResource").remove("id");
+    assert_eq!(
+        findings(&d),
+        [
+            "Language.name: not in the OpenAPI description",
+            "LanguageResource.id: not in the OpenAPI description"
+        ]
+    );
+    let mut d = doc("radarr-6.3.0.10514");
+    properties(&mut d, "QualityProfileResource").remove("language");
+    assert_eq!(
+        findings(&d),
+        ["QualityProfileResource.language: not in the OpenAPI description"]
     );
 }
 
@@ -750,7 +782,7 @@ fn servarr_findings(openapi: &Value, lidarr: bool) -> Vec<String> {
     } else {
         let mut endpoints = arr::ENDPOINTS.to_vec();
         endpoints.extend(servarr::V3.task_endpoints());
-        check(openapi, &endpoints, &arr::wire_types())
+        check(openapi, &endpoints, &arr_wire_types(openapi))
     }
 }
 

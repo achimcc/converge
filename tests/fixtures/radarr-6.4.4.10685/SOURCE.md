@@ -25,3 +25,16 @@ types) before it was copied here.
   -- `GET /api/v3/importlist/movie`, the fifty films of that list, cut to
   `tmdbId`, `title`, `lists`. Recorded 2026-10-10 around 12:40 CEST for
   `collections` (design §51). Neither carries a credential.
+
+- `language.json` -- `GET /api/v3/language`, verbatim: sixty languages, among
+  them the two pseudo-languages `Any` (id -1) and `Original` (id -2).
+  `qualityprofile-language.json` -- `GET /api/v3/qualityprofile` at the same
+  time, **cut down on the workstation** to two `formatItems` per profile:
+  `jq 'map(.formatItems |= .[:2])'` (the whole answer is 95 kB, nearly all of
+  it custom format scores). Every other field is as recorded; each profile
+  carries `language` as `{id, name}`, and profile 12 ("3D für die
+  VR-Brille (4K, sonst 1080p)", written without a TRaSH template) still has
+  Radarr's default `Original`. Recorded 2026-10-19 around 19:00 CEST for the
+  `languages` field of `quality-profiles` (design §41), the key again in a
+  header file. Neither carries a credential; both were looked at as a shape
+  first.
