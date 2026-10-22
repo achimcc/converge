@@ -53,6 +53,16 @@ pub const NAMED_CONFIGURATION_WRITE: Endpoint = Endpoint {
     request: None,
     response: None,
 };
+/// Where Jellyfin serves the branding stylesheet. Jellyfin 12 leaves
+/// `CustomCss` out of `GET /System/Configuration/Branding` whether it is set
+/// or not (10.11 only when null); `NamedConfiguration::read` fills the field
+/// from here, so a declared stylesheet is compared with what is served.
+pub const BRANDING_CSS: Endpoint = Endpoint {
+    method: "GET",
+    path: "/Branding/Css",
+    request: None,
+    response: None,
+};
 pub const FOLDERS: Endpoint = Endpoint {
     method: "GET",
     path: "/Library/VirtualFolders",
@@ -136,12 +146,13 @@ pub const USER_CONFIGURATION_WRITE: Endpoint = Endpoint {
     request: Some(Shape::Document("UserConfiguration")),
     response: None,
 };
-pub const ENDPOINTS: [Endpoint; 17] = [
+pub const ENDPOINTS: [Endpoint; 18] = [
     SYSTEM_INFO,
     CONFIGURATION_READ,
     CONFIGURATION_WRITE,
     NAMED_CONFIGURATION_READ,
     NAMED_CONFIGURATION_WRITE,
+    BRANDING_CSS,
     FOLDERS,
     LIBRARY_OPTIONS_WRITE,
     TASKS,
@@ -429,12 +440,22 @@ impl Task for NamedConfiguration {
         let path = self.path(&NAMED_CONFIGURATION_READ);
         let reply = t.get(&path)?;
         expect_status_at(NAMED_CONFIGURATION_READ.method, &path, &reply, &[200])?;
-        let document: Value = decode(&path, &reply.body)?;
-        if !document.is_object() {
+        let mut document: Value = decode(&path, &reply.body)?;
+        let Some(object) = document.as_object_mut() else {
             return Err(Error::Decode {
                 path,
                 reason: "not an object".to_string(),
             });
+        };
+        // Jellyfin 12 leaves `CustomCss` out of the branding answer, set or
+        // not (10.11 only when null); the stylesheet itself is served at
+        // `/Branding/Css`. Read it from there, so a declared stylesheet is
+        // compared with what the server really serves instead of failing as a
+        // field the answer lacks (design §15).
+        if self.key == NamedKey::Branding && !object.contains_key("CustomCss") {
+            let reply = t.get(BRANDING_CSS.path)?;
+            expect_status(&BRANDING_CSS, &reply, &[200])?;
+            object.insert("CustomCss".to_string(), Value::String(reply.body));
         }
         Ok(document)
     }
@@ -1568,6 +1589,10 @@ mod tests {
         include_str!("../../tests/fixtures/jellyfin-10.11.11/system-configuration-network.json");
     const BRANDING: &str =
         include_str!("../../tests/fixtures/jellyfin-10.11.11/system-configuration-branding.json");
+    const BRANDING_12: &str =
+        include_str!("../../tests/fixtures/jellyfin-12.2/system-configuration-branding.json");
+    const BRANDING_CSS_12: &str =
+        include_str!("../../tests/fixtures/jellyfin-12.2/branding-css.css");
 
     const LIVETV: &str =
         include_str!("../../tests/fixtures/jellyfin-10.11.11/system-configuration-livetv.json");
@@ -1711,19 +1736,65 @@ mod tests {
                 ("SplashscreenEnabled", json!(false)),
             ]),
         };
-        let t =
-            FakeTransport::default().on_get("/System/Configuration/branding", vec![ok(BRANDING)]);
+        // The 10.11 answer lacks CustomCss (null, omitted): since v0.56.0 the
+        // read fetches the stylesheet route, which is empty here.
+        let t = FakeTransport::default()
+            .on_get("/System/Configuration/branding", vec![ok(BRANDING)])
+            .on_get("/Branding/Css", vec![ok("")]);
         assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
     }
 
     #[test]
-    fn named_configuration_a_null_jellyfin_omitted_is_missing_not_added() {
+    fn named_configuration_branding_reads_custom_css_from_its_own_route() {
+        // Jellyfin 12.2 leaves CustomCss out of the branding answer even when
+        // it is set; the stylesheet is served at /Branding/Css.
         let task = NamedConfiguration {
             key: NamedKey::Branding,
-            set: fields(&[("CustomCss", json!(""))]),
+            set: fields(&[("CustomCss", json!(BRANDING_CSS_12))]),
         };
-        let t =
-            FakeTransport::default().on_get("/System/Configuration/branding", vec![ok(BRANDING)]);
+        let t = FakeTransport::default()
+            .on_get("/System/Configuration/branding", vec![ok(BRANDING_12)])
+            .on_get("/Branding/Css", vec![ok(BRANDING_CSS_12)]);
+        let current = task.read(&t).unwrap();
+        assert_eq!(current["CustomCss"], json!(BRANDING_CSS_12));
+        assert_eq!(task.diff(&current).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn named_configuration_branding_without_stylesheet_is_a_change_not_a_missing_field() {
+        let task = NamedConfiguration {
+            key: NamedKey::Branding,
+            set: fields(&[("CustomCss", json!(BRANDING_CSS_12))]),
+        };
+        let t = FakeTransport::default()
+            .on_get("/System/Configuration/branding", vec![ok(BRANDING)])
+            .on_get("/Branding/Css", vec![ok("")])
+            .on_put(vec![Step::Answer(204, String::new())]);
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert!(
+            changes[0].to_string().contains("CustomCss"),
+            "{}",
+            changes[0]
+        );
+        task.write(&t, &current).unwrap();
+        let (path, body) = &t.written.borrow()[0];
+        assert_eq!(path, "/System/Configuration/branding");
+        let sent: Value = serde_json::from_str(body).unwrap();
+        assert_eq!(sent["CustomCss"], json!(BRANDING_CSS_12));
+        assert_eq!(sent["LoginDisclaimer"], current["LoginDisclaimer"]);
+    }
+
+    #[test]
+    fn named_configuration_a_field_jellyfin_omits_is_missing_not_added() {
+        // Only the branding stylesheet has a second route; every other field
+        // the answer lacks is still an error — a typo must not become a write.
+        let task = NamedConfiguration {
+            key: NamedKey::Network,
+            set: fields(&[("EnableRemoteAcces", json!(true))]),
+        };
+        let t = FakeTransport::default().on_get("/System/Configuration/network", vec![ok(NETWORK)]);
         let err = task
             .diff(&task.read(&t).unwrap())
             .err()
@@ -1731,7 +1802,7 @@ mod tests {
             .to_string();
         assert_eq!(
             err,
-            "the answer has no such field: BrandingOptionsDto: CustomCss"
+            "the answer has no such field: NetworkConfiguration: EnableRemoteAcces"
         );
     }
 

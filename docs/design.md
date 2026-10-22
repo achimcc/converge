@@ -877,10 +877,21 @@ a release with its component, not a string in a spec.
 
 ### Null means absent
 
-Jellyfin omits null values. The recorded branding answer has no `CustomCss` at
-all, so a spec naming it fails at runtime with "the answer has no such field"
-— the same rule as everywhere (a missing path is never added), and on this
-host the field is not set.
+Jellyfin omits null values. The recorded 10.11 branding answer has no
+`CustomCss` at all, so a spec naming it failed at runtime with "the answer has
+no such field" — the same rule as everywhere (a missing path is never added),
+and on this host the field was not set.
+
+**Since v0.56.0 the branding stylesheet is the one exception** (2026-10-23,
+the host's jump to Jellyfin 12.2): Jellyfin 12 leaves `CustomCss` out of
+`GET /System/Configuration/Branding` whether it is set or not, and serves the
+stylesheet at `GET /Branding/Css` instead. When the branding answer lacks the
+field, `read` fetches that route and inserts its body as `CustomCss`, so a
+declared stylesheet is compared with what the server really serves; an empty
+stylesheet is then a change, not a missing field. The host's first run on 12.2
+had `jellyfin-trickplay` red on exactly this message while the theme was
+already set. Every other field the answer lacks is still an error — a typo
+must not become a write (`named_configuration_a_field_jellyfin_omits_is_missing_not_added`).
 
 ### Live TV: the lists are the unit (v0.24.0, 2026-09-18)
 
