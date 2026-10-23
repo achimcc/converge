@@ -40,6 +40,31 @@ pub fn set(object: &mut Value, path: &str, value: Value) -> bool {
     }
 }
 
+/// Sets the value at `path`, adding the last segment if the object lacks
+/// it. The parents must exist: a spec may leave a field unset, never a whole
+/// section. For a Jellyfin plugin configuration an absent field is a `null`
+/// the serializer left out (`WhenWritingNull`), and the write creates it.
+pub fn insert(object: &mut Value, path: &str, value: Value) -> bool {
+    let Some(parts) = segments(path) else {
+        return false;
+    };
+    let (last, parents) = parts.split_last().expect("split yields one part");
+    let mut current = object;
+    for segment in parents {
+        match current.get_mut(*segment) {
+            Some(next) => current = next,
+            None => return false,
+        }
+    }
+    match current.as_object_mut() {
+        Some(map) => {
+            map.insert((*last).to_string(), value);
+            true
+        }
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -71,5 +96,16 @@ mod tests {
         assert!(!set(&mut v, "A.New", json!(1)), "no new key");
         assert!(!set(&mut v, "X.B", json!(1)), "no new parent");
         assert_eq!(v, json!({"A": {"B": true, "Keep": 7}}));
+    }
+
+    #[test]
+    fn insert_adds_a_last_segment_but_never_a_parent() {
+        let mut v = json!({"A": {"B": false}});
+        assert!(insert(&mut v, "A.New", json!(1)));
+        assert!(insert(&mut v, "Top", json!("x")));
+        assert_eq!(v, json!({"A": {"B": false, "New": 1}, "Top": "x"}));
+        assert!(!insert(&mut v, "X.B", json!(1)), "no new parent");
+        assert!(!insert(&mut v, "A.B.C", json!(1)), "a bool is no object");
+        assert_eq!(v, json!({"A": {"B": false, "New": 1}, "Top": "x"}));
     }
 }

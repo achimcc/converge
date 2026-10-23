@@ -3,7 +3,7 @@
 //! every write sends the object as it was read, with only the named fields
 //! changed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -701,13 +701,23 @@ impl Task for ScheduledTaskTriggers {
 /// One plugin to configure. `secrets` maps a path to the value read from a
 /// systemd credential; the value never appears in a change or an error.
 /// `lists` names entries of lists other writers share (design §8).
+/// `may_be_unset` names paths of `set` and `secrets` the answer may lack:
+/// Jellyfin writes its configuration with `WhenWritingNull`, so a nullable
+/// field nobody has set yet is not in the answer at all. For those paths an
+/// absent field reads as `(unset)` and the write adds it (design §57); every
+/// other absent path stays what it was, a field the plugin does not have.
 pub struct PluginTarget {
     pub id: String,
     pub name: String,
     pub set: BTreeMap<String, Value>,
     pub secrets: BTreeMap<String, Secret>,
     pub lists: BTreeMap<String, ListItems>,
+    pub may_be_unset: BTreeSet<String>,
 }
+
+/// Shown as the current value of a field the answer lacks and the spec
+/// allows to be unset.
+const UNSET: &str = "(unset)";
 
 /// `name=value` of a keyed item, for changes and errors.
 fn item_label(path: &str, list: &ListItems, item: &Map<String, Value>) -> String {
@@ -898,9 +908,36 @@ impl PluginConfigurations {
         missing: &mut Vec<String>,
     ) -> Vec<Change> {
         let configuration = &loaded.configuration;
-        let mut changes = compare_fields(&target.name, configuration, &loaded.set, missing);
+        // Fields that may be unset and are: a change from `(unset)`, not a
+        // missing field. The rest goes through the strict comparison.
+        let mut changes = Vec::new();
+        let mut present = BTreeMap::new();
+        for (path, desired) in &loaded.set {
+            if target.may_be_unset.contains(path) && paths::get(configuration, path).is_none() {
+                changes.push(Change {
+                    subject: target.name.clone(),
+                    field: path.clone(),
+                    current: UNSET.to_string(),
+                    desired: desired.to_string(),
+                });
+            } else {
+                present.insert(path.clone(), desired.clone());
+            }
+        }
+        changes.extend(compare_fields(
+            &target.name,
+            configuration,
+            &present,
+            missing,
+        ));
         for (path, secret) in &target.secrets {
             match paths::get(configuration, path) {
+                None if target.may_be_unset.contains(path) => changes.push(Change {
+                    subject: target.name.clone(),
+                    field: path.clone(),
+                    current: UNSET.to_string(),
+                    desired: format!("{HIDDEN} from its credential"),
+                }),
                 None => missing.push(format!("{}: {path}", target.name)),
                 Some(Value::String(current)) if current == secret.expose() => {}
                 Some(current) => changes.push(Change {
@@ -1037,19 +1074,34 @@ impl Task for PluginConfigurations {
                 continue;
             }
             // The whole configuration goes back: Ratings alone carries more
-            // than a hundred settings made in the web UI.
-            let mut updated = with_fields(&target.name, &loaded.configuration, &loaded.set)?;
-            for (path, secret) in &target.secrets {
-                if !paths::set(
-                    &mut updated,
-                    path,
-                    Value::String(secret.expose().to_string()),
-                ) {
-                    return Err(Error::MissingField(vec![format!(
-                        "{}: {path}",
-                        target.name
-                    )]));
+            // than a hundred settings made in the web UI. A path that may be
+            // unset is added when the answer lacked it; every other path must
+            // be there already (`compare_fields` saw to that).
+            let mut updated = loaded.configuration.clone();
+            let mut missing = Vec::new();
+            for (path, value) in &loaded.set {
+                let written = if target.may_be_unset.contains(path) {
+                    paths::insert(&mut updated, path, value.clone())
+                } else {
+                    paths::set(&mut updated, path, value.clone())
+                };
+                if !written {
+                    missing.push(format!("{}: {path}", target.name));
                 }
+            }
+            for (path, secret) in &target.secrets {
+                let value = Value::String(secret.expose().to_string());
+                let written = if target.may_be_unset.contains(path) {
+                    paths::insert(&mut updated, path, value)
+                } else {
+                    paths::set(&mut updated, path, value)
+                };
+                if !written {
+                    missing.push(format!("{}: {path}", target.name));
+                }
+            }
+            if !missing.is_empty() {
+                return Err(Error::MissingField(missing));
             }
             for (path, list) in &target.lists {
                 with_list(&target.name, &mut updated, path, list)?;
@@ -2001,6 +2053,7 @@ mod tests {
                     .into_iter()
                     .collect(),
                     lists: BTreeMap::new(),
+                    may_be_unset: BTreeSet::new(),
                 },
                 PluginTarget {
                     id: MEDIATHEK.to_string(),
@@ -2011,6 +2064,7 @@ mod tests {
                     ]),
                     secrets: BTreeMap::new(),
                     lists: BTreeMap::new(),
+                    may_be_unset: BTreeSet::new(),
                 },
             ],
         }
@@ -2112,6 +2166,71 @@ mod tests {
         );
     }
 
+    /// The recorded Oscars answer without `OmdbApiKey` -- what Jellyfin
+    /// sends while the field is `null` (`WhenWritingNull`), constructed.
+    fn oscars_without_key() -> String {
+        let mut v: Value = serde_json::from_str(&plugin_file(OSCARS)).unwrap();
+        assert!(v.as_object_mut().unwrap().remove("OmdbApiKey").is_some());
+        v.to_string()
+    }
+
+    #[test]
+    fn an_unset_field_the_spec_allows_is_a_change_and_the_write_adds_it() {
+        let key = "s3cr3t-omdb-value";
+        let mut task = targets(key);
+        task.plugins[0].may_be_unset = ["OmdbApiKey".to_string()].into();
+        task.plugins[0].set = fields(&[("Note", json!("set by converge"))]);
+        task.plugins[0].may_be_unset.insert("Note".to_string());
+        let t = plugins_transport(&oscars_without_key(), &plugin_file(MEDIATHEK))
+            .on_put(vec![Step::Answer(204, String::new())]);
+        let current = task.read(&t).unwrap();
+        let changes = task.diff(&current).unwrap();
+        let shown: Vec<String> = changes.iter().map(ToString::to_string).collect();
+        assert_eq!(
+            shown,
+            [
+                "Jellyfin Oscars: Note (unset) -> \"set by converge\"",
+                "Jellyfin Oscars: OmdbApiKey (unset) -> (hidden) from its credential",
+            ]
+        );
+        assert!(!format!("{changes:?}").contains(key));
+        task.write(&t, &current).unwrap();
+        let written = t.written.borrow();
+        assert_eq!(written.len(), 1, "Mediathek already matched");
+        assert_eq!(written[0].0, format!("/Plugins/{OSCARS}/Configuration"));
+        let body: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert_eq!(body["OmdbApiKey"], json!(key), "the write adds the field");
+        assert_eq!(body["Note"], json!("set by converge"));
+        // Everything the answer carried travels back untouched.
+        let before: Value = serde_json::from_str(&oscars_without_key()).unwrap();
+        for (field, value) in before.as_object().unwrap() {
+            assert_eq!(&body[field], value, "{field}");
+        }
+    }
+
+    #[test]
+    fn an_unset_field_the_spec_does_not_allow_stays_an_error() {
+        let task = targets("s3cr3t");
+        let t = plugins_transport(&oscars_without_key(), &plugin_file(MEDIATHEK));
+        let err = task
+            .diff(&task.read(&t).unwrap())
+            .err()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            err,
+            "the answer has no such field: Jellyfin Oscars: OmdbApiKey"
+        );
+    }
+
+    #[test]
+    fn a_field_that_may_be_unset_but_is_there_is_compared_as_before() {
+        let mut task = targets("<masked>");
+        task.plugins[0].may_be_unset = ["OmdbApiKey".to_string()].into();
+        let t = plugins_transport(&plugin_file(OSCARS), &plugin_file(MEDIATHEK));
+        assert_eq!(task.diff(&task.read(&t).unwrap()).unwrap(), vec![]);
+    }
+
     const INJECTOR: &str = "f5a34f7b2e8a4e6aa7223a216a81b374";
 
     fn injector(items: Vec<Value>) -> PluginConfigurations {
@@ -2133,6 +2252,7 @@ mod tests {
                 )]
                 .into_iter()
                 .collect(),
+                may_be_unset: BTreeSet::new(),
             }],
         }
     }
@@ -2293,6 +2413,7 @@ mod tests {
                     ]),
                     secrets: BTreeMap::new(),
                     lists: BTreeMap::new(),
+                    may_be_unset: BTreeSet::new(),
                 },
                 PluginTarget {
                     id: SSO.to_string(),
@@ -2310,6 +2431,7 @@ mod tests {
                     ]),
                     secrets: BTreeMap::new(),
                     lists: BTreeMap::new(),
+                    may_be_unset: BTreeSet::new(),
                 },
             ],
         }

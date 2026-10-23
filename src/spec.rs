@@ -466,6 +466,9 @@ pub struct TaskTriggers {
 /// comes from a systemd credential (path -> credential name), and entries of
 /// lists the plugin shares with others (path -> keyed items). The name is the
 /// plugin's name as `/Plugins` reports it, so a wrong id fails loudly.
+/// `may_be_unset` names the paths of `set` and `secrets` that the answer may
+/// lack: Jellyfin leaves a `null` field out, and for those the write adds it
+/// (design §57). Every other missing path stays an error.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PluginSettings {
@@ -476,6 +479,8 @@ pub struct PluginSettings {
     pub secrets: BTreeMap<String, String>,
     #[serde(default)]
     pub lists: BTreeMap<String, ListItems>,
+    #[serde(default)]
+    pub may_be_unset: std::collections::BTreeSet<String>,
 }
 
 /// Entries of a list that is not converge's alone. Each item is found by the
@@ -2278,6 +2283,13 @@ impl Spec {
                             )));
                         }
                     }
+                    for path in &plugin.may_be_unset {
+                        if !plugin.set.contains_key(path) && !plugin.secrets.contains_key(path) {
+                            return Err(invalid(format!(
+                                "{at}.may_be_unset: {path:?} is not among set or secrets"
+                            )));
+                        }
+                    }
                     for (path, list) in &plugin.lists {
                         list_items(path, list).map_err(|e| invalid(format!("{at}.lists: {e}")))?;
                         if list.items.iter().any(|item| item.values().any(has_marker)) {
@@ -3700,6 +3712,23 @@ mod tests {
         let path_credential =
             r#"{"c531afa3de204055aca5a7cc43adf783":{"name":"X","secrets":{"A":"../x"}}}"#;
         assert!(jellyfin("plugin-configurations", path_credential).is_err());
+    }
+
+    /// `may_be_unset` is a leave for a path the spec sets, not a second
+    /// place to misspell one (design §57).
+    #[test]
+    fn a_path_that_may_be_unset_must_be_set_or_a_secret() {
+        let good = r#"{"c531afa3de204055aca5a7cc43adf783":{"name":"X","set":{"SeerrUrl":"http://req-01:5055"},"secrets":{"TmdbApiKey":"k"},"may_be_unset":["SeerrUrl","TmdbApiKey"]}}"#;
+        assert!(jellyfin("plugin-configurations", good).is_ok());
+        let stray = good.replace(
+            r#""may_be_unset":["SeerrUrl","#,
+            r#""may_be_unset":["SeerUrl","#,
+        );
+        assert!(jellyfin("plugin-configurations", &stray)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("\"SeerUrl\" is not among set or secrets"));
     }
 
     #[test]

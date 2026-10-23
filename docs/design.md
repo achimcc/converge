@@ -3523,6 +3523,53 @@ Checked against answers recorded from Radarr 6.4.4.10685
 (the recorded profile with only `language` changed), no language read without
 the field, and each of the three errors with nothing written.
 
+## 57. Jellyfin plugins: a field nobody has set yet (v0.58.0, 2026-10-23)
+
+Jellyfin serializes a plugin configuration with `WhenWritingNull`: a nullable
+field whose value is still `null` is not in the answer to
+`GET /Plugins/{id}/Configuration` at all. Two plugins showed it on the
+2026-10-23. Jellyfin Tweaks (5.1.0.0) keeps its switches as `bool?`, where
+`null` means "not managed"; Moonbase (2.4.0.0) keeps the Seerr address and
+its API keys as `string?` with no default. To `plugin-configurations` (§6) an
+absent path was a field the plugin does not have, and that is the right
+default: a misspelt path gets the very same answer, and writing it would
+hand the plugin a field it never reads. So the host could not set those
+fields at all until somebody had written them once by hand -- and that first
+write is exactly the manual step converge exists to replace.
+
+A plugin's spec now names the paths that may be unset, the shape of §53:
+
+```json
+{"8c5d0e914f2a4b6d9e3f1a7c8d9e0f2b": {
+  "name": "Moonbase",
+  "set": {"SeerrEnabled": true, "SeerrUrl": "http://10.0.3.7:5055"},
+  "secrets": {"TmdbApiKey": "jellyfin-tmdb-token"},
+  "may_be_unset": ["SeerrUrl", "TmdbApiKey"]}}
+```
+
+For those paths, and only those, an absent field reads as "no value": the
+plan shows `Moonbase: SeerrUrl (unset) -> "http://10.0.3.7:5055"` (a secret
+shows `(unset) -> (hidden) from its credential`), the write is the same
+`POST` of the whole configuration with the field added (`paths::insert`,
+which adds a last segment but never a parent), and the read back finds the
+field, because the value is no longer `null`. A path that is there is
+compared as before. Every other absent path stays an error before anything
+is written, and a path in `may_be_unset` that is neither in `set` nor in
+`secrets` is refused when the spec is parsed.
+
+**What the leave costs:** for a listed path, a typo is no longer caught by
+the read -- Jellyfin's deserializer drops a property the configuration class
+does not declare, and the next run shows `(unset)` again, every time. That
+repeating line is the signal; the list is short, explicit, and absent by
+default.
+
+Checked against the recorded Oscars configuration with `OmdbApiKey` removed
+(constructed from `tests/fixtures/jellyfin-10.11.11/plugins/c531…json`): the
+two change lines, the body of the one `POST` (the answer plus the two added
+fields, nothing else changed), the same answer without the leave still
+failing with `no such field`, and a listed path that is present compared as
+before.
+
 ## 20. Not in the pilot
 
 
