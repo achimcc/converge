@@ -48,6 +48,8 @@ impl Clock for FakeClock {
 #[derive(Clone)]
 pub enum Step {
     Answer(u16, String),
+    /// An answer that sets a cookie: status, body and one `Set-Cookie` line.
+    WithCookie(u16, String, String),
     Refused,
     /// What ureq reports when a request outlives its time limit.
     TimedOut,
@@ -112,7 +114,12 @@ fn take(queue: Option<&mut VecDeque<Step>>) -> Option<Step> {
 /// a write leaves it unconfirmed.
 fn play(step: Option<Step>, method: &'static str, path: &str) -> Result<Reply, Error> {
     match step {
-        Some(Step::Answer(status, body)) => Ok(Reply { status, body }),
+        Some(Step::Answer(status, body)) => Ok(Reply::new(status, body)),
+        Some(Step::WithCookie(status, body, line)) => Ok(Reply {
+            status,
+            body,
+            set_cookies: vec![crate::secret::Secret::new(line)],
+        }),
         Some(Step::Refused) => Err(Error::NoAnswer {
             method,
             path: path.to_string(),

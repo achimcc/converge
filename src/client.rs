@@ -12,6 +12,32 @@ use crate::{endpoint::Endpoint, error::Error, secret::Secret};
 pub struct Reply {
     pub status: u16,
     pub body: String,
+    /// Every `Set-Cookie` line of the answer, whole. A cookie is a session,
+    /// so the lines are secrets: no `Debug`, no `Display` (design §58).
+    pub set_cookies: Vec<Secret>,
+}
+
+impl Reply {
+    /// An answer without cookies -- what nearly every service sends.
+    pub fn new(status: u16, body: String) -> Self {
+        Self {
+            status,
+            body,
+            set_cookies: Vec::new(),
+        }
+    }
+
+    /// The value of the cookie `name` that this answer sets: the text
+    /// between `name=` and the first `;` of a `Set-Cookie` line. An empty
+    /// value is a cookie being cleared, and is `None`.
+    pub fn cookie(&self, name: &str) -> Option<Secret> {
+        self.set_cookies.iter().find_map(|line| {
+            let pair = line.expose().split(';').next()?;
+            let (key, value) = pair.split_once('=')?;
+            (key.trim() == name && !value.trim().is_empty())
+                .then(|| Secret::new(value.trim().to_string()))
+        })
+    }
 }
 
 pub trait Transport {
@@ -63,6 +89,9 @@ pub struct HttpTransport {
     reads_only: bool,
     /// A write of this transport has gone out, answered or not (design §54).
     wrote: AtomicBool,
+    /// Headers every request carries besides the key: Velvarr's `Origin`
+    /// (design §58). Not secrets -- they come from the spec.
+    fixed: Vec<(&'static str, String)>,
 }
 
 /// Where a request that got no answer was lost.
@@ -114,7 +143,16 @@ impl HttpTransport {
             accept_json: false,
             reads_only: false,
             wrote: AtomicBool::new(false),
+            fixed: Vec::new(),
         }
+    }
+
+    /// One more header on every request, with a value from the spec -- never
+    /// a secret, which belongs in the key. Velvarr refuses a write whose
+    /// `Origin` is not the one it was configured with (design §58).
+    pub fn with_header(mut self, name: &'static str, value: String) -> Self {
+        self.fixed.push((name, value));
+        self
     }
 
     /// A transport whose requests are all reads, for a sign-in that only
@@ -150,11 +188,14 @@ impl HttpTransport {
     /// The key header, and `Accept` when asked for. An empty header name is
     /// the anonymous transport: it sends no key at all.
     fn headers<B>(&self, request: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
-        let request = if self.header.is_empty() {
+        let mut request = if self.header.is_empty() {
             request
         } else {
             request.header(self.header, self.key.expose())
         };
+        for (name, value) in &self.fixed {
+            request = request.header(*name, value);
+        }
         if self.accept_json {
             request.header("Accept", "application/json")
         } else {
@@ -175,8 +216,20 @@ impl HttpTransport {
         let write = method != "GET" && !self.reads_only;
         let answer = result.and_then(|mut response| {
             let status = response.status().as_u16();
+            // A line that is not text is no cookie converge could send back.
+            let set_cookies = response
+                .headers()
+                .get_all("set-cookie")
+                .iter()
+                .filter_map(|v| v.to_str().ok())
+                .map(|v| Secret::new(v.to_string()))
+                .collect();
             let body = response.body_mut().read_to_string()?;
-            Ok(Reply { status, body })
+            Ok(Reply {
+                status,
+                body,
+                set_cookies,
+            })
         });
         let e = match answer {
             Ok(reply) => {
@@ -461,18 +514,12 @@ mod tests {
             response: None,
         };
         let body = include_str!("../tests/fixtures/constructed-validation-error.json");
-        let reply = Reply {
-            status: 400,
-            body: body.into(),
-        };
+        let reply = Reply::new(400, body.into());
         assert_eq!(
             expect_status(&EP, &reply, &[200]).err().unwrap().to_string(),
             "PUT /u answered HTTP 400: MaxSize: 'Max Size' must be greater than or equal to 'Min Size'."
         );
-        let reply = Reply {
-            status: 500,
-            body: "<html>secret stack</html>".into(),
-        };
+        let reply = Reply::new(500, "<html>secret stack</html>".into());
         assert_eq!(
             expect_status(&EP, &reply, &[200])
                 .err()
@@ -480,20 +527,14 @@ mod tests {
                 .to_string(),
             "PUT /u answered HTTP 500"
         );
-        let reply = Reply {
-            status: 202,
-            body: String::new(),
-        };
+        let reply = Reply::new(202, String::new());
         assert!(expect_status(&EP, &reply, &[200, 202]).is_ok());
     }
 
     #[test]
     fn expect_status_shows_laravel_validation_fields_and_nothing_else() {
         let body = include_str!("../tests/fixtures/koel-9.11.3/constructed-validation-error.json");
-        let reply = Reply {
-            status: 422,
-            body: body.into(),
-        };
+        let reply = Reply::new(422, body.into());
         assert_eq!(
             expect_status_at("POST", "/api/radio/stations", &reply, &[201])
                 .err()
@@ -501,10 +542,10 @@ mod tests {
                 .to_string(),
             "POST /api/radio/stations answered HTTP 422: logo: Invalid image for logo; url: The url field must be a valid URL."
         );
-        let reply = Reply {
-            status: 401,
-            body: include_str!("../tests/fixtures/koel-9.11.3/unauthenticated.json").into(),
-        };
+        let reply = Reply::new(
+            401,
+            include_str!("../tests/fixtures/koel-9.11.3/unauthenticated.json").into(),
+        );
         assert_eq!(
             expect_status_at("GET", "/api/radio/stations", &reply, &[200])
                 .err()
@@ -512,6 +553,39 @@ mod tests {
                 .to_string(),
             "GET /api/radio/stations answered HTTP 401"
         );
+    }
+
+    #[test]
+    fn a_cookie_is_read_by_name_from_its_set_cookie_line() {
+        let reply = Reply {
+            status: 200,
+            body: String::new(),
+            set_cookies: vec![
+                Secret::new("other=1; Path=/".into()),
+                Secret::new(
+                    "velvarr_session=tok-3f9a; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800"
+                        .into(),
+                ),
+            ],
+        };
+        assert_eq!(
+            reply.cookie("velvarr_session").unwrap().expose(),
+            "tok-3f9a"
+        );
+        assert_eq!(reply.cookie("other").unwrap().expose(), "1");
+        assert!(reply.cookie("velvarr").is_none());
+        assert!(Reply::new(200, String::new())
+            .cookie("velvarr_session")
+            .is_none());
+        // A logout clears the cookie with an empty value: no session.
+        let cleared = Reply {
+            status: 200,
+            body: String::new(),
+            set_cookies: vec![Secret::new(
+                "velvarr_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0".into(),
+            )],
+        };
+        assert!(cleared.cookie("velvarr_session").is_none());
     }
 
     #[test]

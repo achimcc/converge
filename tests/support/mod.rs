@@ -80,6 +80,15 @@ impl Server {
                     held.push(stream);
                     continue;
                 }
+                // An answer that starts with `Set-Cookie: ` carries header
+                // lines first, up to an empty line, then the body.
+                let (extra, answer) = match answer.strip_prefix("Set-Cookie: ") {
+                    Some(_) => match answer.split_once("\r\n\r\n") {
+                        Some((lines, body)) => (format!("{lines}\r\n"), body.to_string()),
+                        None => (format!("{answer}\r\n"), String::new()),
+                    },
+                    None => (String::new(), answer),
+                };
                 // A 3xx route's answer is its `Location`.
                 let _ = if (300..400).contains(&status) {
                     write!(
@@ -89,7 +98,7 @@ impl Server {
                 } else {
                     write!(
                         stream,
-                        "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                        "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{answer}",
                         answer.len()
                     )
                 };

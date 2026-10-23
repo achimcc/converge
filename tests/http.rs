@@ -395,3 +395,53 @@ fn a_sign_in_that_gets_no_answer_is_a_read() {
     );
     assert!(!anonymous.wrote());
 }
+
+#[test]
+fn a_set_cookie_line_comes_back_with_the_reply_and_fixed_headers_go_out() {
+    let server = Server::start(vec![(
+        "POST",
+        "/api/login",
+        200,
+        "Set-Cookie: velvarr_session=sess-77c1-never-print-me; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800\r\n\r\n{\"account\":{}}"
+            .into(),
+    )]);
+    let reply = HttpTransport::anonymous(&server.base_url(), Duration::from_secs(5))
+        .with_header("Origin", "https://velvarr.example".into())
+        .post_json("/api/login", "{}")
+        .unwrap();
+    assert_eq!(reply.status, 200);
+    assert_eq!(reply.body, r#"{"account":{}}"#);
+    assert_eq!(
+        reply.cookie("velvarr_session").unwrap().expose(),
+        "sess-77c1-never-print-me"
+    );
+    let headers = server.requests()[0].headers.to_ascii_lowercase();
+    assert!(
+        headers.contains("origin: https://velvarr.example"),
+        "{headers}"
+    );
+    assert!(
+        headers.contains("content-type: application/json"),
+        "{headers}"
+    );
+}
+
+#[test]
+fn a_session_cookie_travels_as_the_cookie_header() {
+    let server = Server::start(vec![("GET", "/api/admin/users", 200, "{}".into())]);
+    HttpTransport::new(
+        &server.base_url(),
+        "Cookie",
+        Secret::new("velvarr_session=sess-1".into()),
+        Duration::from_secs(5),
+    )
+    .with_header("X-Forwarded-Proto", "https".into())
+    .get("/api/admin/users")
+    .unwrap();
+    let headers = server.requests()[0].headers.to_ascii_lowercase();
+    assert!(
+        headers.contains("cookie: velvarr_session=sess-1"),
+        "{headers}"
+    );
+    assert!(headers.contains("x-forwarded-proto: https"), "{headers}");
+}
