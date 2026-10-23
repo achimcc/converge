@@ -3570,6 +3570,191 @@ fields, nothing else changed), the same answer without the leave still
 failing with `no such field`, and a listed path that is present compared as
 before.
 
+## 58. Velvarr: a session cookie, the setup, the integrations and the accounts (v0.59.0, 2026-10-23)
+
+Velvarr (0.39.3) is a wish list for Whisparr in front of Jellyfin, a
+Next.js application. It publishes no OpenAPI description and has no API
+key. Its accounts **are** Jellyfin accounts: `POST /api/login` checks the
+name and password with Jellyfin's `AuthenticateByName`, and the session is
+nothing but the `HttpOnly` cookie `velvarr_session` in the answer's
+`Set-Cookie`. Every field name below was read off the source at the release
+commit (`0b94af6`); the fixtures are built from it (`constructed-…`, with
+file and line in their `SOURCE.md`) until a running instance is recorded.
+
+### Two small things the transport learned
+
+- **A reply carries its `Set-Cookie` lines** (`Reply::set_cookies`), each
+  a `Secret`: a cookie is a session. `Reply::cookie(name)` reads one value;
+  an empty one -- a cookie being cleared -- is none.
+- **Fixed headers per transport** (`HttpTransport::with_header`), with a
+  value from the spec and never a secret. Velvarr needs `Origin`: with
+  `VELVARR_ORIGIN` set, `guardMutation` (`src/server/security.ts`) refuses
+  any write whose `Origin` is not exactly that origin. Optionally
+  `X-Forwarded-Proto: https`, as a TLS proxy would send it.
+
+The session itself goes where every key goes: `Service::key_header` is
+`Cookie`, `key_value` makes `velvarr_session=<value>` out of it. So it
+inherits what the key header has -- it is never in `argv`, a URL or a line,
+and a redirect off the service's origin is refused before it is sent (B39).
+Every write is `application/json`, which `guardMutation` also insists on;
+converge sends no `Sec-Fetch-Site`, which it lets pass when absent.
+
+### The sign-in, and the setup on the first run
+
+The shape is Questarr's (§47): `api_key_credential` holds the password of a
+Jellyfin account -- a local service account, since each sign-in under
+Velvarr's shared device id replaces that account's earlier Jellyfin token --
+and `desired.username` names it. Every Velvarr spec also carries
+`desired.origin` and may carry `desired.setup`.
+
+A run asks `GET /api/status` first, without a session. Set up
+(`initialized`), it signs in. Not set up, a **plan** reports
+`Velvarr, owner <name>: (not set up) -> (set up)` and stops, as Questarr's
+does; an **apply** sets Velvarr up from `desired.setup`:
+`POST /api/setup/inspect` (setup secret, account, Jellyfin URLs and key)
+answers the libraries the account sees, the spec's library **names** become
+ids, and `POST /api/setup` stores the integration -- Whisparr too, when the
+setup names it -- and makes the account the owner. Its answer sets the
+cookie. A setup answered `409 already_initialized` lost a race and signs in
+instead. `setupReady: false` (no `VELVARR_SECRET_KEY` or
+`VELVARR_SETUP_SECRET`) and a spec without `setup` are errors that say so,
+before anything is sent. The setup's credentials -- `setupSecret`,
+`jellyfinApiKey`, `whisparrApiKey` under `desired.setup.secret_fields` --
+are read only then: the setup secret has no use afterwards.
+
+**One sign-in per run** (the token cache of §29): Velvarr counts failed
+sign-ins, five per account in five minutes (successful ones are refunded),
+and each sign-in opens a Jellyfin session. A refusal shows Velvarr's error
+**code** and what it means -- `upstream_auth`, `origin_mismatch`,
+`too_many_attempts`, `not_admitted`, … -- never its message, which can carry
+an upstream's text. Velvarr answers Jellyfin's refusal as 502, not 401: a
+401 would sign every browser out.
+
+Readiness is `GET /api/health` (`{"ok":true}`); Velvarr reports no version
+of its own, so the version line says `(not reported)`.
+
+### integrations
+
+`GET /api/admin/integrations` answers the connections with
+`apiKeyConfigured` in place of each key; `PATCH` takes `jellyfinUrl`,
+`jellyfinExternalUrl` (both required in every body that is not a provider
+save), `jellyfinApiKey`, `whisparrUrl`, `whisparrApiKey`, `delivery` and
+`pathMappings`.
+
+**How a rotated key arrives: on every apply.** Velvarr shows only whether a
+key is stored, so a changed one cannot be seen by reading. Three ways were
+weighed:
+
+1. *Send the key only when Velvarr insists* -- it does when a URL moves to
+   another origin -- and otherwise never: a rotated key would never arrive.
+2. *Keep a fingerprint of the last key sent* somewhere: converge keeps no
+   state between runs, and a fingerprint on the host is one more file whose
+   loss looks like "unchanged".
+3. *Send both keys with every apply*, as converge does with every
+   write-only secret (`hand_over`, §13): chosen. It is harmless here --
+   Velvarr's identity of a Whisparr connection hangs on its URL, not its key
+   (`resolveWhisparrIdentity`), a stored delivery is not re-armed by a save
+   that leaves it on, and Velvarr checks the Jellyfin key against Jellyfin
+   (`listUsers` as administrator) on every such `PATCH`, so a wrong key
+   fails the run instead of being stored. The Whisparr key is not checked
+   by the `PATCH`; a wrong one shows when Velvarr next talks to Whisparr.
+
+A write that went out in this run marks the keys as sent, so `hand_over`
+does not send them twice. A key Velvarr does not hold at all
+(`apiKeyConfigured: false`) is a change in the plan:
+`whisparr: apiKey (not stored) -> (the credential's, not shown)`.
+
+**Every body carries the whole connection**, because of `nextWhisparr`
+(`routes/admin.ts`): given a `whisparrUrl`, it builds a new connection from
+URL and key and takes `delivery` and `pathMappings` from that new one, not
+the stored one -- a body with a URL and without them drops both. Whatever
+the spec leaves to Velvarr is therefore sent back exactly as it was read.
+A spec without `whisparr` sends no Whisparr key at all, and Velvarr keeps
+that connection as it is (a note says so). Removing it is not offered.
+
+**The delivery names its quality profile** (`quality_profile`, never
+`qualityProfileId`; the id is whatever Whisparr's database handed out,
+as in §50). The name is resolved through Velvarr's own view of Whisparr,
+`GET /api/admin/whisparr` (its `profiles`), and only while Velvarr already
+reaches the Whisparr the spec names. Otherwise -- a first connection, a new
+URL -- the write takes two `PATCH`es: the connection first, then the
+delivery with the profile read through it. An answer that carries `error`
+(Velvarr reports an upstream refusal there instead of failing) is an error
+naming its code.
+
+**The libraries are checked, never written.** `nextJellyfin` keeps
+`libraryIds` as the setup stored them; no route changes them afterwards.
+So `jellyfin.libraries` compares the names of the configured libraries --
+read from `GET /api/admin/users`, whose `libraries` are the configured ones
+the signed-in account sees -- with the spec's, and a difference is an error
+that says why, not a change converge would pretend to make.
+
+URLs in the spec must be what Velvarr stores (`validateBaseUrl`): http or
+https, lower-case host, no trailing slash, query, fragment or user. Velvarr
+accepts plain HTTP to a non-loopback host only with `VELVARR_ALLOW_HTTP=1`
+and a private address.
+
+### accounts
+
+`GET /api/admin/users` answers the admitted accounts and the configured
+libraries; `PATCH /api/admin/users/{id}` wants `enabled`, `role` and
+`libraryIds` every time, `autoApprove` optionally. So an account's fields
+the spec leaves out are sent as read. Libraries are named, and only the
+configured ones can be granted.
+
+An account Velvarr does not have yet is imported first, and **the import
+takes every Jellyfin account at once** (`POST /api/admin/users/import`,
+`importAccounts(listUsers)`): there is no import by name. The newcomers are
+disabled requesters without libraries -- they cannot sign in -- so the
+side effect is a longer list, not access. converge imports only when the
+spec names an account that is missing, and names it if the import did not
+bring it (no such Jellyfin account).
+
+The owner cannot be disabled or demoted (Velvarr refuses it), and neither
+may the account converge signs in as be: it would lock the next run out.
+Both are errors before anything is written.
+
+### What is not done
+
+Providers (TPDB, StashDB, the judgment model) live in the same
+`PATCH /api/admin/integrations` and are not offered. A logout at the end of
+a run is not sent: Velvarr's sessions expire after seven days, and the
+logout would not end the Jellyfin session the sign-in opened.
+
+## 59. Whisparr Eros: Radarr's tasks on Eros' own description (v0.59.0, 2026-10-23)
+
+Whisparr Eros (3.6.4.1865) is a Radarr fork on API v3. The host needs what
+it already does for Radarr: root folders, SABnzbd and qBittorrent as
+download clients, the download-client configuration, media management,
+naming, and optionally a notification. So `Service::Whisparr` is a Servarr
+(`is_servarr`) on `servarr::V3`, and its download clients and notifications
+are `providers::DOWNLOAD_CLIENTS_V3` and `NOTIFICATIONS_V3` -- the same code,
+not a copy. Its import lists exist but are not offered, and neither are
+quality definitions, profiles or custom formats: nobody asked for them, and
+they have not been checked against Eros.
+
+**The description is Eros' own, not Radarr's.** Eros commits no
+`openapi.json`; it builds one at run time and serves it at
+`/docs/v3/openapi.json`. `openapi/whisparr-3.6.4.1865.json` was fetched from
+the release binary run on the workstation (`openapi/SOURCE.md`), and
+`schema-check --service whisparr` checks against it. That matters for the
+fields: Eros' naming document has six fields Radarr's lacks (`renameScenes`,
+`standardSceneFormat`, …) and its media management two
+(`whisparrFolderLimit`, `skipFreeSpaceCheckWhenGrabbing`); a spec naming
+them passes against Eros' file and fails against Radarr's.
+
+**Measured, not assumed.** Before the fixtures were recorded, converge
+applied the host's six specs to that Eros 3.6.4.1865 and a second plan
+answered 0. One finding: Eros **tests an enabled provider on every create,
+`forceSave=true` or not** -- a download client whose host does not answer
+is a 400 ("Unable to connect to SABnzbd"), and one whose address is not
+routed takes longer than the request timeout. On the host SABnzbd and
+qBittorrent answer, so this matters only for a test bench; the recording
+was made with disabled clients.
+
+The status answer says `version: 3.6.4.1865`, `branch: eros`: that is the
+version a spec's OpenAPI file is named after.
+
 ## 20. Not in the pilot
 
 

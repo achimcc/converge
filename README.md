@@ -19,10 +19,11 @@ script should have been:
 
 ## Status
 
-Early. **v0.50.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
+Early. **v0.59.0** — tasks for **Radarr**, **Sonarr** (API v3), **Lidarr**,
 **Prowlarr** (API v1), **Jellyfin** (10.11), **Trailarr** (0.11, 0.13), **ntfy** (2.26), **bindery** (1.33), **Seerr** (3.2), **Koel** (9.11),
 **SuggestArr** (2.14), **Kavita** (0.9), **Audiobookshelf** (2.36),
-**Dispatcharr** (0.31), **authentik** (2026.5), **Questarr** (1.4) and **Bazarr** (1.6), each replacing a shell unit
+**Dispatcharr** (0.31), **authentik** (2026.5), **Questarr** (1.4), **Bazarr** (1.6),
+**Whisparr Eros** (3.6) and **Velvarr** (0.39), each replacing a shell unit
 or an OpenTofu resource on the host it was written for:
 
 | service | task | desired state |
@@ -31,15 +32,15 @@ or an OpenTofu resource on the host it was written for:
 | Radarr, Sonarr | `quality-profiles` | qualities every profile must allow; with `exactly` and `keep`, the profiles that survive -- every other one is removed once all of them are there, never half the profiles or more (up to six removals pass: a fresh service's defaults). `format_scores` gives a named custom format its score in every profile (in every kept one with `keep`); every other `formatItems` entry stays as its writer left it. `languages` sets a named profile's language (Radarr only; Sonarr v4's profiles have none) |
 | Radarr, Sonarr | `custom-formats` | custom formats by name: the switch that puts one into a file name, and its specifications by name with `implementation`, `negate`, `required` and their `fields`. Formats the spec does not name are counted, never listed, and never removed -- `exactly` is refused here |
 | Prowlarr | `app-profiles` | app profiles by name: `enableRss`, `enableAutomaticSearch`, `enableInteractiveSearch`, `minimumSeeders`. A missing one is added |
-| Radarr, Sonarr, Lidarr | `naming`, `media-management` | top-level fields of the configuration document |
-| Radarr, Sonarr, Lidarr | `download-client-config` | the same for `config/downloadclient` -- among them the switch every import hangs on |
-| Radarr, Sonarr, Lidarr | `indexer-config` | the same for `config/indexer`: retention, minimum age, maximum size, RSS interval. Only Radarr carries the four extra fields |
-| Radarr, Sonarr, Lidarr | `delay-profiles` | the **default** delay profile -- the one without tags -- by its fields: `preferredProtocol` and the two delays. A tagged profile belongs to whoever set the tag and is left alone; `tags` and `order` cannot be set, they say which profile is meant |
-| Radarr, Sonarr, Lidarr, Prowlarr | `download-clients`, `notifications` | providers by name: top-level fields, `fields` entries by name, secrets from credentials handed over on every `apply` |
+| Radarr, Sonarr, Lidarr, Whisparr | `naming`, `media-management` | top-level fields of the configuration document |
+| Radarr, Sonarr, Lidarr, Whisparr | `download-client-config` | the same for `config/downloadclient` -- among them the switch every import hangs on |
+| Radarr, Sonarr, Lidarr, Whisparr | `indexer-config` | the same for `config/indexer`: retention, minimum age, maximum size, RSS interval. Only Radarr carries the four extra fields |
+| Radarr, Sonarr, Lidarr, Whisparr | `delay-profiles` | the **default** delay profile -- the one without tags -- by its fields: `preferredProtocol` and the two delays. A tagged profile belongs to whoever set the tag and is left alone; `tags` and `order` cannot be set, they say which profile is meant |
+| Radarr, Sonarr, Lidarr, Prowlarr, Whisparr | `download-clients`, `notifications` | providers by name: top-level fields, `fields` entries by name, secrets from credentials handed over on every `apply` |
 | Radarr, Sonarr | `import-lists` | the same for import lists (a TMDb list, a Trakt list, …); the quality profile by name instead of `qualityProfileId` (never both). What a list then adds and searches is the service's doing, not converge's |
 | Prowlarr | `applications` | the same for Prowlarr's links to Radarr, Sonarr and Lidarr |
 | Prowlarr | `indexers`, `indexer-proxies` | the same, added from a named template; tags by label (missing labels are added); an indexer's app profile by name instead of `appProfileId` (never both); secrets the service shows are compared, never printed |
-| Radarr, Sonarr, Lidarr | `root-folders` | root folders by path; Lidarr's with fields and profiles by name; missing ones are added |
+| Radarr, Sonarr, Lidarr, Whisparr | `root-folders` | root folders by path; Lidarr's with fields and profiles by name; missing ones are added |
 | Lidarr | `quality-profiles` | what a profile a root folder names holds: the qualities it allows (a group follows its own), the `cutoff` by name and the upgrade switch. converge creates no profile |
 | Lidarr | `metadata-profiles` | the same for a metadata profile: the primary and secondary album types and the release statuses it allows -- everything the lists do not name is not allowed |
 | Jellyfin | `server-configuration` | fields of `ServerConfiguration`, by path |
@@ -81,6 +82,8 @@ or an OpenTofu resource on the host it was written for:
 | Questarr | `search-settings` | fields of the signed-in account's search settings (`autoSearchEnabled`, `searchIntervalHours`, `autoDownloadEnabled`, `autoSearchUnreleased`): only the differing ones are written. Questarr takes an unknown key without a word, so the spec is checked against the four names |
 | Questarr | `prowlarr-sync` | the indexers of one Prowlarr, copied into Questarr: a plan sees whether any indexer comes from it, an apply syncs once -- Questarr keeps no connection, and the key is answered masked |
 | Bazarr | `language-profiles` | language profiles by name, each with its languages in order (two-letter code, and the switches `hi`, `forced`, `audio_exclude`, `audio_only_include`); a missing profile is added under the next free id, differing languages are written. Bazarr takes the profiles only as a whole list and deletes what a list leaves out, so every write carries all of them -- the ones the spec does not name exactly as read. Nothing is removed; a language Bazarr does not know is an error, and so is a change of the languages under a cutoff that names one |
+| Velvarr | `integrations` | the connections to Jellyfin (`url`, `externalUrl`) and Whisparr (`url`, and only if the spec names them the `delivery` -- its quality profile by name -- and the `pathMappings`); both keys from credentials, handed over on every apply, since Velvarr shows only that one is stored. The Jellyfin libraries are checked, never written: Velvarr chooses them at setup. A spec without `whisparr` leaves that connection alone. Every task signs in with a Jellyfin account's name and password, once per run, and sends the `Origin` Velvarr is configured with -- and the first apply sets Velvarr up with `desired.setup` (a plan never does) |
+| Velvarr | `accounts` | accounts by Jellyfin name: `role`, `enabled`, `autoApprove` and libraries by name; what the spec leaves out stays. A missing one is imported first -- Velvarr imports every Jellyfin account at once, as disabled requesters. The owner and the account converge signs in as stay enabled admins |
 | authentik | `settings` | fields of the tenant settings (`/admin/settings/`), by name — those outside the blueprint schema; `PATCH` carries only what differs |
 | SuggestArr | `configuration` | the whole flat configuration: plain fields by name, secret fields from credentials (never shown), and the Jellyfin libraries derived from what the service reports, minus the collection types named |
 
@@ -420,8 +423,8 @@ a single `DELETE`:
 |---|---|---|
 | `converge apply [--deadline <s>] [--request-timeout <s>] <spec>...` | reconcile, write, read back | 0 done, 1 any spec failed, 3 no answer and nothing written |
 | `converge plan [--deadline <s>] [--request-timeout <s>] <spec>...` | show what `apply` would change | 0 equal, 2 differs, 1 error, 3 no answer |
-| `converge schema-check --service <radarr\|sonarr\|lidarr\|prowlarr\|jellyfin\|trailarr\|kavita\|dispatcharr\|authentik> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
-| `converge schema-check --service <ntfy\|bindery\|seerr\|koel\|suggestarr\|audiobookshelf\|questarr\|bazarr> [--spec <spec>]...` | ntfy, bindery and Questarr publish no OpenAPI description, Bazarr's hides the endpoint that writes, Seerr's misnames its fields, Koel's describes a long-gone version, SuggestArr's covers only its public `/api/v1`: only validate the specs (`--openapi` is refused) | 0 / 1 |
+| `converge schema-check --service <radarr\|sonarr\|lidarr\|prowlarr\|whisparr\|jellyfin\|trailarr\|kavita\|dispatcharr\|authentik> --openapi <file> [--spec <spec>]...` | compare the wire types — and the field paths of the given specs — with an OpenAPI file | 0 / 1 |
+| `converge schema-check --service <ntfy\|bindery\|seerr\|koel\|suggestarr\|audiobookshelf\|questarr\|bazarr\|velvarr> [--spec <spec>]...` | ntfy, bindery, Questarr and Velvarr publish no OpenAPI description, Bazarr's hides the endpoint that writes, Seerr's misnames its fields, Koel's describes a long-gone version, SuggestArr's covers only its public `/api/v1`: only validate the specs (`--openapi` is refused) | 0 / 1 |
 
 Several specs are processed in order; one failing does not skip the next.
 
@@ -469,7 +472,7 @@ radarr quality-definitions: changed 1 field(s), read back and confirmed
    types derive their JSON schema; `schema-check` compares it with the
    service's `openapi.json`. Run it in your build against the exact version
    you deploy, and an upgrade that renames a field fails before the deploy.
-   ntfy, bindery and Questarr publish no such description, Bazarr's hides its
+   ntfy, bindery, Questarr and Velvarr publish no such description, Bazarr's hides its
    settings endpoint, and Seerr's and Koel's do
    not fit the running service; for them `schema-check` validates the specs,
    and only the first two checks apply to their fields.
