@@ -161,7 +161,7 @@ macro_rules! api {
     };
 }
 
-/// Radarr and Sonarr.
+/// Radarr and Sonarr -- and Whisparr Eros, a Radarr fork (design §59).
 pub static V3: Api = api!("v3", false);
 /// Lidarr.
 pub static V1: Api = api!("v1", true);
@@ -169,7 +169,7 @@ pub static V1: Api = api!("v1", true);
 impl Api {
     pub fn of(service: Service) -> Option<&'static Api> {
         match service {
-            Service::Radarr | Service::Sonarr => Some(&V3),
+            Service::Radarr | Service::Sonarr | Service::Whisparr => Some(&V3),
             Service::Lidarr => Some(&V1),
             _ => None,
         }
@@ -210,6 +210,12 @@ pub fn lidarr_wire_types() -> Vec<schemars::Schema> {
     let mut types = vec![schemars::schema_for!(crate::services::arr::SystemResource)];
     types.extend(crate::services::lidarr::wire_types());
     types
+}
+
+/// Whisparr's: as Prowlarr's, only the status answer is typed -- every task
+/// it has reads documents (design §59).
+pub fn whisparr_wire_types() -> Vec<schemars::Schema> {
+    vec![schemars::schema_for!(crate::services::arr::SystemResource)]
 }
 
 /// Prowlarr's: only its status answer is typed; providers are documents.
@@ -817,6 +823,8 @@ mod tests {
             "/api/v1/config/downloadclient/{id}"
         );
         assert!(std::ptr::eq(Api::of(Service::Lidarr).unwrap(), &V1));
+        // Whisparr Eros is a Radarr fork: Radarr's API v3 (design §59).
+        assert!(std::ptr::eq(Api::of(Service::Whisparr).unwrap(), &V3));
         assert!(Api::of(Service::Jellyfin).is_none());
     }
 

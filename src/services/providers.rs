@@ -158,7 +158,10 @@ pub static INDEXER_PROXIES_V1: ProviderApi = provider_api!(
 
 impl ProviderApi {
     pub fn of(service: Service, kind: Kind) -> Option<&'static ProviderApi> {
-        let v3 = matches!(service, Service::Radarr | Service::Sonarr);
+        let arr = matches!(service, Service::Radarr | Service::Sonarr);
+        // Whisparr Eros speaks Radarr's v3 (design §59); of its providers
+        // only download clients and notifications are asked for.
+        let v3 = arr || service == Service::Whisparr;
         let v1 = matches!(service, Service::Lidarr | Service::Prowlarr);
         let prowlarr = service == Service::Prowlarr;
         match kind {
@@ -166,7 +169,7 @@ impl ProviderApi {
             Kind::DownloadClients if v1 => Some(&DOWNLOAD_CLIENTS_V1),
             Kind::Notifications if v3 => Some(&NOTIFICATIONS_V3),
             Kind::Notifications if v1 => Some(&NOTIFICATIONS_V1),
-            Kind::ImportLists if v3 => Some(&IMPORT_LISTS_V3),
+            Kind::ImportLists if arr => Some(&IMPORT_LISTS_V3),
             Kind::Applications if prowlarr => Some(&APPLICATIONS_V1),
             Kind::Indexers if prowlarr => Some(&INDEXERS_V1),
             Kind::IndexerProxies if prowlarr => Some(&INDEXER_PROXIES_V1),
@@ -992,6 +995,30 @@ mod tests {
         );
         assert_eq!(INDEXER_PROXIES_V1.tags.path, "/api/v1/tag");
         assert_eq!(of(Service::Sonarr, Kind::Indexers), None);
+    }
+
+    #[test]
+    fn whisparr_has_radarrs_download_clients_and_notifications_and_nothing_else() {
+        // Eros is a Radarr fork on API v3 (design §59). Its import lists
+        // exist, but no task here asks for them, so none is offered.
+        let of = |k| ProviderApi::of(Service::Whisparr, k);
+        assert!(std::ptr::eq(
+            of(Kind::DownloadClients).unwrap(),
+            &DOWNLOAD_CLIENTS_V3
+        ));
+        assert!(std::ptr::eq(
+            of(Kind::Notifications).unwrap(),
+            &NOTIFICATIONS_V3
+        ));
+        for kind in [
+            Kind::ImportLists,
+            Kind::Applications,
+            Kind::Indexers,
+            Kind::IndexerProxies,
+        ] {
+            assert!(of(kind).is_none());
+        }
+        assert_eq!(ProviderApi::endpoints_of(Service::Whisparr).len(), 12);
     }
 
     #[test]

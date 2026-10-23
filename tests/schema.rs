@@ -1115,3 +1115,32 @@ fn the_collection_query_parameters_exist() {
         }
     }
 }
+
+/// Whisparr Eros (design §59): Radarr's v3 endpoints for the documents,
+/// folders and the two provider kinds, against Eros' own description -- and
+/// one it lacks is found.
+#[test]
+fn the_whisparr_endpoints_match_eros_and_a_missing_one_is_found() {
+    use converge::{
+        services::{providers::ProviderApi, servarr},
+        spec::Service,
+    };
+    let mut endpoints = vec![servarr::V3.status];
+    endpoints.extend(servarr::V3.task_endpoints());
+    endpoints.extend(ProviderApi::endpoints_of(Service::Whisparr));
+    let wire = servarr::whisparr_wire_types();
+    let mut eros = doc("whisparr-3.6.4.1865");
+    assert_eq!(check(&eros, &endpoints, &wire), Vec::<String>::new());
+
+    eros["paths"]
+        .as_object_mut()
+        .unwrap()
+        .remove("/api/v3/notification/{id}");
+    let found = check(&eros, &endpoints, &wire);
+    assert!(
+        found
+            .iter()
+            .any(|f| f.contains("/api/v3/notification/{id}")),
+        "{found:?}"
+    );
+}

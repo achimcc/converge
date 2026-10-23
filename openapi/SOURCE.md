@@ -75,3 +75,19 @@ deploys.
 These files describe names and types, not behaviour: Radarr's and Sonarr's
 list only `200` for `PUT /api/v3/qualitydefinition/update`, and Radarr
 answers `202`.
+
+`whisparr-3.6.4.1865.json` is not in Whisparr Eros' repository either: Eros
+builds its description at run time and serves it at `/docs/v3/openapi.json`
+(`src/NzbDrone.Integration.Test/OpenApiFixture.cs` fetches it there). It was
+fetched 2026-10-23 around 16:55 CEST, byte for byte, from the release asset
+`Whisparr.eros.3.6.4-release.1865.linux-x64.tar.gz` of tag
+`v3.6.4-release.1865` (commit `61cf11c943fbc4c2556c502b2dd0e738ec9f5b66`)
+running on the workstation with a fresh data directory -- the instance the
+fixtures under `tests/fixtures/whisparr-3.6.4.1865` come from. Its
+`info.version` is the API's, `3.0.0`; the application reports `3.6.4.1865`.
+Nothing was masked: the description holds names, types and defaults, no
+configured values.
+
+| file | source | sha256 |
+|---|---|---|
+| `whisparr-3.6.4.1865.json` | `GET /docs/v3/openapi.json` of Whisparr Eros 3.6.4.1865 | `b5ebb06027a860d0ed37b23dbdcb0b8e3b8c4b6b24282624966ec87c00e6e1fe` |

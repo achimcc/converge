@@ -3011,3 +3011,479 @@ fn plan_until_leaves_plan_itself_at_exit_2() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
 }
+
+// --- Whisparr Eros (design §59) ---------------------------------------------
+
+const WHISPARR_STATUS: &str = include_str!("fixtures/whisparr-3.6.4.1865/system-status.json");
+const WHISPARR_CLIENTS: &str = include_str!("fixtures/whisparr-3.6.4.1865/downloadclient.json");
+const WHISPARR_NAMING: &str = include_str!("fixtures/whisparr-3.6.4.1865/naming.json");
+
+/// The download clients the recording was made from, as a spec names them.
+const WHISPARR_CLIENTS_SPEC: &str = r#"{"providers":{
+    "SABnzbd":{"implementation":"Sabnzbd","set":{"enable":false,"priority":1},
+               "fields":{"host":"10.0.10.10","port":8080,"movieCategory":"whisparr"},
+               "secret_fields":{"apiKey":"sabnzbd-api-key"}},
+    "qBittorrent":{"implementation":"QBittorrent","set":{"enable":false},
+               "fields":{"host":"10.0.10.11","port":8080,"username":"admin","movieCategory":"whisparr"},
+               "secret_fields":{"password":"qbittorrent-webui-password"}}}}"#;
+
+fn whisparr_spec(dir: &Path, file: &str, base: &str, task: &str, desired: &str) -> PathBuf {
+    let path = dir.join(file);
+    std::fs::write(
+        &path,
+        format!(
+            r#"{{"service":"whisparr","base_url":"{base}","api_key_credential":"whisparr-api-key","task":"{task}","desired":{desired}}}"#
+        ),
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn schema_check_checks_whisparr_specs_against_eros_own_description() {
+    let openapi = format!(
+        "{}/openapi/whisparr-3.6.4.1865.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let base = "http://localhost:6969";
+    // `renameScenes` is Eros' own: Radarr's description has no such field.
+    let naming = whisparr_spec(
+        dir.path(),
+        "n.json",
+        base,
+        "naming",
+        r#"{"renameMovies":true,"renameScenes":true}"#,
+    );
+    let clients = whisparr_spec(
+        dir.path(),
+        "c.json",
+        base,
+        "download-clients",
+        WHISPARR_CLIENTS_SPEC,
+    );
+    let folders = whisparr_spec(
+        dir.path(),
+        "f.json",
+        base,
+        "root-folders",
+        r#"{"folders":{"/tank/data/media/xxx":{}}}"#,
+    );
+    let out = schema_check("whisparr", Some(&openapi), &[&naming, &clients, &folders]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("whisparr: 21 endpoints and their wire types match"),
+        "{stdout}"
+    );
+
+    // Sonarr's name for it: Eros has no episodes.
+    let wrong = whisparr_spec(
+        dir.path(),
+        "w.json",
+        base,
+        "naming",
+        r#"{"renameEpisodes":true}"#,
+    );
+    let out = schema_check("whisparr", Some(&openapi), &[&wrong]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("NamingConfigResource has no property renameEpisodes"),
+        "{stderr}"
+    );
+
+    // Radarr's description does not know Eros' field: the file matters.
+    let radarr = format!(
+        "{}/openapi/radarr-6.3.0.10514.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let out = schema_check("whisparr", Some(&radarr), &[&naming]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("NamingConfigResource has no property renameScenes"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn a_whisparr_plan_against_the_recording_is_0_and_the_key_is_x_api_key() {
+    let server = Server::start(vec![
+        ("GET", "/api/v3/system/status", 200, WHISPARR_STATUS.into()),
+        (
+            "GET",
+            "/api/v3/downloadclient",
+            200,
+            WHISPARR_CLIENTS.into(),
+        ),
+        ("GET", "/api/v3/config/naming", 200, WHISPARR_NAMING.into()),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let clients = whisparr_spec(
+        dir.path(),
+        "c.json",
+        &server.base_url(),
+        "download-clients",
+        WHISPARR_CLIENTS_SPEC,
+    );
+    let naming = whisparr_spec(
+        dir.path(),
+        "n.json",
+        &server.base_url(),
+        "naming",
+        r#"{"renameMovies":true,"renameScenes":true,"colonReplacementFormat":"dash"}"#,
+    );
+    for (name, value) in [
+        ("whisparr-api-key", "whisparr-key-never-print-me"),
+        ("sabnzbd-api-key", "sab-key-never-print-me"),
+        ("qbittorrent-webui-password", "qb-pw-never-print-me"),
+    ] {
+        std::fs::write(dir.path().join(name), format!("{value}\n")).unwrap();
+    }
+    let out = converge()
+        .arg("plan")
+        .arg(&clients)
+        .arg(&naming)
+        .env("CREDENTIALS_DIRECTORY", dir.path())
+        .output()
+        .unwrap();
+    let printed = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(0), "{printed}");
+    assert!(
+        printed.contains("whisparr download-clients: service version 3.6.4.1865"),
+        "{printed}"
+    );
+    assert!(printed.contains("whisparr naming: unchanged"), "{printed}");
+    for request in server.requests() {
+        assert!(
+            request
+                .headers
+                .to_ascii_lowercase()
+                .contains("x-api-key: whisparr-key-never-print-me"),
+            "{}",
+            request.path
+        );
+    }
+    for secret in [
+        "whisparr-key-never-print-me",
+        "sab-key-never-print-me",
+        "qb-pw-never-print-me",
+    ] {
+        assert!(!printed.contains(secret), "{secret} in: {printed}");
+    }
+}
+
+// --- Velvarr (design §58) ----------------------------------------------------
+
+const VELVARR_HEALTH: &str = include_str!("fixtures/velvarr-0.39.3/constructed-health.json");
+const VELVARR_FRESH: &str = include_str!("fixtures/velvarr-0.39.3/constructed-status-fresh.json");
+const VELVARR_SET_UP: &str = include_str!("fixtures/velvarr-0.39.3/constructed-status-set-up.json");
+const VELVARR_INSPECT: &str =
+    include_str!("fixtures/velvarr-0.39.3/constructed-setup-inspect.json");
+const VELVARR_LOGIN: &str = include_str!("fixtures/velvarr-0.39.3/constructed-login.json");
+const VELVARR_INTEGRATIONS: &str =
+    include_str!("fixtures/velvarr-0.39.3/constructed-integrations-delivery.json");
+const VELVARR_WHISPARR: &str =
+    include_str!("fixtures/velvarr-0.39.3/constructed-whisparr-status.json");
+const VELVARR_USERS: &str = include_str!("fixtures/velvarr-0.39.3/constructed-users.json");
+
+const VELVARR_SESSION: &str = "sess-cli-never-print-me";
+
+fn velvarr_cookie(body: &str) -> String {
+    format!(
+        "Set-Cookie: velvarr_session={VELVARR_SESSION}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800\r\n\r\n{body}"
+    )
+}
+
+const VELVARR_SETUP_PART: &str = r#""setup":{"jellyfinUrl":"http://10.0.10.5:8096","jellyfinExternalUrl":"https://jellyfin.example","libraries":["XXX"],"whisparrUrl":"http://10.0.10.12:6969","secret_fields":{"setupSecret":"velvarr-setup-secret","jellyfinApiKey":"jellyfin-api-key","whisparrApiKey":"whisparr-api-key"}}"#;
+const VELVARR_INTEGRATIONS_PART: &str = r#""jellyfin":{"url":"http://10.0.10.5:8096","externalUrl":"https://jellyfin.example"},"whisparr":{"url":"http://10.0.10.12:6969","delivery":{"enabled":true,"rootFolderPath":"/tank/data/media/xxx","quality_profile":"HD-1080p","searchOnAdd":true},"pathMappings":[{"whisparrPrefix":"/tank/data/media/xxx","jellyfinPrefix":"/media/xxx"}]},"secret_fields":{"jellyfinApiKey":"jellyfin-api-key","whisparrApiKey":"whisparr-api-key"}"#;
+
+fn velvarr_spec(dir: &Path, file: &str, base: &str, task: &str, rest: &str) -> PathBuf {
+    let path = dir.join(file);
+    std::fs::write(
+        &path,
+        format!(
+            r#"{{"service":"velvarr","base_url":"{base}","api_key_credential":"velvarr-passwort","task":"{task}","desired":{{"username":"converge","origin":"https://velvarr.example",{rest}}}}}"#
+        ),
+    )
+    .unwrap();
+    for (name, value) in [
+        ("velvarr-passwort", "velvarr-pw-never-print-me"),
+        (
+            "velvarr-setup-secret",
+            "setup-secret-never-print-me-0123456789",
+        ),
+        ("jellyfin-api-key", "jellyfin-key-never-print-me"),
+        ("whisparr-api-key", "whisparr-key-never-print-me"),
+    ] {
+        std::fs::write(dir.join(name), format!("{value}\n")).unwrap();
+    }
+    path
+}
+
+const VELVARR_SECRETS: [&str; 5] = [
+    "velvarr-pw-never-print-me",
+    "setup-secret-never-print-me-0123456789",
+    "jellyfin-key-never-print-me",
+    "whisparr-key-never-print-me",
+    VELVARR_SESSION,
+];
+
+#[test]
+fn schema_check_for_velvarr_validates_its_tasks_without_an_openapi_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = "http://localhost:3000";
+    let integrations = velvarr_spec(
+        dir.path(),
+        "i.json",
+        base,
+        "integrations",
+        &format!("{VELVARR_SETUP_PART},{VELVARR_INTEGRATIONS_PART}"),
+    );
+    let accounts = velvarr_spec(
+        dir.path(),
+        "a.json",
+        base,
+        "accounts",
+        r#""accounts":{"anna":{"role":"requester","enabled":true}}"#,
+    );
+    let out = schema_check("velvarr", None, &[&integrations, &accounts]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("velvarr: no OpenAPI description exists; 2 spec(s) valid"),
+        "{stdout}"
+    );
+    let bad = velvarr_spec(
+        dir.path(),
+        "b.json",
+        base,
+        "accounts",
+        r#""accounts":{"anna":{"role":"owner"}}"#,
+    );
+    let out = schema_check("velvarr", None, &[&bad]);
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn a_plan_against_a_velvarr_that_is_not_set_up_sets_nothing_up() {
+    let server = Server::start(vec![
+        ("GET", "/api/health", 200, VELVARR_HEALTH.into()),
+        ("GET", "/api/status", 200, VELVARR_FRESH.into()),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let spec = velvarr_spec(
+        dir.path(),
+        "i.json",
+        &server.base_url(),
+        "integrations",
+        &format!("{VELVARR_SETUP_PART},{VELVARR_INTEGRATIONS_PART}"),
+    );
+    let out = converge()
+        .arg("plan")
+        .arg(&spec)
+        .env("CREDENTIALS_DIRECTORY", dir.path())
+        .output()
+        .unwrap();
+    let printed = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(2), "{printed}");
+    assert!(
+        printed.contains(
+            "velvarr integrations: would change Velvarr, owner converge: (not set up) -> (set up)"
+        ),
+        "{printed}"
+    );
+    assert!(server.requests().iter().all(|r| r.method == "GET"));
+}
+
+#[test]
+fn a_first_apply_sets_velvarr_up_and_the_session_carries_the_rest() {
+    let mut users: serde_json::Value = serde_json::from_str(VELVARR_USERS).unwrap();
+    users["accounts"][1]["enabled"] = serde_json::json!(true);
+    let server = Server::start(vec![
+        ("GET", "/api/health", 200, VELVARR_HEALTH.into()),
+        ("GET", "/api/status", 200, VELVARR_FRESH.into()),
+        ("POST", "/api/setup/inspect", 200, VELVARR_INSPECT.into()),
+        ("POST", "/api/setup", 200, velvarr_cookie(VELVARR_LOGIN)),
+        ("GET", "/api/admin/users", 200, users.to_string()),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let spec = velvarr_spec(
+        dir.path(),
+        "a.json",
+        &server.base_url(),
+        "accounts",
+        &format!(r#"{VELVARR_SETUP_PART},"accounts":{{"anna":{{"enabled":true}}}}"#),
+    );
+    let out = converge()
+        .arg("apply")
+        .arg(&spec)
+        .env("CREDENTIALS_DIRECTORY", dir.path())
+        .output()
+        .unwrap();
+    let printed = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(0), "{printed}");
+    assert!(printed.contains("velvarr accounts: unchanged"), "{printed}");
+    let seen = server.requests();
+    let posts: Vec<&str> = seen
+        .iter()
+        .filter(|r| r.method == "POST")
+        .map(|r| r.path.as_str())
+        .collect();
+    assert_eq!(posts, ["/api/setup/inspect", "/api/setup"]);
+    let setup = seen.iter().find(|r| r.path == "/api/setup").unwrap();
+    let body: serde_json::Value = serde_json::from_str(&setup.body).unwrap();
+    assert_eq!(
+        body["libraryIds"],
+        serde_json::json!(["098873858ff54b6c9a23aefae609dd20"])
+    );
+    let users = seen.iter().find(|r| r.path == "/api/admin/users").unwrap();
+    let headers = users.headers.to_ascii_lowercase();
+    assert!(
+        headers.contains(&format!("cookie: velvarr_session={VELVARR_SESSION}")),
+        "{headers}"
+    );
+    for secret in VELVARR_SECRETS {
+        assert!(!printed.contains(secret), "{secret} in: {printed}");
+    }
+}
+
+#[test]
+fn one_velvarr_run_signs_in_once_sends_its_origin_and_prints_no_secret() {
+    let server = Server::start(vec![
+        ("GET", "/api/health", 200, VELVARR_HEALTH.into()),
+        ("GET", "/api/status", 200, VELVARR_SET_UP.into()),
+        ("POST", "/api/login", 200, velvarr_cookie(VELVARR_LOGIN)),
+        (
+            "GET",
+            "/api/admin/integrations",
+            200,
+            VELVARR_INTEGRATIONS.into(),
+        ),
+        (
+            "PATCH",
+            "/api/admin/integrations",
+            200,
+            VELVARR_INTEGRATIONS.into(),
+        ),
+        ("GET", "/api/admin/whisparr", 200, VELVARR_WHISPARR.into()),
+        ("GET", "/api/admin/users", 200, VELVARR_USERS.into()),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let integrations = velvarr_spec(
+        dir.path(),
+        "i.json",
+        &server.base_url(),
+        "integrations",
+        VELVARR_INTEGRATIONS_PART,
+    );
+    let accounts = velvarr_spec(
+        dir.path(),
+        "a.json",
+        &server.base_url(),
+        "accounts",
+        r#""accounts":{"anna":{"role":"requester","enabled":false}}"#,
+    );
+    let out = converge()
+        .arg("apply")
+        .arg(&integrations)
+        .arg(&accounts)
+        .env("CREDENTIALS_DIRECTORY", dir.path())
+        .output()
+        .unwrap();
+    let printed = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(0), "{printed}");
+    assert!(
+        printed.contains("velvarr integrations: unchanged"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("velvarr integrations: whisparr: apiKey handed over from credentials"),
+        "{printed}"
+    );
+    assert!(printed.contains("velvarr accounts: unchanged"), "{printed}");
+
+    let seen = server.requests();
+    let logins = seen.iter().filter(|r| r.path == "/api/login").count();
+    assert_eq!(logins, 1);
+    let login = seen.iter().find(|r| r.path == "/api/login").unwrap();
+    assert!(!login.headers.to_ascii_lowercase().contains("cookie:"));
+    for request in &seen {
+        let headers = request.headers.to_ascii_lowercase();
+        assert!(
+            headers.contains("origin: https://velvarr.example"),
+            "{} {headers}",
+            request.path
+        );
+        if request.path.starts_with("/api/admin/") {
+            assert!(
+                headers.contains(&format!("cookie: velvarr_session={VELVARR_SESSION}")),
+                "{} {headers}",
+                request.path
+            );
+        }
+    }
+    // The keys travel in the PATCH body and nowhere else.
+    let patch = seen.iter().find(|r| r.method == "PATCH").unwrap();
+    assert!(patch.body.contains("jellyfin-key-never-print-me"));
+    assert!(patch
+        .headers
+        .to_ascii_lowercase()
+        .contains("content-type: application/json"));
+    for secret in VELVARR_SECRETS {
+        assert!(!printed.contains(secret), "{secret} in: {printed}");
+    }
+}
+
+#[test]
+fn a_velvarr_that_cannot_be_set_up_or_a_spec_without_a_setup_is_named_and_nothing_is_sent() {
+    const NOT_READY: &str =
+        include_str!("fixtures/velvarr-0.39.3/constructed-status-not-ready.json");
+    for (status, rest, why) in [
+        (
+            NOT_READY,
+            format!(r#"{VELVARR_SETUP_PART},"accounts":{{"anna":{{"enabled":true}}}}"#),
+            "setupReady false",
+        ),
+        (
+            VELVARR_FRESH,
+            r#""accounts":{"anna":{"enabled":true}}"#.to_string(),
+            "has no desired.setup",
+        ),
+    ] {
+        let server = Server::start(vec![
+            ("GET", "/api/health", 200, VELVARR_HEALTH.into()),
+            ("GET", "/api/status", 200, status.into()),
+        ]);
+        let dir = tempfile::tempdir().unwrap();
+        let spec = velvarr_spec(dir.path(), "a.json", &server.base_url(), "accounts", &rest);
+        let out = converge()
+            .arg("apply")
+            .arg(&spec)
+            .env("CREDENTIALS_DIRECTORY", dir.path())
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "{stderr}");
+        assert!(stderr.contains(why), "{why}: {stderr}");
+        assert!(server.requests().iter().all(|r| r.method == "GET"));
+    }
+}

@@ -13,16 +13,16 @@ use converge::{
     services::{
         arr, audiobookshelf, authentik, bazarr, bindery, collections, dispatcharr, jellyfin,
         kavita, koel, lidarr, ntfy, providers, prowlarr, questarr, seerr, servarr, setup,
-        suggestarr, trailarr,
+        suggestarr, trailarr, velvarr,
     },
-    spec::{Desired, DispatcharrTask, QuestarrTask, Service, Spec},
+    spec::{Desired, DispatcharrTask, QuestarrTask, Service, Spec, VelvarrDesired, VelvarrTask},
 };
 
 const USAGE: &str = "usage:
   converge apply [--deadline <seconds>] [--request-timeout <seconds>] <spec.json>...
   converge plan [--deadline <seconds>] [--request-timeout <seconds>] <spec.json>...
-  converge schema-check --service <radarr|sonarr|lidarr|prowlarr|jellyfin|trailarr|kavita|dispatcharr|authentik> --openapi <file> [--spec <spec.json>]...
-  converge schema-check --service ntfy|bindery|seerr|koel|suggestarr|audiobookshelf|questarr|bazarr [--spec <spec.json>]...";
+  converge schema-check --service <radarr|sonarr|lidarr|prowlarr|whisparr|jellyfin|trailarr|kavita|dispatcharr|authentik> --openapi <file> [--spec <spec.json>]...
+  converge schema-check --service ntfy|bindery|seerr|koel|suggestarr|audiobookshelf|questarr|bazarr|velvarr [--spec <spec.json>]...";
 
 /// How long one request may take unless `--request-timeout` says otherwise.
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -325,6 +325,55 @@ fn reconcile_one(
                 }
             }
         }
+        // And for Velvarr (design §58): the password of a Jellyfin account in,
+        // the session cookie out -- and on the very first run Velvarr's setup,
+        // which makes that account the owner. One sign-in per run: a failed
+        // one counts against the account, and each opens a Jellyfin session.
+        Desired::Velvarr(desired) => {
+            let at = (spec.base_url.clone(), desired.username.clone());
+            match tokens.get(&at) {
+                Some(session) => converge::secret::Secret::new(session.clone()),
+                None => {
+                    // Not `reads_only`: the first run sets Velvarr up.
+                    let anonymous = velvarr_headers(
+                        HttpTransport::anonymous(&spec.base_url, request_timeout),
+                        desired,
+                    );
+                    converge::engine::await_ready(
+                        &|| velvarr::probe(&anonymous),
+                        &SystemClock,
+                        timing,
+                    )
+                    .map_err(fail)?;
+                    let status = velvarr::status(&anonymous).map_err(fail)?;
+                    let session = if status.initialized {
+                        velvarr::login(&anonymous, &desired.username, &key)
+                    } else {
+                        // A plan writes nothing, and the setup is a write.
+                        if matches!(mode, Mode::Plan) {
+                            let change = converge::engine::Change {
+                                subject: format!("Velvarr, owner {}", desired.username),
+                                field: String::new(),
+                                current: "(not set up)".to_string(),
+                                desired: "(set up)".to_string(),
+                            };
+                            say(&format!(
+                                "{label}: note: nothing else can be planned before Velvarr is set up"
+                            ));
+                            say(&format!("{label}: would change {change}"));
+                            say(&format!("{label}: 1 field(s) differ"));
+                            return Ok(true);
+                        }
+                        let setup = velvarr_setup(&spec, desired, credentials, status)
+                            .map_err(fail)?;
+                        velvarr::set_up(&anonymous, &desired.username, &key, &setup)
+                    }
+                    .map_err(|e| failure(&label, &e, anonymous.wrote()))?;
+                    tokens.insert(at, session.expose().to_string());
+                    session
+                }
+            }
+        }
         _ => key,
     };
     let transport = HttpTransport::new(
@@ -337,6 +386,10 @@ fn reconcile_one(
         transport.accept_json()
     } else {
         transport
+    };
+    let transport = match &spec.desired {
+        Desired::Velvarr(desired) => velvarr_headers(transport, desired),
+        _ => transport,
     };
     let report = match &spec.desired {
         Desired::QualityDefinitions(desired) => {
@@ -939,6 +992,72 @@ fn reconcile_one(
             };
             run(mode, &task, &transport, &SystemClock, timing)
         }
+        Desired::Velvarr(desired) => match &desired.task {
+            VelvarrTask::Integrations(d) => {
+                // Every key before the first request, as for plugins.
+                let secret = |name: &str| match d.secret_fields.get(name) {
+                    Some(credential) => read_credential(credentials, credential).map(Some),
+                    None => Ok(None),
+                };
+                let jellyfin_key = secret("jellyfinApiKey").map_err(fail)?;
+                let whisparr_key = secret("whisparrApiKey").map_err(fail)?;
+                let jellyfin_key = jellyfin_key.ok_or_else(|| {
+                    fail(Error::SpecInvalid {
+                        path: spec.path.clone(),
+                        reason: "desired.secret_fields must name jellyfinApiKey".to_string(),
+                    })
+                })?;
+                let whisparr = match (&d.whisparr, whisparr_key) {
+                    (Some(w), Some(api_key)) => Some(velvarr::WhisparrTarget {
+                        url: w.url.clone(),
+                        api_key,
+                        delivery: w.delivery.as_ref().map(|d| velvarr::Delivery {
+                            enabled: d.enabled,
+                            root_folder_path: d.root_folder_path.clone(),
+                            quality_profile: d.quality_profile.clone(),
+                            search_on_add: d.search_on_add,
+                        }),
+                        path_mappings: w.path_mappings.as_ref().map(|list| {
+                            list.iter()
+                                .map(|m| serde_json::to_value(m).unwrap_or_default())
+                                .collect()
+                        }),
+                    }),
+                    _ => None,
+                };
+                let task = velvarr::Integrations {
+                    jellyfin: velvarr::JellyfinTarget {
+                        url: d.jellyfin.url.clone(),
+                        external_url: d.jellyfin.external_url.clone(),
+                        libraries: d.jellyfin.libraries.clone(),
+                        api_key: jellyfin_key,
+                    },
+                    whisparr,
+                    sent: std::cell::RefCell::new(false),
+                };
+                run(mode, &task, &transport, &SystemClock, timing)
+            }
+            VelvarrTask::Accounts(accounts) => {
+                let task = velvarr::Accounts {
+                    accounts: accounts
+                        .iter()
+                        .map(|(name, a)| {
+                            (
+                                name.clone(),
+                                velvarr::AccountTarget {
+                                    role: a.role.clone(),
+                                    enabled: a.enabled,
+                                    auto_approve: a.auto_approve,
+                                    libraries: a.libraries.clone(),
+                                },
+                            )
+                        })
+                        .collect(),
+                    signed_in_as: desired.username.clone(),
+                };
+                run(mode, &task, &transport, &SystemClock, timing)
+            }
+        },
         // Handled above, before any credential is read.
         Desired::Setup(_) => Err(Error::Refused(
             "setup is run without a key, before this point".to_string(),
@@ -947,6 +1066,62 @@ fn reconcile_one(
     // From here on a write may have gone out: the transport knows.
     .map_err(|e| failure(&label, &e, transport.wrote()))?;
     Ok(print_report(&label, report))
+}
+
+/// The headers Velvarr wants besides the session (design §58): `Origin` on
+/// every request -- a write without the configured one is refused -- and,
+/// when the spec says so, `X-Forwarded-Proto: https`.
+fn velvarr_headers(transport: HttpTransport, desired: &VelvarrDesired) -> HttpTransport {
+    let transport = transport.with_header("Origin", desired.origin.clone());
+    if desired.forwarded_https {
+        transport.with_header("X-Forwarded-Proto", "https".to_string())
+    } else {
+        transport
+    }
+}
+
+/// What the first run sets Velvarr up with. Its credentials are read only
+/// here, when Velvarr is not set up: the setup secret has no use after it.
+fn velvarr_setup(
+    spec: &Spec,
+    desired: &VelvarrDesired,
+    credentials: Option<&Path>,
+    status: velvarr::Status,
+) -> Result<velvarr::Setup, Error> {
+    let Some(setup) = &desired.setup else {
+        return Err(Error::Refused(format!(
+            "Velvarr is not set up, and the spec {} has no desired.setup to set it up with",
+            spec.path.display()
+        )));
+    };
+    if !status.setup_ready {
+        return Err(Error::Refused(
+            "Velvarr is not set up and cannot be: it answers setupReady false \
+             (VELVARR_SECRET_KEY must be 64 hex digits, VELVARR_SETUP_SECRET at least 32 characters)"
+                .to_string(),
+        ));
+    }
+    let secret = |name: &str| -> Result<Option<converge::secret::Secret>, Error> {
+        match setup.secret_fields.get(name) {
+            Some(credential) => read_credential(credentials, credential).map(Some),
+            None => Ok(None),
+        }
+    };
+    let required = |name: &str| -> Result<converge::secret::Secret, Error> {
+        secret(name)?.ok_or_else(|| Error::SpecInvalid {
+            path: spec.path.clone(),
+            reason: format!("desired.setup.secret_fields must name {name}"),
+        })
+    };
+    Ok(velvarr::Setup {
+        jellyfin_url: setup.jellyfin_url.clone(),
+        jellyfin_external_url: setup.jellyfin_external_url.clone(),
+        libraries: setup.libraries.clone(),
+        whisparr_url: setup.whisparr_url.clone(),
+        setup_secret: required("setupSecret")?,
+        jellyfin_api_key: required("jellyfinApiKey")?,
+        whisparr_api_key: secret("whisparrApiKey")?,
+    })
 }
 
 /// Prints a run's lines. `true` means a plan found a difference.
@@ -1052,7 +1227,7 @@ fn schema_check(args: &[String]) -> ExitCode {
     }
     if let Some(
         name @ ("ntfy" | "bindery" | "seerr" | "koel" | "suggestarr" | "audiobookshelf"
-        | "questarr" | "bazarr"),
+        | "questarr" | "bazarr" | "velvarr"),
     ) = service.as_deref()
     {
         return match openapi {
@@ -1077,6 +1252,14 @@ fn schema_check(args: &[String]) -> ExitCode {
                 arr::wire_types()
             };
             (endpoints, wire)
+        }
+        // Whisparr Eros: Radarr's documents, folders and two provider kinds
+        // (design §59) -- checked against Eros' own description.
+        "whisparr" => {
+            let mut endpoints = vec![servarr::V3.status];
+            endpoints.extend(servarr::V3.task_endpoints());
+            endpoints.extend(providers::ProviderApi::endpoints_of(Service::Whisparr));
+            (endpoints, servarr::whisparr_wire_types())
         }
         "lidarr" => {
             let mut endpoints = vec![servarr::V1.status];
@@ -1334,7 +1517,8 @@ fn schema_check(args: &[String]) -> ExitCode {
             | Desired::SeerrJellyfin(_)
             | Desired::SeerrServers(..)
             | Desired::SeerrWebhook(_)
-            | Desired::Questarr(_) => (Vec::new(), 0),
+            | Desired::Questarr(_)
+            | Desired::Velvarr(_) => (Vec::new(), 0),
             Desired::Naming(set) => (
                 schema::check_paths(&document, servarr::NAMING, set),
                 set.len(),

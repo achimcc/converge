@@ -1,0 +1,14 @@
+{
+  "renameMovies": true,
+  "renameScenes": true,
+  "replaceIllegalCharacters": true,
+  "colonReplacementFormat": "dash",
+  "standardMovieFormat": "{Movie Title} {(Release Year)} {[Quality Title]}",
+  "movieFolderFormat": "movies/{Studio CleanNetwork}/{Studio CleanTitle}/{Movie Title} {(Release Year)}",
+  "standardSceneFormat": "{Studio CleanTitleSlug} - {Release-Date} - {Scene CleanTitle} {[Quality Title]}",
+  "sceneFolderFormat": "scenes/{Studio CleanNetwork}/{Studio CleanTitle}/{Release Date} - {Scene CleanTitle} {[StashId]}",
+  "sceneImportFolderFormat": "import/",
+  "maxFolderPathLength": 255,
+  "maxFilePathLength": 255,
+  "id": 1
+}

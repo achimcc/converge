@@ -18,3 +18,4 @@ pub mod servarr;
 pub mod setup;
 pub mod suggestarr;
 pub mod trailarr;
+pub mod velvarr;

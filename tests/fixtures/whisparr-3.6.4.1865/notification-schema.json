@@ -1,0 +1,168 @@
+[
+  {
+    "onGrab": false,
+    "onDownload": false,
+    "onUpgrade": false,
+    "onRename": false,
+    "onMovieAdded": false,
+    "onMovieDelete": false,
+    "onMovieFileDelete": false,
+    "onMovieFileDeleteForUpgrade": false,
+    "onHealthIssue": false,
+    "includeHealthWarnings": false,
+    "onHealthRestored": false,
+    "onApplicationUpdate": false,
+    "onManualInteractionRequired": false,
+    "supportsOnGrab": true,
+    "supportsOnDownload": true,
+    "supportsOnUpgrade": true,
+    "supportsOnRename": false,
+    "supportsOnMovieAdded": true,
+    "supportsOnMovieDelete": true,
+    "supportsOnMovieFileDelete": true,
+    "supportsOnMovieFileDeleteForUpgrade": true,
+    "supportsOnHealthIssue": true,
+    "supportsOnHealthRestored": true,
+    "supportsOnApplicationUpdate": true,
+    "supportsOnManualInteractionRequired": true,
+    "name": "",
+    "fields": [
+      {
+        "order": 0,
+        "name": "serverUrl",
+        "label": "Server URL",
+        "helpText": "Leave blank to use public server (https://ntfy.sh)",
+        "helpLink": "https://ntfy.sh/docs/install/",
+        "type": "url",
+        "advanced": false,
+        "privacy": "normal",
+        "placeholder": "https://ntfy.sh",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "accessToken",
+        "label": "Access Token",
+        "helpText": "Optional token-based authorization. Takes priority over username/password",
+        "helpLink": "https://docs.ntfy.sh/config/#access-tokens",
+        "type": "password",
+        "advanced": false,
+        "privacy": "apiKey",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "userName",
+        "label": "Username",
+        "helpText": "Optional username",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "userName",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "password",
+        "label": "Password",
+        "helpText": "Optional password",
+        "type": "password",
+        "advanced": false,
+        "privacy": "password",
+        "isFloat": false
+      },
+      {
+        "order": 4,
+        "name": "priority",
+        "label": "Priority",
+        "value": 3,
+        "type": "select",
+        "advanced": false,
+        "selectOptions": [
+          {
+            "value": 1,
+            "name": "Min",
+            "order": 1,
+            "dividerAfter": false
+          },
+          {
+            "value": 2,
+            "name": "Low",
+            "order": 2,
+            "dividerAfter": false
+          },
+          {
+            "value": 3,
+            "name": "Default",
+            "order": 3,
+            "dividerAfter": false
+          },
+          {
+            "value": 4,
+            "name": "High",
+            "order": 4,
+            "dividerAfter": false
+          },
+          {
+            "value": 5,
+            "name": "Max",
+            "order": 5,
+            "dividerAfter": false
+          }
+        ],
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 5,
+        "name": "topics",
+        "label": "Topics",
+        "helpText": "List of Topics to send notifications to",
+        "value": [],
+        "type": "tag",
+        "advanced": false,
+        "privacy": "normal",
+        "placeholder": "Topic1234,Topic4321",
+        "isFloat": false
+      },
+      {
+        "order": 6,
+        "name": "tags",
+        "label": "Ntfy Tags and Emojis",
+        "helpText": "Optional list of tags or emojis to use",
+        "helpLink": "https://ntfy.sh/docs/emojis/",
+        "type": "tag",
+        "advanced": false,
+        "privacy": "normal",
+        "placeholder": "warning,skull",
+        "isFloat": false
+      },
+      {
+        "order": 7,
+        "name": "clickUrl",
+        "label": "Click Url",
+        "helpText": "Optional link when user clicks notification",
+        "type": "url",
+        "advanced": false,
+        "privacy": "normal",
+        "placeholder": "https://myserver.example.com/whisparr",
+        "isFloat": false
+      },
+      {
+        "order": 8,
+        "name": "headers",
+        "label": "Headers",
+        "value": [],
+        "type": "keyValueList",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "ntfy.sh",
+    "implementation": "Ntfy",
+    "configContract": "NtfySettings",
+    "infoLink": "https://wiki.servarr.com/whisparr/supported#ntfy",
+    "tags": [],
+    "presets": []
+  }
+]

@@ -28,6 +28,10 @@ pub enum Service {
     Authentik,
     Questarr,
     Bazarr,
+    /// Whisparr Eros: a Radarr fork on API v3 (design §59).
+    Whisparr,
+    /// Velvarr: a session cookie from a Jellyfin sign-in (design §58).
+    Velvarr,
 }
 
 impl Service {
@@ -50,6 +54,8 @@ impl Service {
             Service::Authentik => "authentik",
             Service::Questarr => "questarr",
             Service::Bazarr => "bazarr",
+            Service::Whisparr => "whisparr",
+            Service::Velvarr => "velvarr",
         }
     }
 
@@ -62,7 +68,8 @@ impl Service {
             | Service::Prowlarr
             | Service::Bindery
             | Service::Seerr
-            | Service::Kavita => "X-Api-Key",
+            | Service::Kavita
+            | Service::Whisparr => "X-Api-Key",
             Service::Jellyfin => "X-Emby-Token",
             Service::Trailarr | Service::Bazarr => "X-API-KEY",
             Service::Ntfy
@@ -72,6 +79,8 @@ impl Service {
             | Service::Dispatcharr
             | Service::Authentik
             | Service::Questarr => "Authorization",
+            // The session is a cookie and nothing else (design §58).
+            Service::Velvarr => "Cookie",
         }
     }
 
@@ -88,6 +97,11 @@ impl Service {
             | Service::Dispatcharr
             | Service::Authentik
             | Service::Questarr => Secret::new(format!("Bearer {}", key.expose())),
+            Service::Velvarr => Secret::new(format!(
+                "{}={}",
+                crate::services::velvarr::COOKIE,
+                key.expose()
+            )),
             _ => key,
         }
     }
@@ -103,10 +117,14 @@ impl Service {
         matches!(self, Service::Radarr | Service::Sonarr)
     }
 
-    /// Radarr, Sonarr and Lidarr: the same application underneath (Servarr),
-    /// whose configuration documents and root folders share their shape.
+    /// Radarr, Sonarr, Lidarr and Whisparr: the same application underneath
+    /// (Servarr), whose configuration documents and root folders share their
+    /// shape. Whisparr Eros is a Radarr fork (design §59).
     pub fn is_servarr(self) -> bool {
-        matches!(self, Service::Radarr | Service::Sonarr | Service::Lidarr)
+        matches!(
+            self,
+            Service::Radarr | Service::Sonarr | Service::Lidarr | Service::Whisparr
+        )
     }
 }
 
@@ -169,6 +187,8 @@ enum TaskName {
     ProwlarrSync,
     LanguageProfiles,
     Setup,
+    Integrations,
+    Accounts,
 }
 
 impl TaskName {
@@ -246,6 +266,7 @@ impl TaskName {
             TaskName::LanguageProfiles => service == Service::Bazarr,
             // The door a first account closes (design §52).
             TaskName::Setup => service == Service::Kavita || service == Service::Bindery,
+            TaskName::Integrations | TaskName::Accounts => service == Service::Velvarr,
         }
     }
 }
@@ -847,6 +868,111 @@ pub enum Desired {
     BazarrLanguageProfiles(BTreeMap<String, Vec<crate::services::bazarr::Language>>),
     /// The account that closes a service's setup door (design §52).
     Setup(SetupAccount),
+    /// A Velvarr task, and the session it runs in (design §58).
+    Velvarr(Box<VelvarrDesired>),
+}
+
+/// Every Velvarr spec: who converge signs in as, the `Origin` Velvarr wants
+/// on a write, and what the very first run sets Velvarr up with. The
+/// password is `api_key_credential` (design §58).
+#[derive(Debug, Clone, PartialEq)]
+pub struct VelvarrDesired {
+    pub username: String,
+    /// `scheme://host[:port]`, exactly Velvarr's `VELVARR_ORIGIN`.
+    pub origin: String,
+    /// Send `X-Forwarded-Proto: https`, as a TLS proxy in front would.
+    pub forwarded_https: bool,
+    pub setup: Option<VelvarrSetup>,
+    pub task: VelvarrTask,
+}
+
+/// What `POST /api/setup` gets on a Velvarr that is not set up yet. Wire
+/// names, but libraries by name and secrets by credential.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VelvarrSetup {
+    #[serde(rename = "jellyfinUrl")]
+    pub jellyfin_url: String,
+    #[serde(rename = "jellyfinExternalUrl")]
+    pub jellyfin_external_url: String,
+    pub libraries: Vec<String>,
+    #[serde(rename = "whisparrUrl", default)]
+    pub whisparr_url: Option<String>,
+    /// `setupSecret`, `jellyfinApiKey`, and `whisparrApiKey` with a Whisparr.
+    pub secret_fields: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum VelvarrTask {
+    Integrations(VelvarrIntegrations),
+    /// Jellyfin account name → what it is in Velvarr.
+    Accounts(BTreeMap<String, VelvarrAccount>),
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VelvarrIntegrations {
+    pub jellyfin: VelvarrJellyfin,
+    #[serde(default)]
+    pub whisparr: Option<VelvarrWhisparr>,
+    /// `jellyfinApiKey`, and `whisparrApiKey` with a Whisparr.
+    pub secret_fields: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VelvarrJellyfin {
+    pub url: String,
+    #[serde(rename = "externalUrl")]
+    pub external_url: String,
+    /// Checked, never written: Velvarr chooses them at setup only.
+    #[serde(default)]
+    pub libraries: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VelvarrWhisparr {
+    pub url: String,
+    #[serde(default)]
+    pub delivery: Option<VelvarrDelivery>,
+    #[serde(rename = "pathMappings", default)]
+    pub path_mappings: Option<Vec<VelvarrPathMapping>>,
+}
+
+/// Velvarr's `WhisparrDelivery`, the profile by name instead of
+/// `qualityProfileId`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VelvarrDelivery {
+    pub enabled: bool,
+    #[serde(rename = "rootFolderPath")]
+    pub root_folder_path: String,
+    pub quality_profile: String,
+    #[serde(rename = "searchOnAdd")]
+    pub search_on_add: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct VelvarrPathMapping {
+    #[serde(rename = "whisparrPrefix")]
+    pub whisparr_prefix: String,
+    #[serde(rename = "jellyfinPrefix")]
+    pub jellyfin_prefix: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VelvarrAccount {
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(rename = "autoApprove", default)]
+    pub auto_approve: Option<bool>,
+    #[serde(default)]
+    pub libraries: Option<Vec<String>>,
 }
 
 /// Who closes the setup door: only a name. The password is drawn for the
@@ -1346,6 +1472,9 @@ impl Spec {
                 }
                 Desired::Setup(account)
             }
+            TaskName::Integrations | TaskName::Accounts => Desired::Velvarr(Box::new(
+                velvarr_desired(raw.task, raw.desired).map_err(invalid)?,
+            )),
             // Before the arms that share the task's name: Questarr's own shape.
             TaskName::DownloadClients if raw.service == Service::Questarr => {
                 Desired::Questarr(questarr_desired(raw.task, raw.desired).map_err(invalid)?)
@@ -2664,6 +2793,10 @@ impl Spec {
             },
             Desired::AuthentikSettings(_) => "settings",
             Desired::Setup(_) => "setup",
+            Desired::Velvarr(ref d) => match &d.task {
+                VelvarrTask::Integrations(_) => "integrations",
+                VelvarrTask::Accounts(_) => "accounts",
+            },
         }
     }
 }
@@ -2894,6 +3027,253 @@ fn questarr_desired(task: TaskName, desired: serde_json::Value) -> Result<Questa
         }
         other => Err(format!("{other:?} is not a Questarr task")),
     }
+}
+
+/// A Velvarr spec's `desired`, checked (design §58). The errors are the
+/// reason only; the caller names the spec. What Velvarr would answer with a
+/// 400 is refused here, so a typo stops the build instead of the unit.
+fn velvarr_desired(task: TaskName, desired: serde_json::Value) -> Result<VelvarrDesired, String> {
+    /// A base URL as Velvarr stores it (`validateBaseUrl`, `http.ts`):
+    /// http or https, no user, query or fragment, and no trailing slash --
+    /// Velvarr strips it, and a spec that kept it would differ on every run.
+    fn base_url(url: &str, what: &str) -> Result<(), String> {
+        let rest = url
+            .strip_prefix("https://")
+            .or_else(|| url.strip_prefix("http://"))
+            .ok_or_else(|| format!("{what} must start with http:// or https://"))?;
+        let host = rest.split('/').next().unwrap_or_default();
+        if host.is_empty()
+            || url.len() > 2048
+            || url.ends_with('/')
+            || url
+                .chars()
+                .any(|c| c.is_whitespace() || matches!(c, '?' | '#' | '\\' | '@'))
+        {
+            return Err(format!(
+                "{what}: {url:?} is not a base URL as Velvarr stores it (no trailing slash, query, fragment or user)"
+            ));
+        }
+        if host != host.to_ascii_lowercase() {
+            return Err(format!("{what}: Velvarr stores the host in lower case"));
+        }
+        Ok(())
+    }
+
+    fn origin(origin: &str) -> Result<(), String> {
+        base_url(origin, "desired.origin")?;
+        let rest = origin.split_once("://").map(|(_, r)| r).unwrap_or_default();
+        if rest.contains('/') {
+            return Err("desired.origin is scheme, host and port, without a path".to_string());
+        }
+        Ok(())
+    }
+
+    /// Exactly the named secrets, each once: `required` always, `optional`
+    /// only when `with` says so.
+    fn secrets(
+        fields: &BTreeMap<String, String>,
+        required: &[&str],
+        optional: Option<&str>,
+        with: bool,
+        what: &str,
+    ) -> Result<(), String> {
+        for name in fields.keys() {
+            if !required.contains(&name.as_str()) && optional != Some(name.as_str()) {
+                return Err(format!("{what}: {name} is not a secret field here"));
+            }
+        }
+        for name in required.iter().copied().chain(optional.filter(|_| with)) {
+            match fields.get(name) {
+                Some(credential) => credential_name(credential, &format!("{what}.{name}"))?,
+                None => return Err(format!("{what} must name {name}")),
+            }
+        }
+        if let Some(name) = optional.filter(|_| !with) {
+            if fields.contains_key(name) {
+                return Err(format!("{what}: {name} without its URL"));
+            }
+        }
+        Ok(())
+    }
+
+    fn names(list: &[String], what: &str) -> Result<(), String> {
+        if list.is_empty() {
+            return Err(format!("{what} names nothing"));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for name in list {
+            if name.trim().is_empty() {
+                return Err(format!("{what}: a name is empty"));
+            }
+            if !seen.insert(name) {
+                return Err(format!("{what}: {name} twice"));
+            }
+        }
+        Ok(())
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Raw {
+        username: String,
+        origin: String,
+        #[serde(default)]
+        forwarded_https: bool,
+        #[serde(default)]
+        setup: Option<VelvarrSetup>,
+        #[serde(default)]
+        jellyfin: Option<serde_json::Value>,
+        #[serde(default)]
+        whisparr: Option<serde_json::Value>,
+        #[serde(default)]
+        secret_fields: Option<serde_json::Value>,
+        #[serde(default)]
+        accounts: Option<serde_json::Value>,
+    }
+    let raw: Raw = serde_json::from_value(desired).map_err(|e| format!("desired: {e}"))?;
+    account_name(&raw.username, "desired.username")?;
+    // Velvarr's `authenticate` trims the name and takes at most 200.
+    if raw.username != raw.username.trim() || raw.username.chars().count() > 200 {
+        return Err(
+            "desired.username has surrounding whitespace or more than 200 characters".to_string(),
+        );
+    }
+    origin(&raw.origin)?;
+    if let Some(setup) = &raw.setup {
+        base_url(&setup.jellyfin_url, "desired.setup.jellyfinUrl")?;
+        base_url(
+            &setup.jellyfin_external_url,
+            "desired.setup.jellyfinExternalUrl",
+        )?;
+        if let Some(url) = &setup.whisparr_url {
+            base_url(url, "desired.setup.whisparrUrl")?;
+        }
+        // Velvarr refuses a setup without a library.
+        names(&setup.libraries, "desired.setup.libraries")?;
+        secrets(
+            &setup.secret_fields,
+            &["setupSecret", "jellyfinApiKey"],
+            Some("whisparrApiKey"),
+            setup.whisparr_url.is_some(),
+            "desired.setup.secret_fields",
+        )?;
+    }
+    let task = match task {
+        TaskName::Integrations => {
+            if raw.accounts.is_some() {
+                return Err("desired.accounts belongs to the task accounts".to_string());
+            }
+            let mut body = serde_json::Map::new();
+            for (key, value) in [
+                ("jellyfin", raw.jellyfin),
+                ("whisparr", raw.whisparr),
+                ("secret_fields", raw.secret_fields),
+            ] {
+                if let Some(value) = value {
+                    body.insert(key.to_string(), value);
+                }
+            }
+            let d: VelvarrIntegrations = serde_json::from_value(serde_json::Value::Object(body))
+                .map_err(|e| format!("desired: {e}"))?;
+            base_url(&d.jellyfin.url, "desired.jellyfin.url")?;
+            base_url(&d.jellyfin.external_url, "desired.jellyfin.externalUrl")?;
+            if let Some(libraries) = &d.jellyfin.libraries {
+                names(libraries, "desired.jellyfin.libraries")?;
+            }
+            if let Some(whisparr) = &d.whisparr {
+                base_url(&whisparr.url, "desired.whisparr.url")?;
+                if let Some(delivery) = &whisparr.delivery {
+                    let path = &delivery.root_folder_path;
+                    if path.chars().count() > 1024 || (delivery.enabled && path.is_empty()) {
+                        return Err(
+                            "desired.whisparr.delivery.rootFolderPath must be 1 to 1024 characters when enabled"
+                                .to_string(),
+                        );
+                    }
+                    if delivery.quality_profile.trim().is_empty() {
+                        return Err(
+                            "desired.whisparr.delivery.quality_profile is empty".to_string()
+                        );
+                    }
+                }
+                if let Some(mappings) = &whisparr.path_mappings {
+                    if mappings.len() > 50 {
+                        return Err(
+                            "desired.whisparr.pathMappings: Velvarr keeps at most 50".to_string()
+                        );
+                    }
+                    for m in mappings {
+                        for prefix in [&m.whisparr_prefix, &m.jellyfin_prefix] {
+                            if prefix.is_empty() || prefix.chars().count() > 1024 {
+                                return Err(
+                                    "desired.whisparr.pathMappings: a prefix is 1 to 1024 characters"
+                                        .to_string(),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            secrets(
+                &d.secret_fields,
+                &["jellyfinApiKey"],
+                Some("whisparrApiKey"),
+                d.whisparr.is_some(),
+                "desired.secret_fields",
+            )?;
+            VelvarrTask::Integrations(d)
+        }
+        TaskName::Accounts => {
+            if raw.jellyfin.is_some() || raw.whisparr.is_some() || raw.secret_fields.is_some() {
+                return Err(
+                    "desired: jellyfin, whisparr and secret_fields belong to the task integrations"
+                        .to_string(),
+                );
+            }
+            let accounts: BTreeMap<String, VelvarrAccount> = serde_json::from_value(
+                raw.accounts
+                    .ok_or_else(|| "desired: missing field `accounts`".to_string())?,
+            )
+            .map_err(|e| format!("desired.accounts: {e}"))?;
+            if accounts.is_empty() {
+                return Err("desired.accounts names nobody".to_string());
+            }
+            for (name, account) in &accounts {
+                let at = format!("desired.accounts.{name}");
+                account_name(name, &at)?;
+                if account.role.is_none()
+                    && account.enabled.is_none()
+                    && account.auto_approve.is_none()
+                    && account.libraries.is_none()
+                {
+                    return Err(format!("{at} sets nothing"));
+                }
+                if let Some(role) = &account.role {
+                    if !crate::services::velvarr::ROLES.contains(&role.as_str()) {
+                        return Err(format!(
+                            "{at}.role: {role:?} is not one of {}",
+                            crate::services::velvarr::ROLES.join(", ")
+                        ));
+                    }
+                }
+                if let Some(libraries) = &account.libraries {
+                    // An empty list is a valid grant: no library.
+                    if !libraries.is_empty() {
+                        names(libraries, &format!("{at}.libraries"))?;
+                    }
+                }
+            }
+            VelvarrTask::Accounts(accounts)
+        }
+        other => return Err(format!("{other:?} is not a Velvarr task")),
+    };
+    Ok(VelvarrDesired {
+        username: raw.username,
+        origin: raw.origin,
+        forwarded_https: raw.forwarded_https,
+        setup: raw.setup,
+        task,
+    })
 }
 
 /// A Dispatcharr spec's `desired`, checked. The errors are the reason only;
@@ -4518,6 +4898,247 @@ mod tests {
     }
 
     const LIDARR_FOLDERS: &str = r#"{"folders":{"/tank/data/media/music":{"set":{"name":"Musik","defaultMonitorOption":"all"},"profiles":{"defaultQualityProfileId":"Standard","defaultMetadataProfileId":"Standard"}}}}"#;
+
+    fn whisparr(task: &str, desired: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"whisparr","base_url":"http://10.0.10.12:6969","api_key_credential":"whisparr-api-key","task":"{task}","desired":{desired}}}"#
+        ))
+    }
+
+    #[test]
+    fn whisparr_takes_radarrs_documents_folders_and_providers() {
+        // Design §59: Eros is a Radarr fork, and the tasks the host needs
+        // are Radarr's -- parsed by the same arms.
+        let naming = whisparr("naming", r#"{"renameScenes":true}"#).unwrap();
+        assert_eq!(naming.service, Service::Whisparr);
+        assert_eq!(naming.service.key_header(), "X-Api-Key");
+        assert_eq!(naming.task_name(), "naming");
+        for (task, desired) in [
+            ("media-management", r#"{"copyUsingHardlinks":true}"#),
+            (
+                "download-client-config",
+                r#"{"enableCompletedDownloadHandling":true}"#,
+            ),
+            ("root-folders", r#"{"folders":{"/tank/data/media/xxx":{}}}"#),
+            (
+                "download-clients",
+                r#"{"providers":{"SABnzbd":{"implementation":"Sabnzbd","fields":{"host":"10.0.10.10"},"secret_fields":{"apiKey":"sabnzbd-api-key"}}}}"#,
+            ),
+            (
+                "notifications",
+                r#"{"providers":{"ntfy":{"implementation":"Ntfy","fields":{"serverUrl":"http://10.0.10.20"}}}}"#,
+            ),
+        ] {
+            let spec = whisparr(task, desired).unwrap_or_else(|e| panic!("{task}: {e}"));
+            assert_eq!(spec.task_name(), task);
+        }
+        // A root folder is a path and nothing else, as in Radarr.
+        let err = whisparr(
+            "root-folders",
+            r#"{"folders":{"/tank/xxx":{"set":{"importFiles":[]}}}}"#,
+        )
+        .err()
+        .unwrap();
+        assert!(
+            err.to_string().contains("nothing to set but its path"),
+            "{err}"
+        );
+    }
+
+    const VELVARR_SETUP: &str = r#""setup":{"jellyfinUrl":"http://10.0.10.5:8096","jellyfinExternalUrl":"https://jellyfin.example","libraries":["XXX"],"whisparrUrl":"http://10.0.10.12:6969","secret_fields":{"setupSecret":"velvarr-setup-secret","jellyfinApiKey":"jellyfin-api-key","whisparrApiKey":"whisparr-api-key"}}"#;
+
+    fn velvarr(task: &str, rest: &str) -> Result<Spec, Error> {
+        parse(&format!(
+            r#"{{"service":"velvarr","base_url":"http://10.0.10.30:3000","api_key_credential":"velvarr-passwort","task":"{task}","desired":{{"username":"converge","origin":"https://velvarr.example",{rest}}}}}"#
+        ))
+    }
+
+    const VELVARR_INTEGRATIONS: &str = r#""jellyfin":{"url":"http://10.0.10.5:8096","externalUrl":"https://jellyfin.example","libraries":["XXX"]},"whisparr":{"url":"http://10.0.10.12:6969","delivery":{"enabled":true,"rootFolderPath":"/tank/data/media/xxx","quality_profile":"Any","searchOnAdd":true},"pathMappings":[{"whisparrPrefix":"/tank/data/media/xxx","jellyfinPrefix":"/media/xxx"}]},"secret_fields":{"jellyfinApiKey":"jellyfin-api-key","whisparrApiKey":"whisparr-api-key"}"#;
+
+    #[test]
+    fn velvarr_specs_carry_the_session_the_setup_and_their_task() {
+        let spec = velvarr(
+            "integrations",
+            &format!("{VELVARR_SETUP},{VELVARR_INTEGRATIONS}"),
+        )
+        .unwrap();
+        assert_eq!(spec.service, Service::Velvarr);
+        assert_eq!(spec.task_name(), "integrations");
+        assert_eq!(spec.service.key_header(), "Cookie");
+        assert_eq!(
+            spec.service.key_value(Secret::new("s".into())).expose(),
+            "velvarr_session=s"
+        );
+        let Desired::Velvarr(d) = &spec.desired else {
+            panic!("{:?}", spec.desired);
+        };
+        assert_eq!(d.origin, "https://velvarr.example");
+        assert!(!d.forwarded_https);
+        assert_eq!(d.setup.as_ref().unwrap().libraries, ["XXX"]);
+        let VelvarrTask::Integrations(i) = &d.task else {
+            panic!("{:?}", d.task);
+        };
+        assert_eq!(
+            i.whisparr
+                .as_ref()
+                .unwrap()
+                .delivery
+                .as_ref()
+                .unwrap()
+                .quality_profile,
+            "Any"
+        );
+
+        let spec = velvarr(
+            "accounts",
+            r#""forwarded_https":true,"accounts":{"anna":{"role":"requester","enabled":true,"autoApprove":false,"libraries":["XXX"]},"ben":{"libraries":[]}}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.task_name(), "accounts");
+        let Desired::Velvarr(d) = &spec.desired else {
+            panic!();
+        };
+        assert!(d.forwarded_https && d.setup.is_none());
+        let VelvarrTask::Accounts(accounts) = &d.task else {
+            panic!();
+        };
+        assert_eq!(accounts["anna"].auto_approve, Some(false));
+    }
+
+    #[test]
+    fn velvarr_refuses_what_velvarr_would_refuse_or_store_differently() {
+        let integrations = |jellyfin: &str, secrets: &str| {
+            velvarr(
+                "integrations",
+                &format!(r#""jellyfin":{jellyfin},"secret_fields":{secrets}"#),
+            )
+        };
+        let jf = r#"{"url":"http://10.0.10.5:8096","externalUrl":"https://jellyfin.example"}"#;
+        let key = r#"{"jellyfinApiKey":"k"}"#;
+        assert!(integrations(jf, key).is_ok());
+        for (jellyfin, secrets, why) in [
+            (
+                r#"{"url":"http://10.0.10.5:8096/","externalUrl":"https://jellyfin.example"}"#,
+                key,
+                "trailing slash",
+            ),
+            (
+                r#"{"url":"ftp://10.0.10.5","externalUrl":"https://jellyfin.example"}"#,
+                key,
+                "http:// or https://",
+            ),
+            (
+                r#"{"url":"http://Jellyfin:8096","externalUrl":"https://jellyfin.example"}"#,
+                key,
+                "lower case",
+            ),
+            (jf, "{}", "must name jellyfinApiKey"),
+            (
+                jf,
+                r#"{"jellyfinApiKey":"k","whisparrApiKey":"w"}"#,
+                "whisparrApiKey without its URL",
+            ),
+            (
+                jf,
+                r#"{"jellyfinApiKey":"k","tpdbApiToken":"t"}"#,
+                "tpdbApiToken is not a secret field",
+            ),
+            (jf, r#"{"jellyfinApiKey":"../k"}"#, "not a credential name"),
+        ] {
+            let err = integrations(jellyfin, secrets).err().unwrap().to_string();
+            assert!(err.contains(why), "{why}: {err}");
+        }
+        // A Whisparr without its key.
+        let err = velvarr(
+            "integrations",
+            &format!(r#""jellyfin":{jf},"whisparr":{{"url":"http://10.0.10.12:6969"}},"secret_fields":{key}"#),
+        )
+        .err()
+        .unwrap();
+        assert!(
+            err.to_string().contains("must name whisparrApiKey"),
+            "{err}"
+        );
+        // A delivery by id: the spec names the profile.
+        let err = velvarr(
+            "integrations",
+            &format!(r#""jellyfin":{jf},"whisparr":{{"url":"http://10.0.10.12:6969","delivery":{{"enabled":true,"rootFolderPath":"/x","qualityProfileId":4,"searchOnAdd":true}}}},"secret_fields":{{"jellyfinApiKey":"k","whisparrApiKey":"w"}}"#),
+        )
+        .err()
+        .unwrap();
+        assert!(err.to_string().contains("qualityProfileId"), "{err}");
+
+        for (rest, why) in [
+            (
+                r#""accounts":{"anna":{"role":"owner"}}"#,
+                "is not one of admin",
+            ),
+            (r#""accounts":{"anna":{}}"#, "sets nothing"),
+            (r#""accounts":{}"#, "names nobody"),
+            (
+                r#""accounts":{"anna":{"libraries":["XXX","XXX"]}}"#,
+                "XXX twice",
+            ),
+            (
+                r#""jellyfin":{},"accounts":{"anna":{"enabled":true}}"#,
+                "belong to the task integrations",
+            ),
+        ] {
+            let err = velvarr("accounts", rest).err().unwrap().to_string();
+            assert!(err.contains(why), "{why}: {err}");
+        }
+        let err = velvarr(
+            "integrations",
+            &format!(r#""accounts":{{}},"jellyfin":{jf},"secret_fields":{key}"#),
+        )
+        .err()
+        .unwrap();
+        assert!(
+            err.to_string().contains("belongs to the task accounts"),
+            "{err}"
+        );
+
+        // The origin is scheme, host and port.
+        let err = parse(r#"{"service":"velvarr","base_url":"http://x:3000","api_key_credential":"p","task":"accounts","desired":{"username":"converge","origin":"https://velvarr.example/app","accounts":{"anna":{"enabled":true}}}}"#)
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("without a path"), "{err}");
+        // A setup without a library, or without its setup secret.
+        let err = velvarr(
+            "accounts",
+            r#""setup":{"jellyfinUrl":"http://j","jellyfinExternalUrl":"https://j","libraries":[],"secret_fields":{"setupSecret":"s","jellyfinApiKey":"k"}},"accounts":{"anna":{"enabled":true}}"#,
+        )
+        .err()
+        .unwrap();
+        assert!(
+            err.to_string().contains("setup.libraries names nothing"),
+            "{err}"
+        );
+        let err = velvarr(
+            "accounts",
+            r#""setup":{"jellyfinUrl":"http://j","jellyfinExternalUrl":"https://j","libraries":["XXX"],"secret_fields":{"jellyfinApiKey":"k"}},"accounts":{"anna":{"enabled":true}}"#,
+        )
+        .err()
+        .unwrap();
+        assert!(err.to_string().contains("must name setupSecret"), "{err}");
+        // Velvarr is not a Servarr: its tasks are its own.
+        assert!(velvarr("naming", r#""accounts":{}"#).is_err());
+    }
+
+    #[test]
+    fn whisparr_has_no_quality_or_import_list_tasks() {
+        // Not asked for and not checked against Eros: refused, not guessed.
+        for task in [
+            "quality-definitions",
+            "quality-profiles",
+            "custom-formats",
+            "import-lists",
+            "metadata-profiles",
+        ] {
+            let err = whisparr(task, "{}").err().unwrap();
+            assert!(err.to_string().contains("does not belong"), "{task}: {err}");
+        }
+    }
 
     #[test]
     fn root_folders_are_strict() {
