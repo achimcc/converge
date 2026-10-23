@@ -358,10 +358,16 @@ impl Task for Collections<'_> {
                 });
             }
             let (on_list, tmdb) = list_members(&wanted.source)?;
+            // `collapseBoxSetItems=false`: Jellyfin 12 folds the films that sit
+            // in a collection into that collection and lists the box set in
+            // their place — with the default, the 49 members of a collection
+            // were missing from their own library's answer, and the task
+            // refused to "remove 49 of 49 members" (2026-10-23, the host's
+            // first run on 12.2). 10.11 never collapsed here.
             let films = get_items(
                 t,
                 &format!(
-                    "parentId={library}&includeItemTypes=Movie&recursive=true&fields=ProviderIds"
+                    "parentId={library}&includeItemTypes=Movie&recursive=true&fields=ProviderIds&collapseBoxSetItems=false"
                 ),
             )?;
             let wanted_items: Vec<BaseItemDto> = films
@@ -525,7 +531,7 @@ mod tests {
     const NAME: &str = "50 politisch linke Filme";
     const LIBRARY: &str = "7a2175bccb1f1a94152cbd2b2bae8f6d";
     const FILMS_PATH: &str =
-        "/Items?parentId=7a2175bccb1f1a94152cbd2b2bae8f6d&includeItemTypes=Movie&recursive=true&fields=ProviderIds";
+        "/Items?parentId=7a2175bccb1f1a94152cbd2b2bae8f6d&includeItemTypes=Movie&recursive=true&fields=ProviderIds&collapseBoxSetItems=false";
     const BOXSETS_PATH: &str = "/Items?includeItemTypes=BoxSet&recursive=true";
     const COLLECTION: &str = "c0ffee00c0ffee00c0ffee00c0ffee00";
 

@@ -916,6 +916,17 @@ not the dashboard's: Jellyfin neither generates an `Id` nor queues a guide
 refresh. The spec carries its own ids, and refreshing the guide is an action,
 which stays with the caller.
 
+### Collections on Jellyfin 12: the library answer must not collapse (v0.57.0)
+
+Jellyfin 12 folds films that belong to a collection into that collection when
+a library is listed with `includeItemTypes=Movie` — the box set appears in
+their place, and the films are gone from the answer. The `collections` task
+compares a collection's members with the films of its library by TMDb id; on
+the host's first run on 12.2 the 49 members of a collection were missing from
+the library answer, and the task refused to "remove 49 of 49 members". The
+library query carries `collapseBoxSetItems=false` since v0.57.0 (2026-10-23);
+10.11 never collapsed here, so the answer there is unchanged.
+
 ## 16. Library ids by name (v0.12.0, 2026-09-14)
 
 Jellyfin's sign-in plugins decide which libraries an account sees, and they
